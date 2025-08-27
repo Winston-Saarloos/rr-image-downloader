@@ -1,0 +1,6 @@
+@SaveTheMemories.API_HostAddress = http://localhost:5263
+
+GET {{SaveTheMemories.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
