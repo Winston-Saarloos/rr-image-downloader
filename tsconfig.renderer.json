@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "es5",
+    "lib": ["dom", "dom.iterable", "es6"],
+    "module": "esnext",
+    "moduleResolution": "node",
+    "noEmit": true,
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "src/renderer/**/*",
+    "src/shared/**/*",
+    "src/index.tsx",
+    "src/index.css"
+  ],
+  "exclude": ["src/main/**/*", "node_modules", "dist"]
+}

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RecNet Photo Downloader</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>🎮 RecNet Photo Downloader</h1>
+        <p>Download photos from Rec Room players</p>
+      </header>
+
+      <main>
+        <!-- Settings Panel -->
+        <div class="panel">
+          <h2>Settings</h2>
+          <div class="form-group">
+            <label for="outputFolder">Output Folder:</label>
+            <div class="folder-input">
+              <input type="text" id="outputFolder" readonly />
+              <button id="selectFolder">Browse</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="pageSize">Page Size:</label>
+            <input type="number" id="pageSize" value="150" min="1" max="500" />
+          </div>
+          <div class="form-group">
+            <label for="delayMs">Delay Between Pages (ms):</label>
+            <input type="number" id="delayMs" value="500" min="0" max="5000" />
+          </div>
+        </div>
+
+        <!-- Main Controls -->
+        <div class="panel">
+          <h2>Download Photos</h2>
+          <div class="form-group">
+            <label for="accountId">Rec Room Account ID:</label>
+            <input
+              type="text"
+              id="accountId"
+              placeholder="Enter Rec Room account ID"
+            />
+          </div>
+          <div class="form-group">
+            <label for="recNetToken">RecNet Token (Optional):</label>
+            <input
+              type="password"
+              id="recNetToken"
+              placeholder="Enter RecNet token for higher rate limits"
+            />
+            <small>Get your token from RecNet API documentation</small>
+          </div>
+
+          <div class="options">
+            <label class="checkbox-label">
+              <input type="checkbox" id="incremental" checked />
+              Incremental Download (only new photos)
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="downloadFeed" />
+              Also download feed photos
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label for="maxIterations">Max Pages to Fetch:</label>
+            <input
+              type="number"
+              id="maxIterations"
+              value="50"
+              min="1"
+              max="200"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="downloadLimit">Download Limit (photos):</label>
+            <input
+              type="number"
+              id="downloadLimit"
+              value="100"
+              min="1"
+              max="10000"
+            />
+          </div>
+
+          <div class="button-group">
+            <button id="collectPhotos" class="btn btn-primary">
+              Collect Photos
+            </button>
+            <button id="collectFeed" class="btn btn-secondary">
+              Collect Feed Only
+            </button>
+            <button id="downloadPhotos" class="btn btn-success">
+              Download Images
+            </button>
+            <button id="downloadFeedOnly" class="btn btn-info">
+              Download Feed Only
+            </button>
+            <button id="cancelOperation" class="btn btn-danger" disabled>
+              Cancel
+            </button>
+          </div>
+        </div>
+
+        <!-- Progress Panel -->
+        <div class="panel">
+          <h2>Progress</h2>
+          <div id="progressContainer" class="progress-container">
+            <div class="progress-bar">
+              <div id="progressBar" class="progress-fill"></div>
+            </div>
+            <div id="progressText" class="progress-text">Ready</div>
+          </div>
+          <div id="progressDetails" class="progress-details"></div>
+        </div>
+
+        <!-- Results Panel -->
+        <div class="panel">
+          <h2>Results</h2>
+          <div id="results" class="results">
+            <p class="placeholder">No operations completed yet.</p>
+          </div>
+        </div>
+
+        <!-- Log Panel -->
+        <div class="panel">
+          <h2>Log</h2>
+          <div id="log" class="log"></div>
+          <button id="clearLog" class="btn btn-small">Clear Log</button>
+        </div>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

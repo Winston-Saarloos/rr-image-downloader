@@ -1,0 +1,93 @@
+{
+  "name": "recnet-photo-downloader",
+  "version": "1.0.0",
+  "description": "RecNet Photo Downloader - Download photos from Rec Room players",
+  "main": "dist/main/main/main.js",
+  "homepage": "./",
+  "scripts": {
+    "start": "electron dist/main/main/main.js",
+    "dev": "concurrently \"npm run dev:react\" \"wait-on http://localhost:3000 && npm run dev:electron\"",
+    "dev:electron": "tsc && electron dist/main/main/main.js --dev",
+    "dev:react": "react-scripts start",
+    "dev:react-only": "react-scripts start",
+    "build": "npm run build:main && npm run build:react && node build-electron.js && electron-builder",
+    "build:main": "tsc && npm run copy:assets",
+    "copy:assets": "node -e \"require('fs-extra').copySync('assets', 'dist/main/assets')\"",
+    "build:react": "react-scripts build",
+    "build:win": "npm run build:main && npm run build:react && node build-electron.js && electron-builder --win",
+    "build:win:dir": "npm run build:main && npm run build:react && node build-electron.js && electron-builder --win --dir",
+    "dist": "npm run build:main && npm run build:react && node build-electron.js && electron-builder --publish=never",
+    "eject": "react-scripts eject",
+    "lint": "eslint src --ext .js,.jsx,.ts,.tsx",
+    "lint:fix": "eslint src --ext .js,.jsx,.ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,css,md}\"",
+    "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,json,css,md}\""
+  },
+  "keywords": [
+    "recnet",
+    "rec-room",
+    "photo-downloader",
+    "electron",
+    "react",
+    "typescript"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "@typescript-eslint/eslint-plugin": "^5.62.0",
+    "@typescript-eslint/parser": "^5.62.0",
+    "autoprefixer": "^10.4.0",
+    "concurrently": "^8.0.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "electron-packager": "^17.1.2",
+    "eslint": "^8.0.0",
+    "eslint-import-resolver-typescript": "^3.6.0",
+    "eslint-plugin-import": "^2.29.0",
+    "eslint-plugin-react": "^7.0.0",
+    "eslint-plugin-react-hooks": "^4.0.0",
+    "postcss": "^8.4.0",
+    "prettier": "^3.0.0",
+    "react-scripts": "5.0.1",
+    "tailwindcss": "^3.3.0",
+    "typescript": "^4.9.5",
+    "wait-on": "^7.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "fs-extra": "^11.0.0",
+    "lucide-react": "^0.294.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "build": {
+    "appId": "com.recnet.photo-downloader",
+    "productName": "RecNet Photo Downloader",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/main/**/*",
+      "build/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "dir"
+    }
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}
