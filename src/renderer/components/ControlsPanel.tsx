@@ -23,18 +23,81 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
   const [isOperationActive, setIsOperationActive] = useState(false);
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [isLookingUpAccount, setIsLookingUpAccount] = useState(false);
+  const [searchResults, setSearchResults] = useState<AccountInfo[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(
+    null
+  );
   const [progressMonitor, setProgressMonitor] = useState<NodeJS.Timeout | null>(
     null
   );
 
-  // Cleanup progress monitor on unmount
+  // Cleanup progress monitor and search timeout on unmount
   useEffect(() => {
     return () => {
       if (progressMonitor) {
         clearInterval(progressMonitor);
       }
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+      }
     };
-  }, [progressMonitor]);
+  }, [progressMonitor, searchTimeout]);
+
+  const searchAccounts = async (username: string) => {
+    if (!username.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      if (!window.electronAPI) {
+        throw new Error('Electron API not available');
+      }
+
+      const result = await window.electronAPI.searchAccounts(username);
+      if (result.success && result.data) {
+        setSearchResults(result.data);
+        onLog(
+          `Found ${result.data.length} account(s) matching "${username}"`,
+          'info'
+        );
+      } else {
+        setSearchResults([]);
+        onLog('No accounts found', 'warning');
+      }
+    } catch (error) {
+      setSearchResults([]);
+      onLog(`Error searching accounts: ${error}`, 'error');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleUsernameSearch = (username: string) => {
+    // Clear existing timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+
+    // Set new timeout for debouncing
+    const timeout = setTimeout(() => {
+      searchAccounts(username);
+    }, 1000); // 1 second debounce
+
+    setSearchTimeout(timeout);
+  };
+
+  const selectAccount = (account: AccountInfo) => {
+    setAccountId(account.accountId.toString());
+    setAccountInfo(account);
+    setSearchResults([]);
+    onLog(
+      `Selected account: ${account.displayName}, @${account.username}`,
+      'success'
+    );
+  };
 
   const lookupAccount = async (id: string) => {
     if (!id.trim()) {
@@ -415,6 +478,48 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
       </h2>
 
       <div className="space-y-6">
+        {/* Username Search */}
+        <div>
+          <label className="form-label font-mono">SEARCH_BY_@USERNAME:</label>
+          <input
+            type="text"
+            onChange={e => handleUsernameSearch(e.target.value)}
+            placeholder="Enter username to search"
+            className="form-input font-mono w-full"
+            disabled={isOperationActive}
+          />
+          {isSearching && (
+            <p className="text-sm text-terminal-textMuted mt-1 font-mono">
+              &gt; Searching accounts...
+            </p>
+          )}
+          {searchResults.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {searchResults.slice(0, 5).map((account, index) => (
+                <button
+                  key={index}
+                  onClick={() => selectAccount(account)}
+                  className="w-full text-left p-2 bg-terminal-surface border border-terminal-border rounded hover:bg-terminal-textDim transition-colors"
+                >
+                  <div className="font-mono text-sm">
+                    <span className="text-terminal-text">
+                      {account.displayName}
+                    </span>
+                    <span className="text-terminal-textMuted">
+                      {' '}
+                      @{account.username}
+                    </span>
+                    <span className="text-terminal-textMuted text-xs">
+                      {' '}
+                      (ID: {account.accountId})
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Account ID */}
         <div>
           <label className="form-label font-mono">TARGET_ACCOUNT:</label>

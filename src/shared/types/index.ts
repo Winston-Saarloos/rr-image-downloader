@@ -146,6 +146,7 @@ export interface ElectronAPI {
     callback: (event: any, progress: Progress) => void
   ) => void;
   lookupAccount: (accountId: string) => Promise<ApiResponse<AccountInfo[]>>;
+  searchAccounts: (username: string) => Promise<ApiResponse<AccountInfo[]>>;
 }
 
 declare global {

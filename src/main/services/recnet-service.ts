@@ -906,4 +906,16 @@ export class RecNetService extends EventEmitter {
       throw new Error(`Failed to lookup account: ${(error as Error).message}`);
     }
   }
+
+  async searchAccounts(username: string): Promise<AccountInfo[]> {
+    try {
+      const client = this.createHttpClient();
+      const response = await client.get(
+        `https://apim.rec.net/accounts/account/search?name=${encodeURIComponent(username)}`
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to search accounts: ${(error as Error).message}`);
+    }
+  }
 }

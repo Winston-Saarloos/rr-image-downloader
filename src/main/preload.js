@@ -36,4 +36,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Account lookup
   lookupAccount: accountId => ipcRenderer.invoke('lookup-account', accountId),
+  searchAccounts: username => ipcRenderer.invoke('search-accounts', username),
 });

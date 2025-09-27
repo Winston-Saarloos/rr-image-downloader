@@ -74,8 +74,10 @@
       "build/**/*",
       "package.json"
     ],
+    "icon": "public/favicon.ico",
     "win": {
-      "target": "dir"
+      "target": "dir",
+      "icon": "public/favicon.ico"
     }
   },
   "browserslist": {

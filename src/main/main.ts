@@ -52,7 +52,7 @@ function createWindow(): void {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
     },
-    icon: path.join(__dirname, '../assets/icon.png'),
+    icon: path.join(__dirname, '../../public/favicon.ico'),
     title: 'RecNet Photo Downloader',
   });
 
@@ -210,6 +210,22 @@ ipcMain.handle(
   ): Promise<ApiResponse<AccountInfo[]>> => {
     try {
       const result = await recNetService.lookupAccount(accountId);
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+// Search accounts by username
+ipcMain.handle(
+  'search-accounts',
+  async (
+    event: IpcMainInvokeEvent,
+    username: string
+  ): Promise<ApiResponse<AccountInfo[]>> => {
+    try {
+      const result = await recNetService.searchAccounts(username);
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
