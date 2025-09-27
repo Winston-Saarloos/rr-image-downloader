@@ -12,6 +12,7 @@ import {
   IterationDetail,
   DownloadResultItem,
   DownloadStats,
+  AccountInfo,
 } from '../../shared/types';
 
 interface CurrentOperation {
@@ -33,7 +34,6 @@ export class RecNetService extends EventEmitter {
     );
     this.settings = {
       outputRoot: 'output',
-      pageSize: 150,
       cdnBase: 'https://img.rec.net/',
       globalMaxConcurrentDownloads: 1,
       interPageDelayMs: 500,
@@ -133,9 +133,7 @@ export class RecNetService extends EventEmitter {
 
   async collectPhotos(
     accountId: string,
-    token?: string,
-    incremental = true,
-    maxIterations = 50
+    token?: string
   ): Promise<CollectionResult> {
     this.currentOperation = { cancelled: false };
 
@@ -219,7 +217,8 @@ export class RecNetService extends EventEmitter {
       }
 
       // Collect photos in pages
-      for (let iteration = 0; iteration < maxIterations; iteration++) {
+      let iteration = 0;
+      while (true) {
         if (this.currentOperation.cancelled) {
           throw new Error('Operation cancelled');
         }
@@ -227,12 +226,12 @@ export class RecNetService extends EventEmitter {
         this.updateProgress(
           `Fetching page ${iteration + 1}...`,
           iteration,
-          maxIterations
+          0 // Total unknown since we loop until done
         );
 
         let url = `https://apim.rec.net/apis/api/images/v4/player/${encodeURIComponent(
           accountId
-        )}?skip=${skip}&take=${this.settings.pageSize}&sort=2`;
+        )}?skip=${skip}&take=${150}&sort=2`;
 
         if (lastSortValue) {
           url += `&after=${encodeURIComponent(lastSortValue)}`;
@@ -283,7 +282,7 @@ export class RecNetService extends EventEmitter {
           iteration: iteration + 1,
           url,
           skip,
-          take: this.settings.pageSize,
+          take: 150,
           itemsReceived: photos.length,
           newPhotosAdded,
           totalSoFar: totalFetched,
@@ -292,9 +291,13 @@ export class RecNetService extends EventEmitter {
           incrementalMode: !!lastSortValue,
         });
 
-        if (photos.length < this.settings.pageSize) break;
+        if (photos.length < 150) {
+          // No more photos available
+          break;
+        }
 
-        skip += this.settings.pageSize;
+        skip += 150;
+        iteration++;
 
         if (this.settings.interPageDelayMs > 0) {
           await this.delay(this.settings.interPageDelayMs);
@@ -318,9 +321,8 @@ export class RecNetService extends EventEmitter {
         totalNewPhotosAdded,
         totalPhotos: all.length,
         totalFetched,
-        pageSize: this.settings.pageSize,
+        pageSize: 150,
         delayMs: this.settings.interPageDelayMs,
-        maxIterations,
         iterationsCompleted: iterationDetails.length,
         lastSortValue,
         incrementalMode: !!lastSortValue,
@@ -335,8 +337,7 @@ export class RecNetService extends EventEmitter {
   async collectFeedPhotos(
     accountId: string,
     token?: string,
-    incremental = true,
-    maxIterations = 50
+    incremental = true
   ): Promise<CollectionResult> {
     this.currentOperation = { cancelled: false };
 
@@ -433,7 +434,8 @@ export class RecNetService extends EventEmitter {
       }
 
       // Collect feed photos
-      for (let iteration = 0; iteration < maxIterations; iteration++) {
+      let iteration = 0;
+      while (true) {
         if (this.currentOperation.cancelled) {
           throw new Error('Operation cancelled');
         }
@@ -441,15 +443,13 @@ export class RecNetService extends EventEmitter {
         this.updateProgress(
           `Fetching feed page ${iteration + 1}...`,
           iteration,
-          maxIterations
+          0 // Total unknown since we loop until done
         );
 
         const sinceParam = sinceTime.toISOString();
         const url = `https://apim.rec.net/apis/api/images/v3/feed/player/${encodeURIComponent(
           accountId
-        )}?skip=${skip}&take=${
-          this.settings.pageSize
-        }&since=${encodeURIComponent(sinceParam)}`;
+        )}?skip=${skip}&take=${150}&since=${encodeURIComponent(sinceParam)}`;
 
         const response: AxiosResponse<Photo[]> = await client.get(url);
 
@@ -500,7 +500,7 @@ export class RecNetService extends EventEmitter {
           iteration: iteration + 1,
           url,
           skip,
-          take: this.settings.pageSize,
+          take: 150,
           since: sinceParam,
           itemsReceived: photos.length,
           newPhotosAdded,
@@ -510,9 +510,13 @@ export class RecNetService extends EventEmitter {
           incrementalMode: existingPhotoCount > 0,
         });
 
-        if (photos.length < this.settings.pageSize) break;
+        if (photos.length < 150) {
+          // No more photos available
+          break;
+        }
 
-        skip += this.settings.pageSize;
+        skip += 150;
+        iteration++;
 
         if (this.settings.interPageDelayMs > 0) {
           await this.delay(this.settings.interPageDelayMs);
@@ -533,9 +537,8 @@ export class RecNetService extends EventEmitter {
         totalNewPhotosAdded,
         totalPhotos: all.length,
         totalFetched,
-        pageSize: this.settings.pageSize,
+        pageSize: 150,
         delayMs: this.settings.interPageDelayMs,
-        maxIterations,
         iterationsCompleted: iterationDetails.length,
         sinceTime: sinceTime.toISOString(),
         incrementalMode: existingPhotoCount > 0,
@@ -548,7 +551,7 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async downloadPhotos(accountId: string, limit = 1): Promise<DownloadResult> {
+  async downloadPhotos(accountId: string): Promise<DownloadResult> {
     this.currentOperation = { cancelled: false };
 
     try {
@@ -581,20 +584,11 @@ export class RecNetService extends EventEmitter {
       const rateLimitMs = 1000;
       let processedCount = 0;
 
-      this.updateProgress(
-        'Downloading photos...',
-        0,
-        Math.min(limit, totalPhotos),
-        0
-      );
+      this.updateProgress('Downloading photos...', 0, totalPhotos, 0);
 
       for (const photo of photos) {
         if (this.currentOperation.cancelled) {
           throw new Error('Operation cancelled');
-        }
-
-        if (processedCount >= limit) {
-          break;
         }
 
         if (!photo.Id || !photo.ImageName) {
@@ -692,7 +686,7 @@ export class RecNetService extends EventEmitter {
         this.updateProgress(
           'Downloading photos...',
           processedCount,
-          Math.min(limit, totalPhotos)
+          totalPhotos
         );
       }
 
@@ -709,7 +703,6 @@ export class RecNetService extends EventEmitter {
       return {
         accountId,
         photosDirectory: photosDir,
-        limit,
         processedCount,
         downloadStats,
         downloadResults,
@@ -721,10 +714,7 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async downloadFeedPhotos(
-    accountId: string,
-    limit = 1
-  ): Promise<DownloadResult> {
+  async downloadFeedPhotos(accountId: string): Promise<DownloadResult> {
     this.currentOperation = { cancelled: false };
 
     try {
@@ -756,20 +746,11 @@ export class RecNetService extends EventEmitter {
       const rateLimitMs = 1000;
       let processedCount = 0;
 
-      this.updateProgress(
-        'Downloading feed photos...',
-        0,
-        Math.min(limit, totalPhotos),
-        0
-      );
+      this.updateProgress('Downloading feed photos...', 0, totalPhotos, 0);
 
       for (const photo of photos) {
         if (this.currentOperation.cancelled) {
           throw new Error('Operation cancelled');
-        }
-
-        if (processedCount >= limit) {
-          break;
         }
 
         if (!photo.Id || !photo.ImageName) {
@@ -867,7 +848,7 @@ export class RecNetService extends EventEmitter {
         this.updateProgress(
           'Downloading feed photos...',
           processedCount,
-          Math.min(limit, totalPhotos)
+          totalPhotos
         );
       }
 
@@ -884,7 +865,6 @@ export class RecNetService extends EventEmitter {
       return {
         accountId,
         feedPhotosDirectory: feedPhotosDir,
-        limit,
         processedCount,
         downloadStats,
         downloadResults,
@@ -913,5 +893,17 @@ export class RecNetService extends EventEmitter {
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async lookupAccount(accountId: string): Promise<AccountInfo[]> {
+    try {
+      const client = this.createHttpClient();
+      const response = await client.get(
+        `https://accounts.rec.net/account/bulk?id=${encodeURIComponent(accountId)}`
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to lookup account: ${(error as Error).message}`);
+    }
   }
 }

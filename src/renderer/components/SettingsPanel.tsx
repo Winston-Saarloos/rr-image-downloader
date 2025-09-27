@@ -35,17 +35,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  const handlePageSizeChange = async (value: number) => {
-    await onUpdateSettings({ pageSize: value });
-  };
-
   const handleDelayChange = async (value: number) => {
     await onUpdateSettings({ interPageDelayMs: value });
   };
 
   return (
     <div className="panel">
-      <h2 className="text-2xl font-bold text-terminal-text mb-6 pb-3 border-b-2 border-terminal-border terminal-glow font-mono">
+      <h2 className="text-2xl font-bold text-terminal-text mb-6 pb-3 border-b-2 border-terminal-border font-mono">
         SYSTEM_CONFIG
       </h2>
 
@@ -71,20 +67,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         </div>
 
-        {/* Page Size */}
-        <div>
-          <label className="form-label font-mono">BATCH_SIZE:</label>
-          <input
-            type="number"
-            value={settings.pageSize}
-            onChange={e => handlePageSizeChange(parseInt(e.target.value))}
-            min="1"
-            max="500"
-            className="form-input font-mono"
-            disabled={true}
-          />
-        </div>
-
         {/* Delay Between Pages */}
         <div>
           <label className="form-label font-mono">REQUEST_DELAY:</label>
@@ -97,7 +79,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             className="form-input font-mono"
           />
           <p className="text-sm text-terminal-textMuted mt-1 font-mono">
-            &gt; Milliseconds between requests
+            &gt; Milliseconds between requests (minimum 500ms)
           </p>
         </div>
       </div>

@@ -33,4 +33,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeProgressListener: callback => {
     ipcRenderer.removeListener('progress-update', callback);
   },
+
+  // Account lookup
+  lookupAccount: accountId => ipcRenderer.invoke('lookup-account', accountId),
 });

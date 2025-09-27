@@ -1,6 +1,5 @@
 export interface RecNetSettings {
   outputRoot: string;
-  pageSize: number;
   cdnBase: string;
   globalMaxConcurrentDownloads: number;
   interPageDelayMs: number;
@@ -20,6 +19,21 @@ export interface Photo {
   sort?: string;
   CreatedAt?: string;
   [key: string]: any;
+}
+
+export interface AccountInfo {
+  accountId: number;
+  username: string;
+  displayName: string;
+  displayEmoji: string;
+  profileImage: string;
+  bannerImage: string;
+  isJunior: boolean;
+  platforms: number;
+  personalPronouns: number;
+  identityFlags: number;
+  createdAt: string;
+  isMetaPlatformBlocked: boolean;
 }
 
 export interface IterationDetail {
@@ -53,7 +67,6 @@ export interface CollectionResult {
   totalFetched: number;
   pageSize: number;
   delayMs: number;
-  maxIterations: number;
   iterationsCompleted: number;
   lastSortValue?: string;
   incrementalMode: boolean;
@@ -89,7 +102,6 @@ export interface DownloadResult {
   accountId: string;
   photosDirectory?: string;
   feedPhotosDirectory?: string;
-  limit: number;
   processedCount: number;
   downloadStats: DownloadStats;
   downloadResults: DownloadResultItem[];
@@ -106,25 +118,20 @@ export interface ElectronAPI {
   collectPhotos: (params: {
     accountId: string;
     token?: string;
-    incremental?: boolean;
-    maxIterations?: number;
   }) => Promise<ApiResponse<CollectionResult>>;
 
   collectFeedPhotos: (params: {
     accountId: string;
     token?: string;
     incremental?: boolean;
-    maxIterations?: number;
   }) => Promise<ApiResponse<CollectionResult>>;
 
   downloadPhotos: (params: {
     accountId: string;
-    limit?: number;
   }) => Promise<ApiResponse<DownloadResult>>;
 
   downloadFeedPhotos: (params: {
     accountId: string;
-    limit?: number;
   }) => Promise<ApiResponse<DownloadResult>>;
 
   selectOutputFolder: () => Promise<string | null>;
@@ -138,6 +145,7 @@ export interface ElectronAPI {
   removeProgressListener: (
     callback: (event: any, progress: Progress) => void
   ) => void;
+  lookupAccount: (accountId: string) => Promise<ApiResponse<AccountInfo[]>>;
 }
 
 declare global {

@@ -112,7 +112,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({ logs, onClearLogs }) => {
   return (
     <div className="panel">
       <div className="flex items-center justify-between mb-6 pb-3 border-b-2 border-terminal-border">
-        <h2 className="text-2xl font-bold text-terminal-text terminal-glow font-mono">
+        <h2 className="text-2xl font-bold text-terminal-text font-mono">
           TERMINAL_CONSOLE
         </h2>
         <div className="flex items-center gap-2">
@@ -147,7 +147,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({ logs, onClearLogs }) => {
             overscrollBehavior: 'contain',
             isolation: 'isolate',
             contain: 'strict',
-            height: '200px',
+            height: '230px',
           }}
         >
           {logs.length === 0 ? (

@@ -12,6 +12,7 @@ import {
   DownloadResult,
   RecNetSettings,
   Progress,
+  AccountInfo,
 } from '../shared/types';
 
 // Keep a global reference of the window object
@@ -21,13 +22,16 @@ let recNetService: RecNetService;
 interface CollectPhotosParams {
   accountId: string;
   token?: string;
+}
+
+interface CollectFeedPhotosParams {
+  accountId: string;
+  token?: string;
   incremental?: boolean;
-  maxIterations?: number;
 }
 
 interface DownloadPhotosParams {
   accountId: string;
-  limit?: number;
 }
 
 interface ApiResponse<T> {
@@ -101,9 +105,7 @@ ipcMain.handle(
     try {
       const result = await recNetService.collectPhotos(
         params.accountId,
-        params.token,
-        params.incremental ?? true,
-        params.maxIterations ?? 50
+        params.token
       );
       return { success: true, data: result };
     } catch (error) {
@@ -116,14 +118,13 @@ ipcMain.handle(
   'collect-feed-photos',
   async (
     event: IpcMainInvokeEvent,
-    params: CollectPhotosParams
+    params: CollectFeedPhotosParams
   ): Promise<ApiResponse<CollectionResult>> => {
     try {
       const result = await recNetService.collectFeedPhotos(
         params.accountId,
         params.token,
-        params.incremental ?? true,
-        params.maxIterations ?? 50
+        params.incremental ?? true
       );
       return { success: true, data: result };
     } catch (error) {
@@ -139,10 +140,7 @@ ipcMain.handle(
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
-      const result = await recNetService.downloadPhotos(
-        params.accountId,
-        params.limit ?? 1
-      );
+      const result = await recNetService.downloadPhotos(params.accountId);
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -157,10 +155,7 @@ ipcMain.handle(
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
-      const result = await recNetService.downloadFeedPhotos(
-        params.accountId,
-        params.limit ?? 1
-      );
+      const result = await recNetService.downloadFeedPhotos(params.accountId);
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -205,3 +200,19 @@ ipcMain.handle('get-progress', async (): Promise<Progress> => {
 ipcMain.handle('cancel-operation', async (): Promise<boolean> => {
   return recNetService.cancelCurrentOperation();
 });
+
+// Lookup account information
+ipcMain.handle(
+  'lookup-account',
+  async (
+    event: IpcMainInvokeEvent,
+    accountId: string
+  ): Promise<ApiResponse<AccountInfo[]>> => {
+    try {
+      const result = await recNetService.lookupAccount(accountId);
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);

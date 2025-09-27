@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ControlsPanel } from './components/ControlsPanel';
 import { ProgressPanel } from './components/ProgressPanel';
@@ -9,7 +9,6 @@ import { RecNetSettings, Progress } from '../shared/types';
 function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
     outputRoot: 'output',
-    pageSize: 150,
     cdnBase: 'https://img.rec.net/',
     globalMaxConcurrentDownloads: 1,
     interPageDelayMs: 500,
@@ -107,12 +106,10 @@ function App() {
       <div className="container mx-auto px-4 py-6 max-w-6xl h-full overflow-y-auto">
         {/* Header */}
         <header className="text-left mb-8">
-          <h1 className="text-4xl md:text-5xl font-bold text-terminal-text mb-3 terminal-glow font-mono">
+          <h1 className="text-4xl md:text-5xl font-bold text-terminal-text mb-3 font-mono">
             &gt;_ PHOTO_DOWNLOADER.EXE
           </h1>
-          <p className="text-xl text-terminal-textDim terminal-glow font-mono mb-4">
-            v1.0
-          </p>
+          <p className="text-xl text-terminal-textDim font-mono mb-4">v1.0</p>
 
           {/* Log Panel - Full Width */}
           <LogPanel logs={logs} onClearLogs={clearLogs} />
@@ -129,7 +126,6 @@ function App() {
               />
 
               <ControlsPanel
-                settings={settings}
                 onLog={addLog}
                 onResult={addResult}
                 onProgressChange={setProgress}

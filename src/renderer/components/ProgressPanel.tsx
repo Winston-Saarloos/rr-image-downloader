@@ -62,7 +62,7 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   }, [progress, settings, startTime]);
   return (
     <div className="panel">
-      <h2 className="text-2xl font-bold text-terminal-text mb-6 pb-3 border-b-2 border-terminal-border terminal-glow font-mono">
+      <h2 className="text-2xl font-bold text-terminal-text mb-6 pb-3 border-b-2 border-terminal-border font-mono">
         SYSTEM_STATUS
       </h2>
 

@@ -78,16 +78,11 @@
     @apply focus:border-terminal-accent focus:ring-2 focus:ring-terminal-accent focus:ring-opacity-20;
     @apply placeholder-terminal-textMuted transition-all duration-200;
     background: rgba(10, 10, 10, 0.8);
-    box-shadow:
-      inset 0 2px 4px rgba(0, 0, 0, 0.3),
-      0 0 10px rgba(0, 255, 0, 0.1);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
   }
 
   .form-input:focus {
-    box-shadow:
-      inset 0 2px 4px rgba(0, 0, 0, 0.3),
-      0 0 15px rgba(0, 255, 0, 0.3),
-      0 0 25px rgba(0, 255, 0, 0.1);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
   }
 
   .form-label {
@@ -107,17 +102,15 @@
   .btn-primary {
     @apply bg-terminal-accent text-terminal-bg border border-terminal-accent;
     box-shadow:
-      0 4px 15px rgba(0, 255, 65, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.2),
-      0 0 20px rgba(0, 255, 65, 0.2);
+      0 4px 15px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
   }
 
   .btn-primary:hover {
     @apply bg-terminal-text;
     box-shadow:
-      0 6px 20px rgba(0, 255, 0, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.3),
-      0 0 30px rgba(0, 255, 0, 0.3);
+      0 6px 20px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
   }
 
   .btn-secondary {
@@ -175,23 +168,20 @@
 
   .log-entry.success {
     @apply text-terminal-success;
-    text-shadow: 0 0 8px rgba(0, 255, 0, 0.6);
   }
 
   .log-entry.error {
     @apply text-terminal-error;
-    text-shadow: 0 0 8px rgba(255, 0, 0, 0.6);
   }
 
   .log-entry.warning {
     @apply text-terminal-warning;
-    text-shadow: 0 0 8px rgba(255, 255, 0, 0.6);
   }
 }
 
 /* Terminal-style utilities */
 @layer utilities {
-  .terminal-glow {
+  . {
     text-shadow: 0 0 10px currentColor;
   }
 

@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Download, X } from 'lucide-react';
-import { RecNetSettings } from '../../shared/types';
+import { AccountInfo } from '../../shared/types';
 
 interface ControlsPanelProps {
-  settings: RecNetSettings;
   onLog: (
     message: string,
     type?: 'info' | 'success' | 'error' | 'warning'
@@ -13,7 +12,6 @@ interface ControlsPanelProps {
 }
 
 export const ControlsPanel: React.FC<ControlsPanelProps> = ({
-  settings,
   onLog,
   onResult,
   onProgressChange,
@@ -22,9 +20,9 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
   const [recNetToken, setRecNetToken] = useState('');
   const [incremental, setIncremental] = useState(true);
   const [downloadFeed, setDownloadFeed] = useState(true);
-  const [maxIterations, setMaxIterations] = useState(50);
-  const [downloadLimit, setDownloadLimit] = useState(5);
   const [isOperationActive, setIsOperationActive] = useState(false);
+  const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
+  const [isLookingUpAccount, setIsLookingUpAccount] = useState(false);
   const [progressMonitor, setProgressMonitor] = useState<NodeJS.Timeout | null>(
     null
   );
@@ -37,6 +35,37 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
       }
     };
   }, [progressMonitor]);
+
+  const lookupAccount = async (id: string) => {
+    if (!id.trim()) {
+      setAccountInfo(null);
+      return;
+    }
+
+    setIsLookingUpAccount(true);
+    try {
+      if (!window.electronAPI) {
+        throw new Error('Electron API not available');
+      }
+
+      const result = await window.electronAPI.lookupAccount(id);
+      if (result.success && result.data && result.data.length > 0) {
+        setAccountInfo(result.data[0]);
+        onLog(
+          `Found account: ${result.data[0].displayName}, @${result.data[0].username}`,
+          'success'
+        );
+      } else {
+        setAccountInfo(null);
+        onLog('Account not found', 'warning');
+      }
+    } catch (error) {
+      setAccountInfo(null);
+      onLog(`Error looking up account: ${error}`, 'error');
+    } finally {
+      setIsLookingUpAccount(false);
+    }
+  };
 
   const setOperationActive = (active: boolean) => {
     setIsOperationActive(active);
@@ -170,10 +199,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
     // Step 1: Collect photos metadata
     onLog('Step 1: Collecting photos metadata...', 'info');
     onLog('  → Fetching photo information from RecNet API...', 'info');
-    onLog(
-      `  → Processing up to ${maxIterations} pages (${settings.pageSize} photos per page)...`,
-      'info'
-    );
+    onLog(`  → Processing all pages (150 photos per page)...`, 'info');
     onLog(
       '  → This may take a few minutes for accounts with many photos...',
       'info'
@@ -186,8 +212,6 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
     const photosResult = await window.electronAPI.collectPhotos({
       accountId: accountId.trim(),
       token: recNetToken.trim() || undefined,
-      incremental,
-      maxIterations,
     });
 
     if (!photosResult.success) {
@@ -225,10 +249,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
     if (downloadFeed) {
       onLog('Step 2: Collecting feed metadata...', 'info');
       onLog('  → Fetching feed photo information from RecNet API...', 'info');
-      onLog(
-        `  → Processing up to ${maxIterations} pages (${settings.pageSize} photos per page)...`,
-        'info'
-      );
+      onLog(`  → Processing all pages (150 photos per page)...`, 'info');
       onLog(
         '  → This may take a few minutes for accounts with many feed photos...',
         'info'
@@ -242,7 +263,6 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
         accountId: accountId.trim(),
         token: recNetToken.trim() || undefined,
         incremental,
-        maxIterations,
       });
 
       if (!feedResult.success) {
@@ -278,13 +298,12 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
       onLog('Step 2: Skipping feed metadata collection (disabled)', 'info');
     }
 
-    // Step 3: Download photos (limited)
-    onLog(`Step 3: Downloading photos (limit: ${downloadLimit})...`, 'info');
-    onLog(`  → Starting download of up to ${downloadLimit} photos...`, 'info');
+    // Step 3: Download photos
+    onLog('Step 3: Downloading photos...', 'info');
+    onLog('  → Starting download of all photos...', 'info');
 
     const downloadResult = await window.electronAPI.downloadPhotos({
       accountId: accountId.trim(),
-      limit: downloadLimit,
     });
 
     if (!downloadResult.success) {
@@ -313,18 +332,11 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
     // Step 4: Download feed photos (if enabled and limited)
     let feedDownloadResult: any = null;
     if (downloadFeed) {
-      onLog(
-        `Step 4: Downloading feed photos (limit: ${downloadLimit})...`,
-        'info'
-      );
-      onLog(
-        `  → Starting download of up to ${downloadLimit} feed photos...`,
-        'info'
-      );
+      onLog('Step 4: Downloading feed photos...', 'info');
+      onLog('  → Starting download of all feed photos...', 'info');
 
       feedDownloadResult = await window.electronAPI.downloadFeedPhotos({
         accountId: accountId.trim(),
-        limit: downloadLimit,
       });
 
       if (!feedDownloadResult.success) {
@@ -398,7 +410,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
 
   return (
     <div className="panel">
-      <h2 className="text-2xl font-bold text-terminal-text mb-6 pb-3 border-b-2 border-terminal-border terminal-glow font-mono">
+      <h2 className="text-2xl font-bold text-terminal-text mb-6 pb-3 border-b-2 border-terminal-border font-mono">
         ADVANCED_OPTIONS
       </h2>
 
@@ -410,21 +422,32 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
             type="text"
             value={accountId}
             onChange={e => setAccountId(e.target.value)}
+            onBlur={e => lookupAccount(e.target.value)}
             placeholder="Enter Rec Room account ID"
-            className="form-input font-mono"
+            className="form-input font-mono w-full"
             disabled={isOperationActive}
           />
+          {isLookingUpAccount && (
+            <p className="text-sm text-terminal-textMuted mt-1 font-mono">
+              &gt; Looking up account...
+            </p>
+          )}
+          {accountInfo && (
+            <p className="text-sm text-terminal-success mt-1 font-mono">
+              &gt; Found: {accountInfo.displayName}, @{accountInfo.username}
+            </p>
+          )}
         </div>
 
         {/* RecNet Token */}
         <div>
-          <label className="form-label font-mono">API_TOKEN:</label>
+          <label className="form-label font-mono">(Bearer) AUTH_TOKEN:</label>
           <input
             type="password"
             value={recNetToken}
             onChange={e => setRecNetToken(e.target.value)}
             placeholder="Enter RecNet token for higher rate limits"
-            className="form-input font-mono"
+            className="form-input font-mono w-full"
             disabled={isOperationActive}
           />
           <p className="text-sm text-terminal-textMuted mt-1 font-mono">
@@ -461,37 +484,6 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
           </label>
         </div>
 
-        {/* Max Iterations */}
-        <div>
-          <label className="form-label font-mono">MAX_PAGES:</label>
-          <input
-            type="number"
-            value={maxIterations}
-            onChange={e => setMaxIterations(parseInt(e.target.value))}
-            min="1"
-            max="200"
-            className="form-input font-mono"
-            disabled={isOperationActive}
-          />
-        </div>
-
-        {/* Download Limit */}
-        <div>
-          <label className="form-label font-mono">PHOTO_DOWNLOAD_LIMIT:</label>
-          <input
-            type="number"
-            value={downloadLimit}
-            onChange={e => setDownloadLimit(parseInt(e.target.value))}
-            min="1"
-            max="10000"
-            className="form-input font-mono"
-            disabled={isOperationActive}
-          />
-          <p className="text-sm text-terminal-textMuted mt-1 font-mono">
-            &gt; Max photos to download (for testing)
-          </p>
-        </div>
-
         {/* Main Download Button */}
         <div>
           <button
@@ -503,7 +495,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
             DOWNLOAD_ALL
           </button>
           <p className="text-sm text-terminal-textMuted mt-2 font-mono text-center">
-            &gt; Collects metadata first, then downloads {downloadLimit} photos
+            &gt; Collects metadata first, then downloads all photos
           </p>
         </div>
 

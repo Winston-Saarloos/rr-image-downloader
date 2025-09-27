@@ -120,7 +120,7 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ results }) => {
 
   return (
     <div className="panel">
-      <h2 className="text-2xl font-bold text-terminal-text mb-6 pb-3 border-b-2 border-terminal-border terminal-glow font-mono">
+      <h2 className="text-2xl font-bold text-terminal-text mb-6 pb-3 border-b-2 border-terminal-border font-mono">
         OPERATION_RESULTS
       </h2>
 
