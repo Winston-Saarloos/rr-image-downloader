@@ -218,13 +218,29 @@ export class RecNetService extends EventEmitter {
 
       // Collect photos in pages
       let iteration = 0;
+      let isIncrementalMode = false;
+
+      // If we have existing data, optimize by starting from the end (newest photos)
+      if (lastSortValue && existingPhotoCount > 0) {
+        isIncrementalMode = true;
+        console.log(
+          `Incremental mode: checking for new photos after existing ${existingPhotoCount} photos`
+        );
+        console.log(
+          `Starting from newest photos (after sort value: ${lastSortValue})`
+        );
+      } else {
+        console.log(`Full collection mode: fetching all photos from beginning`);
+      }
+
       while (true) {
         if (this.currentOperation.cancelled) {
           throw new Error('Operation cancelled');
         }
 
+        const modeText = isIncrementalMode ? ' (incremental)' : '';
         this.updateProgress(
-          `Fetching page ${iteration + 1}...`,
+          `Fetching page ${iteration + 1}${modeText}...`,
           iteration,
           0 // Total unknown since we loop until done
         );
@@ -257,7 +273,19 @@ export class RecNetService extends EventEmitter {
           }
 
           let shouldAdd = true;
-          if (lastSortValue && photo.sort) {
+
+          // Check if photo already exists by ID
+          if (photo.Id) {
+            for (const existingPhoto of all) {
+              if (existingPhoto.Id === photo.Id) {
+                shouldAdd = false;
+                break;
+              }
+            }
+          }
+
+          // Also check by sort value for additional safety
+          if (shouldAdd && lastSortValue && photo.sort) {
             if (photo.sort <= lastSortValue) {
               shouldAdd = false;
             }
@@ -290,6 +318,14 @@ export class RecNetService extends EventEmitter {
           newestSortValue,
           incrementalMode: !!lastSortValue,
         });
+
+        // In incremental mode, if we found no new photos, we can stop early
+        if (isIncrementalMode && newPhotosAdded === 0 && photos.length > 0) {
+          console.log(
+            `No new photos found in incremental check, stopping early`
+          );
+          break;
+        }
 
         if (photos.length < 150) {
           // No more photos available
@@ -577,6 +613,9 @@ export class RecNetService extends EventEmitter {
 
       const client = this.createHttpClient();
       const totalPhotos = photos.length;
+      console.log(
+        `Starting download of ${totalPhotos} photos from ${jsonPath}`
+      );
       let alreadyDownloaded = 0;
       let newDownloads = 0;
       let failedDownloads = 0;
@@ -739,6 +778,9 @@ export class RecNetService extends EventEmitter {
 
       const client = this.createHttpClient();
       const totalPhotos = photos.length;
+      console.log(
+        `Starting download of ${totalPhotos} feed photos from ${feedJsonPath}`
+      );
       let alreadyDownloaded = 0;
       let newDownloads = 0;
       let failedDownloads = 0;
@@ -916,6 +958,50 @@ export class RecNetService extends EventEmitter {
       return response.data;
     } catch (error) {
       throw new Error(`Failed to search accounts: ${(error as Error).message}`);
+    }
+  }
+
+  async clearAccountData(accountId: string): Promise<{ filesRemoved: number }> {
+    const accountDir = path.join(this.settings.outputRoot, accountId);
+    const photosJsonPath = path.join(accountDir, `${accountId}_photos.json`);
+    const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
+
+    let filesRemoved = 0;
+
+    try {
+      // Remove photos JSON file
+      if (await fs.pathExists(photosJsonPath)) {
+        await fs.remove(photosJsonPath);
+        filesRemoved++;
+        console.log(`Removed photos file: ${photosJsonPath}`);
+      }
+
+      // Remove feed JSON file
+      if (await fs.pathExists(feedJsonPath)) {
+        await fs.remove(feedJsonPath);
+        filesRemoved++;
+        console.log(`Removed feed file: ${feedJsonPath}`);
+      }
+
+      // Remove the account directory if it's empty
+      try {
+        const files = await fs.readdir(accountDir);
+        if (files.length === 0) {
+          await fs.remove(accountDir);
+          console.log(`Removed empty account directory: ${accountDir}`);
+        }
+      } catch (error) {
+        // Directory might not exist or might not be empty, that's fine
+        console.log(
+          `Account directory not empty or doesn't exist: ${accountDir}`
+        );
+      }
+
+      return { filesRemoved };
+    } catch (error) {
+      throw new Error(
+        `Failed to clear account data: ${(error as Error).message}`
+      );
     }
   }
 }

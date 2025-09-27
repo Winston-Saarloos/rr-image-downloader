@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, X } from 'lucide-react';
+import { Download, X, Trash2 } from 'lucide-react';
 import { AccountInfo } from '../../shared/types';
 
 interface ControlsPanelProps {
@@ -76,15 +76,13 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
   };
 
   const handleUsernameSearch = (username: string) => {
-    // Clear existing timeout
     if (searchTimeout) {
       clearTimeout(searchTimeout);
     }
 
-    // Set new timeout for debouncing
     const timeout = setTimeout(() => {
       searchAccounts(username);
-    }, 1000); // 1 second debounce
+    }, 1000);
 
     setSearchTimeout(timeout);
   };
@@ -132,49 +130,53 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
 
   const setOperationActive = (active: boolean) => {
     setIsOperationActive(active);
-    if (!active) {
+    if (active) {
       // Clear progress monitor
       if (progressMonitor) {
         clearInterval(progressMonitor);
         setProgressMonitor(null);
       }
+
+      // Reset progress
       onProgressChange({
-        isRunning: false,
-        currentStep: 'Ready',
+        isRunning: true,
+        currentStep: 'Starting...',
+        progress: 0,
         current: 0,
         total: 0,
-        progress: 0,
       });
-    } else {
+
       // Start progress monitoring
       const monitor = setInterval(async () => {
-        if (window.electronAPI) {
-          try {
+        try {
+          if (window.electronAPI) {
             const progress = await window.electronAPI.getProgress();
             onProgressChange(progress);
 
-            // Log progress updates for long operations
+            // Log progress updates occasionally
             if (progress.isRunning && progress.currentStep) {
-              if (
-                progress.currentStep.includes('Fetching page') ||
-                progress.currentStep.includes('Collecting')
-              ) {
-                // Only log every few updates to avoid spam
-                const shouldLog = Math.random() < 0.1; // 10% chance to log
-                if (shouldLog) {
-                  onLog(
-                    `  → ${progress.currentStep} (${progress.current}/${progress.total})`,
-                    'info'
-                  );
-                }
+              // Only log every few updates to avoid spam
+              const shouldLog = Math.random() < 0.1; // 10% chance to log
+              if (shouldLog) {
+                onLog(
+                  `  → ${progress.currentStep} (${progress.current}/${progress.total})`,
+                  'info'
+                );
               }
             }
-          } catch (error) {
-            // Ignore progress monitoring errors
           }
+        } catch (error) {
+          // Ignore progress monitoring errors
         }
-      }, 2000); // Check every 2 seconds
+      }, 1000);
+
       setProgressMonitor(monitor);
+    } else {
+      // Clear progress monitor
+      if (progressMonitor) {
+        clearInterval(progressMonitor);
+        setProgressMonitor(null);
+      }
     }
   };
 
@@ -195,73 +197,37 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
 
     try {
       const result = await operation();
-
       if (result.success) {
-        onLog(`${operationName} completed successfully!`, 'success');
+        onLog(`${operationName} completed successfully`, 'success');
         onResult(operationName, result.data, 'success');
       } else {
         onLog(`${operationName} failed: ${result.error}`, 'error');
-        onResult(operationName, { error: result.error }, 'error');
+        onResult(operationName, result.error, 'error');
       }
     } catch (error) {
-      onLog(`${operationName} error: ${error}`, 'error');
-      onResult(operationName, { error: String(error) }, 'error');
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      onLog(`${operationName} failed: ${errorMessage}`, 'error');
+      onResult(operationName, errorMessage, 'error');
     } finally {
       setOperationActive(false);
     }
   };
 
-  // const collectPhotos = async () => {
-  //   if (!window.electronAPI)
-  //     return { success: false, error: 'Electron API not available' };
-
-  //   return await window.electronAPI.collectPhotos({
-  //     accountId: accountId.trim(),
-  //     token: recNetToken.trim() || undefined,
-  //     incremental,
-  //     maxIterations,
-  //   });
-  // };
-
-  // const collectFeedPhotos = async () => {
-  //   if (!window.electronAPI)
-  //     return { success: false, error: 'Electron API not available' };
-
-  //   return await window.electronAPI.collectFeedPhotos({
-  //     accountId: accountId.trim(),
-  //     token: recNetToken.trim() || undefined,
-  //     incremental,
-  //     maxIterations,
-  //   });
-  // };
-
-  // const downloadPhotos = async () => {
-  //   if (!window.electronAPI)
-  //     return { success: false, error: 'Electron API not available' };
-
-  //   return await window.electronAPI.downloadPhotos({
-  //     accountId: accountId.trim(),
-  //     limit: downloadLimit,
-  //   });
-  // };
-
-  // const downloadFeedPhotos = async () => {
-  //   if (!window.electronAPI)
-  //     return { success: false, error: 'Electron API not available' };
-
-  //   return await window.electronAPI.downloadFeedPhotos({
-  //     accountId: accountId.trim(),
-  //     limit: downloadLimit,
-  //   });
-  // };
-
   const downloadAll = async () => {
     if (!window.electronAPI)
       return { success: false, error: 'Electron API not available' };
 
-    // Step 1: Collect photos metadata
-    onLog('Step 1: Collecting photos metadata...', 'info');
+    // Step 1: Collect metadata (photos and feed in parallel)
+    onLog('Step 1: Collecting metadata...', 'info');
+    onLog(
+      '  → Starting parallel collection of photos and feed metadata...',
+      'info'
+    );
     onLog('  → Fetching photo information from RecNet API...', 'info');
+    if (downloadFeed) {
+      onLog('  → Fetching feed photo information from RecNet API...', 'info');
+    }
     onLog(`  → Processing all pages (150 photos per page)...`, 'info');
     onLog(
       '  → This may take a few minutes for accounts with many photos...',
@@ -272,10 +238,25 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
       'info'
     );
 
-    const photosResult = await window.electronAPI.collectPhotos({
+    // Start both collections in parallel
+    const photosPromise = window.electronAPI.collectPhotos({
       accountId: accountId.trim(),
       token: recNetToken.trim() || undefined,
     });
+
+    const feedPromise = downloadFeed
+      ? window.electronAPI.collectFeedPhotos({
+          accountId: accountId.trim(),
+          token: recNetToken.trim() || undefined,
+          incremental,
+        })
+      : Promise.resolve({ success: true, data: null });
+
+    // Wait for both to complete
+    const [photosResult, feedResult] = await Promise.all([
+      photosPromise,
+      feedPromise,
+    ]);
 
     if (!photosResult.success) {
       return {
@@ -284,6 +265,14 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
       };
     }
 
+    if (downloadFeed && !feedResult.success) {
+      return {
+        success: false,
+        error: `Failed to collect feed metadata: ${feedResult.error}`,
+      };
+    }
+
+    // Log photos results
     const totalPhotos = photosResult.data?.totalPhotos || 0;
     const newPhotos = photosResult.data?.totalNewPhotosAdded || 0;
     const existingPhotos = photosResult.data?.existingPhotos || 0;
@@ -291,7 +280,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
     const iterationsCompleted = photosResult.data?.iterationsCompleted || 0;
 
     onLog(
-      `  ✅ Photos metadata collected: ${totalPhotos} total photos found`,
+      `  Photos metadata collected: ${totalPhotos} total photos found`,
       'success'
     );
     onLog(
@@ -307,34 +296,8 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
       onLog(`  → All ${totalPhotos} photos are new`, 'info');
     }
 
-    // Step 2: Collect feed metadata (if enabled)
-    let feedResult: any = null;
-    if (downloadFeed) {
-      onLog('Step 2: Collecting feed metadata...', 'info');
-      onLog('  → Fetching feed photo information from RecNet API...', 'info');
-      onLog(`  → Processing all pages (150 photos per page)...`, 'info');
-      onLog(
-        '  → This may take a few minutes for accounts with many feed photos...',
-        'info'
-      );
-      onLog(
-        '  → Progress updates will appear below as we process each page...',
-        'info'
-      );
-
-      feedResult = await window.electronAPI.collectFeedPhotos({
-        accountId: accountId.trim(),
-        token: recNetToken.trim() || undefined,
-        incremental,
-      });
-
-      if (!feedResult.success) {
-        return {
-          success: false,
-          error: `Failed to collect feed metadata: ${feedResult.error}`,
-        };
-      }
-
+    // Log feed results
+    if (downloadFeed && feedResult.data) {
       const totalFeedPhotos = feedResult.data?.totalPhotos || 0;
       const newFeedPhotos = feedResult.data?.totalNewPhotosAdded || 0;
       const existingFeedPhotos = feedResult.data?.existingPhotos || 0;
@@ -342,7 +305,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
       const feedIterationsCompleted = feedResult.data?.iterationsCompleted || 0;
 
       onLog(
-        `  ✅ Feed metadata collected: ${totalFeedPhotos} total feed photos found`,
+        `  Feed metadata collected: ${totalFeedPhotos} total feed photos found`,
         'success'
       );
       onLog(
@@ -357,12 +320,12 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
       } else {
         onLog(`  → All ${totalFeedPhotos} feed photos are new`, 'info');
       }
-    } else {
-      onLog('Step 2: Skipping feed metadata collection (disabled)', 'info');
+    } else if (!downloadFeed) {
+      onLog('  → Feed metadata collection skipped (disabled)', 'info');
     }
 
-    // Step 3: Download photos
-    onLog('Step 3: Downloading photos...', 'info');
+    // Step 2: Download photos
+    onLog('Step 2: Downloading photos...', 'info');
     onLog('  → Starting download of all photos...', 'info');
 
     const downloadResult = await window.electronAPI.downloadPhotos({
@@ -377,12 +340,12 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
     }
 
     const downloadStats = downloadResult.data?.downloadStats || {};
-    const newDownloads = (downloadStats as any).newDownloads || 0;
-    const alreadyDownloaded = (downloadStats as any).alreadyDownloaded || 0;
-    const failedDownloads = (downloadStats as any).failedDownloads || 0;
+    const newDownloads = downloadStats.newDownloads || 0;
+    const alreadyDownloaded = downloadStats.alreadyDownloaded || 0;
+    const failedDownloads = downloadStats.failedDownloads || 0;
 
     onLog(
-      `  ✅ Photos download completed: ${newDownloads} new photos downloaded`,
+      `  Photos download completed: ${newDownloads} new photos downloaded`,
       'success'
     );
     if (alreadyDownloaded > 0) {
@@ -392,10 +355,10 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
       onLog(`  → ${failedDownloads} photos failed to download`, 'warning');
     }
 
-    // Step 4: Download feed photos (if enabled and limited)
+    // Step 3: Download feed photos (if enabled and limited)
     let feedDownloadResult: any = null;
     if (downloadFeed) {
-      onLog('Step 4: Downloading feed photos...', 'info');
+      onLog('Step 3: Downloading feed photos...', 'info');
       onLog('  → Starting download of all feed photos...', 'info');
 
       feedDownloadResult = await window.electronAPI.downloadFeedPhotos({
@@ -410,11 +373,9 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
       }
 
       const feedDownloadStats = feedDownloadResult.data?.downloadStats || {};
-      const newFeedDownloads = (feedDownloadStats as any).newDownloads || 0;
-      const alreadyDownloadedFeed =
-        (feedDownloadStats as any).alreadyDownloaded || 0;
-      const failedFeedDownloads =
-        (feedDownloadStats as any).failedDownloads || 0;
+      const newFeedDownloads = feedDownloadStats.newDownloads || 0;
+      const alreadyDownloadedFeed = feedDownloadStats.alreadyDownloaded || 0;
+      const failedFeedDownloads = feedDownloadStats.failedDownloads || 0;
 
       onLog(
         `  Feed photos download completed: ${newFeedDownloads} new feed photos downloaded`,
@@ -433,19 +394,15 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
         );
       }
     } else {
-      onLog('Step 4: Skipping feed photos download (disabled)', 'info');
+      onLog('Step 3: Skipping feed photos download (disabled)', 'info');
     }
 
-    // Final summary
-    onLog('', 'info'); // Empty line for separation
-    onLog('DOWNLOAD_ALL operation completed successfully!', 'success');
+    // Summary
     onLog(`Summary: ${newDownloads} photos downloaded`, 'info');
-    if (downloadFeed && feedDownloadResult) {
+    if (downloadFeed && feedDownloadResult?.data) {
       const feedDownloadStats = feedDownloadResult.data?.downloadStats || {};
-      const newFeedDownloads = (feedDownloadStats as any).newDownloads || 0;
-      if (newFeedDownloads > 0) {
-        onLog(`📊 Summary: ${newFeedDownloads} feed photos downloaded`, 'info');
-      }
+      const newFeedDownloads = feedDownloadStats.newDownloads || 0;
+      onLog(`Summary: ${newFeedDownloads} feed photos downloaded`, 'info');
     }
 
     return {
@@ -457,6 +414,38 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
         feedDownloads: feedDownloadResult?.data || null,
       },
     };
+  };
+
+  const clearData = async () => {
+    if (!window.electronAPI)
+      return { success: false, error: 'Electron API not available' };
+
+    if (!accountId) {
+      return { success: false, error: 'Account ID is required' };
+    }
+
+    onLog('Clearing account data...', 'info');
+    onLog(`  → Removing JSON files for account: ${accountId}`, 'info');
+
+    try {
+      const result = await window.electronAPI.clearAccountData(
+        accountId.trim()
+      );
+
+      if (result.success) {
+        onLog('Account data cleared successfully', 'success');
+        onLog(`  → Removed ${result.data?.filesRemoved || 0} files`, 'info');
+        return { success: true, data: result.data };
+      } else {
+        onLog(`Failed to clear account data: ${result.error}`, 'error');
+        return { success: false, error: result.error };
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      onLog(`Failed to clear account data: ${errorMessage}`, 'error');
+      return { success: false, error: errorMessage };
+    }
   };
 
   const cancelOperation = async () => {
@@ -473,14 +462,11 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
 
   return (
     <div className="panel">
-      <h2 className="text-2xl font-bold text-terminal-text mb-6 pb-3 border-b-2 border-terminal-border font-mono">
-        ADVANCED_OPTIONS
-      </h2>
-
-      <div className="space-y-6">
+      <h2 className="panel-title font-mono">CONTROLS</h2>
+      <div className="space-y-4">
         {/* Username Search */}
         <div>
-          <label className="form-label font-mono">SEARCH_BY_@USERNAME:</label>
+          <label className="form-label font-mono">SEARCH_BY_USERNAME:</label>
           <input
             type="text"
             onChange={e => handleUsernameSearch(e.target.value)}
@@ -520,14 +506,14 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
           )}
         </div>
 
-        {/* Account ID */}
+        {/* Account ID Input */}
         <div>
-          <label className="form-label font-mono">TARGET_ACCOUNT:</label>
+          <label className="form-label font-mono">ACCOUNT_ID:</label>
           <input
             type="text"
             value={accountId}
             onChange={e => setAccountId(e.target.value)}
-            onBlur={e => lookupAccount(e.target.value)}
+            onBlur={() => lookupAccount(accountId)}
             placeholder="Enter Rec Room account ID"
             className="form-input font-mono w-full"
             disabled={isOperationActive}
@@ -544,25 +530,26 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
           )}
         </div>
 
-        {/* RecNet Token */}
+        {/* RecNet Token Input */}
         <div>
           <label className="form-label font-mono">(Bearer) AUTH_TOKEN:</label>
           <input
             type="password"
             value={recNetToken}
             onChange={e => setRecNetToken(e.target.value)}
-            placeholder="Enter RecNet token for higher rate limits"
+            placeholder="Enter rec.net token for higher rate limits"
             className="form-input font-mono w-full"
             disabled={isOperationActive}
           />
-          <p className="text-sm text-terminal-textMuted mt-1 font-mono">
-            &gt; Optional: Higher rate limits
+          <p className="text-sm text-terminal-textMuted mt-2 font-mono text-center">
+            &gt; If you enter your authentication token, the app will be able to
+            fetch public, private, and unlisted photos.
           </p>
         </div>
 
         {/* Options */}
         <div className="space-y-3">
-          <label className="flex items-center space-x-3 cursor-pointer">
+          <label className="flex items-center gap-3">
             <input
               type="checkbox"
               checked={incremental}
@@ -575,7 +562,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
             </span>
           </label>
 
-          <label className="flex items-center space-x-3 cursor-pointer">
+          <label className="flex items-center gap-3">
             <input
               type="checkbox"
               checked={downloadFeed}
@@ -600,7 +587,23 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
             DOWNLOAD_ALL
           </button>
           <p className="text-sm text-terminal-textMuted mt-2 font-mono text-center">
-            &gt; Collects metadata first, then downloads all photos
+            &gt; Collects photo metadata first, then downloads all photos. This
+            is done in a gentle way as to avoid a potential 24 hour IP bans.
+          </p>
+        </div>
+
+        {/* Clear Data Button */}
+        <div>
+          <button
+            onClick={() => handleOperation(clearData, 'Clear Data')}
+            disabled={isOperationActive || !accountId}
+            className="btn w-full flex items-center justify-center gap-2 font-mono text-sm py-2 bg-transparent text-red-500 border border-red-500 hover:bg-red-500 hover:text-white transition-colors"
+          >
+            <Trash2 size={16} />
+            CLEAR_ACCOUNT_DATA
+          </button>
+          <p className="text-sm text-terminal-textMuted mt-1 font-mono text-center">
+            &gt; Removes all JSON metadata files for this account
           </p>
         </div>
 

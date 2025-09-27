@@ -232,3 +232,19 @@ ipcMain.handle(
     }
   }
 );
+
+// Clear account data
+ipcMain.handle(
+  'clear-account-data',
+  async (
+    event: IpcMainInvokeEvent,
+    accountId: string
+  ): Promise<ApiResponse<{ filesRemoved: number }>> => {
+    try {
+      const result = await recNetService.clearAccountData(accountId);
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);

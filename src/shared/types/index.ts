@@ -147,6 +147,9 @@ export interface ElectronAPI {
   ) => void;
   lookupAccount: (accountId: string) => Promise<ApiResponse<AccountInfo[]>>;
   searchAccounts: (username: string) => Promise<ApiResponse<AccountInfo[]>>;
+  clearAccountData: (
+    accountId: string
+  ) => Promise<ApiResponse<{ filesRemoved: number }>>;
 }
 
 declare global {
