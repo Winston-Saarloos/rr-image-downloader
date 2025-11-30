@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, Settings as SettingsIcon } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { RecNetSettings } from '../../shared/types';
 
 interface SettingsPanelProps {
@@ -35,54 +39,91 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  const handleDelayChange = async (value: number) => {
-    await onUpdateSettings({ interPageDelayMs: value });
+  const handleDelayChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseInt(e.target.value);
+    if (!isNaN(value)) {
+      await onUpdateSettings({ interPageDelayMs: value });
+    }
+  };
+
+  const handleMaxPhotosChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.trim();
+    if (value === '') {
+      await onUpdateSettings({ maxPhotosToDownload: undefined });
+    } else {
+      const numValue = parseInt(value);
+      if (!isNaN(numValue) && numValue > 0) {
+        await onUpdateSettings({ maxPhotosToDownload: numValue });
+      }
+    }
   };
 
   return (
-    <div className="panel">
-      <h2 className="text-2xl font-bold text-terminal-text mb-6 pb-3 border-b-2 border-terminal-border font-mono">
-        SYSTEM_CONFIG
-      </h2>
-
-      <div className="space-y-6">
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <SettingsIcon className="h-5 w-5" />
+          Settings
+        </CardTitle>
+        <CardDescription>
+          Configure output path and request delays
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
         {/* Output Folder */}
-        <div>
-          <label className="form-label font-mono">OUTPUT_PATH:</label>
-          <div className="flex gap-3">
-            <input
+        <div className="space-y-2">
+          <Label htmlFor="output-path">Output Path</Label>
+          <div className="flex gap-2">
+            <Input
+              id="output-path"
               type="text"
               value={settings.outputRoot}
               readOnly
-              className="form-input flex-1 bg-terminal-bg font-mono"
+              className="flex-1"
             />
-            <button
+            <Button
               onClick={handleSelectFolder}
               disabled={isSelectingFolder}
-              className="btn btn-primary flex items-center gap-2 font-mono"
+              variant="outline"
+              size="icon"
             >
-              <FolderOpen size={16} />
-              {isSelectingFolder ? 'SELECTING...' : 'BROWSE'}
-            </button>
+              <FolderOpen className="h-4 w-4" />
+            </Button>
           </div>
         </div>
 
         {/* Delay Between Pages */}
-        <div>
-          <label className="form-label font-mono">REQUEST_DELAY:</label>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="request-delay">Request Delay (ms)</Label>
+          <Input
+            id="request-delay"
             type="number"
             value={settings.interPageDelayMs}
-            onChange={e => handleDelayChange(parseInt(e.target.value))}
+            onChange={handleDelayChange}
             min="0"
             max="5000"
-            className="form-input font-mono"
           />
-          <p className="text-sm text-terminal-textMuted mt-1 font-mono">
-            &gt; Milliseconds between requests (minimum 500ms)
+          <p className="text-sm text-muted-foreground">
+            Milliseconds between requests (minimum 500ms recommended)
           </p>
         </div>
-      </div>
-    </div>
+
+        {/* Max Photos to Download (Testing) */}
+        <div className="space-y-2">
+          <Label htmlFor="max-photos">Max Photos to Download (Testing)</Label>
+          <Input
+            id="max-photos"
+            type="number"
+            value={settings.maxPhotosToDownload || ''}
+            onChange={handleMaxPhotosChange}
+            min="1"
+            placeholder="No limit"
+          />
+          <p className="text-sm text-muted-foreground">
+            Limit the number of new photos to download for testing. Leave empty for no limit.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 };

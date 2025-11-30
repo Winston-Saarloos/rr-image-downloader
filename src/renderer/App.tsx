@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { SettingsPanel } from './components/SettingsPanel';
-import { ControlsPanel } from './components/ControlsPanel';
-import { ProgressPanel } from './components/ProgressPanel';
-import { ResultsPanel } from './components/ResultsPanel';
-import { LogPanel } from './components/LogPanel';
+import { Download } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { DownloadPanel } from './components/DownloadPanel';
+import { PhotoViewer } from './components/PhotoViewer';
+import { ProgressDisplay } from './components/ProgressDisplay';
+import { DebugMenu } from './components/DebugMenu';
 import { RecNetSettings, Progress } from '../shared/types';
 
 function App() {
@@ -22,6 +23,9 @@ function App() {
     current: 0,
   });
 
+  const [currentAccountId, setCurrentAccountId] = useState<string>('');
+  const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [logs, setLogs] = useState<
     Array<{
       message: string;
@@ -32,33 +36,52 @@ function App() {
   const [results, setResults] = useState<
     Array<{
       operation: string;
-      data: any;
+      data: unknown;
       type: 'success' | 'error';
       timestamp: string;
     }>
   >([]);
 
   useEffect(() => {
-    // Load settings on app start
     loadSettings();
-
-    // Set up progress monitoring
-    if (window.electronAPI) {
-      window.electronAPI.onProgress((event, progressData) => {
-        setProgress(progressData);
-      });
-    }
+    setupProgressMonitoring();
   }, []);
+
+  useEffect(() => {
+    if (currentAccountId) {
+      loadPhotosForAccount(currentAccountId);
+    }
+  }, [currentAccountId, settings.outputRoot]);
 
   const loadSettings = async () => {
     try {
       if (window.electronAPI) {
         const loadedSettings = await window.electronAPI.getSettings();
         setSettings(loadedSettings);
-        addLog('Settings loaded', 'success');
       }
     } catch (error) {
-      addLog(`Failed to load settings: ${error}`, 'error');
+      // Failed to load settings
+    }
+  };
+
+  const setupProgressMonitoring = () => {
+    if (window.electronAPI) {
+      window.electronAPI.onProgress((event, progressData) => {
+        setProgress(progressData);
+      });
+    }
+  };
+
+  const loadPhotosForAccount = async (accountId: string) => {
+    try {
+      if (window.electronAPI) {
+        const result = await window.electronAPI.loadPhotos(accountId);
+        if (result.success && result.data) {
+          // Photos loaded successfully
+        }
+      }
+    } catch (error) {
+      // Failed to load photos
     }
   };
 
@@ -85,7 +108,7 @@ function App() {
 
   const addResult = (
     operation: string,
-    data: any,
+    data: unknown,
     type: 'success' | 'error'
   ) => {
     const timestamp = new Date().toLocaleString();
@@ -97,48 +120,181 @@ function App() {
 
   const clearLogs = () => {
     setLogs([]);
-    addLog('Log cleared', 'info');
     setResults([]);
   };
 
+  const handleDownload = async (username: string, token: string, filePath: string) => {
+    if (!username.trim() || !filePath.trim()) {
+      return;
+    }
+
+    setIsDownloading(true);
+    addLog(`Starting download for username: ${username}`, 'info');
+    setProgress({
+      isRunning: true,
+      currentStep: 'Starting download...',
+      progress: 0,
+      total: 0,
+      current: 0,
+    });
+
+    try {
+      // Update settings with new file path
+      if (window.electronAPI) {
+        await window.electronAPI.updateSettings({ outputRoot: filePath });
+        setSettings((prev) => ({ ...prev, outputRoot: filePath }));
+        addLog(`Output path set to: ${filePath}`, 'info');
+
+        // Search for account by username
+        addLog(`Searching for account: ${username}`, 'info');
+        const searchResult = await window.electronAPI.searchAccounts(username);
+        if (!searchResult.success || !searchResult.data || searchResult.data.length === 0) {
+          throw new Error('Account not found');
+        }
+
+        const account = searchResult.data[0];
+        const accountId = account.accountId.toString();
+        setCurrentAccountId(accountId);
+        addLog(`Found account: ${account.displayName} (ID: ${accountId})`, 'success');
+
+        // Step 1: Collect photos metadata
+        addLog('Step 1: Collecting photos metadata...', 'info');
+        const collectResult = await window.electronAPI.collectPhotos({
+          accountId,
+          token: token.trim() || undefined,
+        });
+
+        if (!collectResult.success) {
+          throw new Error(collectResult.error || 'Failed to collect photos');
+        }
+
+        const totalPhotos = collectResult.data?.totalPhotos || 0;
+        addLog(`Collected ${totalPhotos} photos metadata`, 'success');
+
+        // Reload photos immediately after collection so they're visible
+        loadPhotosForAccount(accountId);
+
+        // Step 2: Download photos
+        addLog('Step 2: Downloading photos...', 'info');
+        const downloadResult = await window.electronAPI.downloadPhotos({
+          accountId,
+        });
+
+        if (!downloadResult.success) {
+          throw new Error(downloadResult.error || 'Failed to download photos');
+        }
+
+        const downloadStats = downloadResult.data?.downloadStats;
+        if (downloadStats) {
+          addLog(
+            `Download complete: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} failed`,
+            'success'
+          );
+          addResult('Download', downloadResult.data, 'success');
+        }
+
+        // Reload photos after download completes
+        setTimeout(() => {
+          loadPhotosForAccount(accountId);
+        }, 1000);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Download failed';
+      addLog(`Download failed: ${errorMessage}`, 'error');
+      addResult('Download', { error: errorMessage }, 'error');
+    } finally {
+      setIsDownloading(false);
+      setProgress({
+        isRunning: false,
+        currentStep: 'Complete',
+        progress: 100,
+        total: 0,
+        current: 0,
+      });
+      // Clear currentAccountId after a delay to allow PhotoViewer to manage its own selection
+      // This allows users to switch between accounts after download completes
+      setTimeout(() => {
+        setCurrentAccountId('');
+      }, 2000);
+    }
+  };
+
+  const handleCancelDownload = async () => {
+    try {
+      if (window.electronAPI) {
+        const cancelled = await window.electronAPI.cancelOperation();
+        if (cancelled) {
+          addLog('Download cancelled', 'warning');
+          setIsDownloading(false);
+          setProgress({
+            isRunning: false,
+            currentStep: 'Cancelled',
+            progress: 0,
+            total: 0,
+            current: 0,
+          });
+        }
+      }
+    } catch (error) {
+      addLog(`Failed to cancel download: ${error}`, 'error');
+    }
+  };
+
   return (
-    <div className="h-screen bg-terminal-bg overflow-hidden">
-      <div className="container mx-auto px-4 py-6 max-w-6xl h-full overflow-y-auto">
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto px-4 py-6 max-w-7xl">
         {/* Header */}
-        <header className="text-left mb-8">
-          <h1 className="text-4xl md:text-5xl font-bold text-terminal-text mb-3 font-mono">
-            &gt;_ PHOTO_DOWNLOADER.EXE
-          </h1>
-          <p className="text-xl text-terminal-textDim font-mono mb-4">v1.0</p>
-
-          {/* Log Panel - Full Width */}
-          <LogPanel logs={logs} onClearLogs={clearLogs} />
-        </header>
-        {/* Main Content */}
-        <main className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left Column */}
-            <div className="space-y-6">
-              <SettingsPanel
-                settings={settings}
-                onUpdateSettings={updateSettings}
-                onLog={addLog}
-              />
-
-              <ControlsPanel
-                onLog={addLog}
-                onResult={addResult}
-                onProgressChange={setProgress}
-              />
+        <header className="mb-8">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <h1 className="text-4xl font-bold">Photo Viewer</h1>
             </div>
-
-            {/* Right Column */}
-            <div className="space-y-6">
-              <ProgressPanel progress={progress} settings={settings} />
-              <ResultsPanel results={results} />
-            </div>
+            <Button onClick={() => setDownloadPanelOpen(true)}>
+              <Download className="mr-2 h-4 w-4" />
+              Download
+            </Button>
           </div>
-        </main>
+          <p className="text-muted-foreground">
+            View, organize, and download your photos
+          </p>
+        </header>
+
+        {/* Download Panel Modal */}
+        <DownloadPanel
+          open={downloadPanelOpen}
+          onOpenChange={setDownloadPanelOpen}
+          onDownload={handleDownload}
+          onCancel={handleCancelDownload}
+          isDownloading={isDownloading}
+          settings={settings}
+        />
+
+        {/* Progress Display */}
+        <div className="mb-6">
+          <ProgressDisplay progress={progress} />
+        </div>
+
+        {/* Photo Viewer */}
+        <PhotoViewer
+          filePath={settings.outputRoot}
+          accountId={isDownloading ? currentAccountId : undefined}
+          isDownloading={isDownloading}
+          onAccountChange={(accountId) => {
+            // Only update if not downloading (to avoid conflicts)
+            if (!isDownloading) {
+              setCurrentAccountId(accountId || '');
+            }
+          }}
+        />
+
+        {/* Debug Menu */}
+        <DebugMenu
+          settings={settings}
+          onUpdateSettings={updateSettings}
+          logs={logs}
+          results={results}
+          onClearLogs={clearLogs}
+        />
       </div>
     </div>
   );

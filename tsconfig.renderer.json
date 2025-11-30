@@ -6,11 +6,17 @@
     "module": "esnext",
     "moduleResolution": "node",
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
   "include": [
     "src/renderer/**/*",
     "src/shared/**/*",
+    "src/components/**/*",
+    "src/lib/**/*",
     "src/index.tsx",
     "src/index.css"
   ],

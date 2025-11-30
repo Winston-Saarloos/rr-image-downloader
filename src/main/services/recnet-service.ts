@@ -348,6 +348,38 @@ export class RecNetService extends EventEmitter {
 
       const totalNewPhotosAdded = all.length - existingPhotoCount;
 
+      // Fetch and save bulk account and room data (from photos + any existing feed)
+      try {
+        this.updateProgress('Fetching account and room data...', 0, 0, 0);
+
+        let combinedForMetadata: Photo[] = [...all];
+        const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
+        if (await fs.pathExists(feedJsonPath)) {
+          try {
+            const feedPhotos: Photo[] = await fs.readJson(feedJsonPath);
+            combinedForMetadata = combinedForMetadata.concat(feedPhotos);
+          } catch (error) {
+            console.log(
+              `Warning: Failed to read feed photos for metadata merge: ${(error as Error).message}`
+            );
+          }
+        }
+
+        const bulkData = await this.fetchAndSaveBulkData(
+          accountId,
+          combinedForMetadata,
+          token
+        );
+        console.log(
+          `Fetched ${bulkData.accountsFetched} accounts and ${bulkData.roomsFetched} rooms`
+        );
+      } catch (error) {
+        console.log(
+          `Warning: Failed to fetch bulk data: ${(error as Error).message}`
+        );
+        // Don't fail the entire operation if bulk fetch fails
+      }
+
       this.setOperationComplete();
 
       return {
@@ -564,6 +596,37 @@ export class RecNetService extends EventEmitter {
 
       const totalNewPhotosAdded = all.length - existingPhotoCount;
 
+      // Fetch and save bulk account and room data (feed + any existing photos)
+      try {
+        this.updateProgress('Fetching feed account and room data...', 0, 0, 0);
+
+        let combinedForMetadata: Photo[] = [...all];
+        const photosJsonPath = path.join(accountDir, `${accountId}_photos.json`);
+        if (await fs.pathExists(photosJsonPath)) {
+          try {
+            const photoMetadata: Photo[] = await fs.readJson(photosJsonPath);
+            combinedForMetadata = combinedForMetadata.concat(photoMetadata);
+          } catch (error) {
+            console.log(
+              `Warning: Failed to read photos metadata for feed merge: ${(error as Error).message}`
+            );
+          }
+        }
+
+        const bulkData = await this.fetchAndSaveBulkData(
+          accountId,
+          combinedForMetadata,
+          token
+        );
+        console.log(
+          `Fetched (feed) ${bulkData.accountsFetched} accounts and ${bulkData.roomsFetched} rooms`
+        );
+      } catch (error) {
+        console.log(
+          `Warning: Failed to fetch bulk data from feed collection: ${(error as Error).message}`
+        );
+      }
+
       this.setOperationComplete();
 
       return {
@@ -613,12 +676,24 @@ export class RecNetService extends EventEmitter {
 
       const client = this.createHttpClient();
       const totalPhotos = photos.length;
+      const maxPhotosToDownload = this.settings.maxPhotosToDownload;
+      const hasDownloadLimit =
+        typeof maxPhotosToDownload === 'number' && maxPhotosToDownload > 0;
+      let remainingDownloadSlots = hasDownloadLimit
+        ? maxPhotosToDownload
+        : undefined;
       console.log(
         `Starting download of ${totalPhotos} photos from ${jsonPath}`
       );
+      if (hasDownloadLimit && remainingDownloadSlots !== undefined) {
+        console.log(
+          `Limiting downloads to ${remainingDownloadSlots} photos for testing`
+        );
+      }
       let alreadyDownloaded = 0;
       let newDownloads = 0;
       let failedDownloads = 0;
+      let skipped = 0;
       const downloadResults: DownloadResultItem[] = [];
       const rateLimitMs = 1000;
       let processedCount = 0;
@@ -658,6 +733,9 @@ export class RecNetService extends EventEmitter {
         // Check if photo already exists
         if (await fs.pathExists(photoPath)) {
           alreadyDownloaded++;
+          if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
+            remainingDownloadSlots--;
+          }
           downloadResults.push({
             photoId,
             status: 'already_exists_in_photos',
@@ -672,6 +750,9 @@ export class RecNetService extends EventEmitter {
         if (await fs.pathExists(feedPhotoPath)) {
           await fs.copy(feedPhotoPath, photoPath);
           alreadyDownloaded++;
+          if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
+            remainingDownloadSlots--;
+          }
           downloadResults.push({
             photoId,
             status: 'copied_from_feed',
@@ -682,6 +763,22 @@ export class RecNetService extends EventEmitter {
           continue;
         }
 
+        // If we've hit the limit (including existing photos), skip any further downloads
+        if (
+          remainingDownloadSlots !== undefined &&
+          remainingDownloadSlots <= 0
+        ) {
+          skipped++;
+          downloadResults.push({
+            photoId,
+            status: 'skipped_limit_reached',
+            url: photoUrl,
+          });
+          processedCount++;
+          continue;
+        }
+
+        // Check if we've reached the download limit (only for new downloads)
         try {
           const response = await client.get(photoUrl, {
             responseType: 'arraybuffer',
@@ -689,6 +786,9 @@ export class RecNetService extends EventEmitter {
           if (response.status === 200) {
             await fs.writeFile(photoPath, response.data);
             newDownloads++;
+            if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
+              remainingDownloadSlots--;
+            }
             downloadResults.push({
               photoId,
               status: 'downloaded',
@@ -736,7 +836,7 @@ export class RecNetService extends EventEmitter {
         alreadyDownloaded,
         newDownloads,
         failedDownloads,
-        skipped: 0,
+        skipped,
       };
 
       return {
@@ -778,12 +878,24 @@ export class RecNetService extends EventEmitter {
 
       const client = this.createHttpClient();
       const totalPhotos = photos.length;
+      const maxPhotosToDownload = this.settings.maxPhotosToDownload;
+      const hasDownloadLimit =
+        typeof maxPhotosToDownload === 'number' && maxPhotosToDownload > 0;
+      let remainingDownloadSlots = hasDownloadLimit
+        ? maxPhotosToDownload
+        : undefined;
       console.log(
         `Starting download of ${totalPhotos} feed photos from ${feedJsonPath}`
       );
+      if (hasDownloadLimit && remainingDownloadSlots !== undefined) {
+        console.log(
+          `Limiting downloads to ${remainingDownloadSlots} photos for testing`
+        );
+      }
       let alreadyDownloaded = 0;
       let newDownloads = 0;
       let failedDownloads = 0;
+      let skipped = 0;
       const downloadResults: DownloadResultItem[] = [];
       const rateLimitMs = 1000;
       let processedCount = 0;
@@ -823,6 +935,9 @@ export class RecNetService extends EventEmitter {
         // Check if photo already exists
         if (await fs.pathExists(photoPath)) {
           alreadyDownloaded++;
+          if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
+            remainingDownloadSlots--;
+          }
           downloadResults.push({
             photoId,
             status: 'already_exists_in_feed',
@@ -837,11 +952,28 @@ export class RecNetService extends EventEmitter {
         if (await fs.pathExists(regularPhotoPath)) {
           await fs.copy(regularPhotoPath, photoPath);
           alreadyDownloaded++;
+          if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
+            remainingDownloadSlots--;
+          }
           downloadResults.push({
             photoId,
             status: 'copied_from_photos',
             sourcePath: regularPhotoPath,
             destinationPath: photoPath,
+          });
+          processedCount++;
+          continue;
+        }
+
+        if (
+          remainingDownloadSlots !== undefined &&
+          remainingDownloadSlots <= 0
+        ) {
+          skipped++;
+          downloadResults.push({
+            photoId,
+            status: 'skipped_limit_reached',
+            url: photoUrl,
           });
           processedCount++;
           continue;
@@ -854,6 +986,9 @@ export class RecNetService extends EventEmitter {
           if (response.status === 200) {
             await fs.writeFile(photoPath, response.data);
             newDownloads++;
+            if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
+              remainingDownloadSlots--;
+            }
             downloadResults.push({
               photoId,
               status: 'downloaded',
@@ -901,7 +1036,7 @@ export class RecNetService extends EventEmitter {
         alreadyDownloaded,
         newDownloads,
         failedDownloads,
-        skipped: 0,
+        skipped,
       };
 
       return {
@@ -935,6 +1070,232 @@ export class RecNetService extends EventEmitter {
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private extractUniqueIds(photos: Photo[]): {
+    accountIds: Set<string>;
+    roomIds: Set<string>;
+  } {
+    const accountIds = new Set<string>();
+    const roomIds = new Set<string>();
+
+    for (const photo of photos) {
+      // Extract room ID - handle multiple possible field shapes
+      const extended = photo as any;
+      if (extended.Room && typeof extended.Room === 'string') {
+        // Room might be an ID string
+        roomIds.add(extended.Room);
+      } else if (extended.RoomId) {
+        roomIds.add(String(extended.RoomId));
+      } else if (extended.roomId) {
+        roomIds.add(String(extended.roomId));
+      } else if (extended.RoomID) {
+        roomIds.add(String(extended.RoomID));
+      }
+
+      // Extract user IDs - could be in Users array or TaggedUsers array
+      if (extended.Users && Array.isArray(extended.Users)) {
+        for (const userId of extended.Users) {
+          if (userId) {
+            accountIds.add(String(userId));
+          }
+        }
+      }
+      if (extended.TaggedUsers && Array.isArray(extended.TaggedUsers)) {
+        for (const userId of extended.TaggedUsers) {
+          if (userId) {
+            accountIds.add(String(userId));
+          }
+        }
+      }
+      if (extended.TaggedPlayerIds && Array.isArray(extended.TaggedPlayerIds)) {
+        for (const userId of extended.TaggedPlayerIds) {
+          if (userId) {
+            accountIds.add(String(userId));
+          }
+        }
+      }
+      // Also check for creator/owner/account fields commonly present on feed photos
+      if (extended.CreatorId) {
+        accountIds.add(String(extended.CreatorId));
+      }
+      if (extended.AccountId) {
+        accountIds.add(String(extended.AccountId));
+      }
+      if (extended.CreatorAccountId) {
+        accountIds.add(String(extended.CreatorAccountId));
+      }
+      if (extended.PlayerId || extended.playerId) {
+        accountIds.add(String(extended.PlayerId || extended.playerId));
+      }
+      if (extended.OwnerId) {
+        accountIds.add(String(extended.OwnerId));
+      }
+    }
+
+    return { accountIds, roomIds };
+  }
+
+  async fetchBulkAccounts(
+    accountIds: string[],
+    token?: string
+  ): Promise<any[]> {
+    if (accountIds.length === 0) {
+      return [];
+    }
+
+    const client = this.createHttpClient(token);
+    const results: any[] = [];
+
+    // Process in batches to avoid URL length limits
+    const batchSize = 100;
+    for (let i = 0; i < accountIds.length; i += batchSize) {
+      const batch = accountIds.slice(i, i + batchSize);
+      
+      try {
+        const formData = new URLSearchParams();
+        for (const id of batch) {
+          formData.append('id', id);
+        }
+
+        const response = await client.post(
+          'https://accounts.rec.net/account/bulk',
+          formData.toString(),
+          {
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+          }
+        );
+
+        if (response.status === 200 && Array.isArray(response.data)) {
+          results.push(...response.data);
+        }
+      } catch (error) {
+        console.log(
+          `Failed to fetch batch of accounts: ${(error as Error).message}`
+        );
+      }
+
+      // Small delay between batches
+      if (i + batchSize < accountIds.length) {
+        await this.delay(100);
+      }
+    }
+
+    return results;
+  }
+
+  async fetchBulkRooms(
+    roomIds: string[],
+    token?: string
+  ): Promise<any[]> {
+    if (roomIds.length === 0) {
+      return [];
+    }
+
+    const client = this.createHttpClient(token);
+    const results: any[] = [];
+
+    // Process in batches to avoid URL length limits
+    const batchSize = 100;
+    for (let i = 0; i < roomIds.length; i += batchSize) {
+      const batch = roomIds.slice(i, i + batchSize);
+      
+      try {
+        const formData = new URLSearchParams();
+        for (const id of batch) {
+          formData.append('id', id);
+        }
+
+        const response = await client.post(
+          'https://rooms.rec.net/rooms/bulk',
+          formData.toString(),
+          {
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+          }
+        );
+
+        if (response.status === 200 && Array.isArray(response.data)) {
+          results.push(...response.data);
+        }
+      } catch (error) {
+        console.log(`Failed to fetch batch of rooms: ${(error as Error).message}`);
+      }
+
+      // Small delay between batches
+      if (i + batchSize < roomIds.length) {
+        await this.delay(100);
+      }
+    }
+
+    return results;
+  }
+
+  async fetchAndSaveBulkData(
+    accountId: string,
+    photos: Photo[],
+    token?: string
+  ): Promise<{ accountsFetched: number; roomsFetched: number }> {
+    try {
+      this.updateProgress('Extracting IDs from photos...', 0, 0, 0);
+
+      // Extract unique IDs
+      const { accountIds, roomIds } = this.extractUniqueIds(photos);
+      const accountIdsArray = Array.from(accountIds);
+      const roomIdsArray = Array.from(roomIds);
+
+      console.log(
+        `Found ${accountIdsArray.length} unique account IDs and ${roomIdsArray.length} unique room IDs`
+      );
+
+      const accountDir = path.join(this.settings.outputRoot, accountId);
+      await fs.ensureDir(accountDir);
+
+      let accountsFetched = 0;
+      let roomsFetched = 0;
+
+      // Fetch and save account data
+      if (accountIdsArray.length > 0) {
+        this.updateProgress(
+          `Fetching account data (${accountIdsArray.length} accounts)...`,
+          0,
+          0,
+          0
+        );
+        const accountsData = await this.fetchBulkAccounts(accountIdsArray, token);
+        accountsFetched = accountsData.length;
+
+        const accountsJsonPath = path.join(accountDir, `${accountId}_accounts.json`);
+        await fs.writeJson(accountsJsonPath, accountsData, { spaces: 2 });
+        console.log(`Saved ${accountsData.length} accounts to ${accountsJsonPath}`);
+      }
+
+      // Fetch and save room data
+      if (roomIdsArray.length > 0) {
+        this.updateProgress(
+          `Fetching room data (${roomIdsArray.length} rooms)...`,
+          0,
+          0,
+          0
+        );
+        const roomsData = await this.fetchBulkRooms(roomIdsArray, token);
+        roomsFetched = roomsData.length;
+
+        const roomsJsonPath = path.join(accountDir, `${accountId}_rooms.json`);
+        await fs.writeJson(roomsJsonPath, roomsData, { spaces: 2 });
+        console.log(`Saved ${roomsData.length} rooms to ${roomsJsonPath}`);
+      }
+
+      return { accountsFetched, roomsFetched };
+    } catch (error) {
+      console.log(
+        `Failed to fetch and save bulk data: ${(error as Error).message}`
+      );
+      throw error;
+    }
   }
 
   async lookupAccount(accountId: string): Promise<AccountInfo[]> {
@@ -1003,5 +1364,103 @@ export class RecNetService extends EventEmitter {
         `Failed to clear account data: ${(error as Error).message}`
       );
     }
+  }
+
+  async listAvailableAccounts(): Promise<
+    Array<{
+      accountId: string;
+      hasPhotos: boolean;
+      hasFeed: boolean;
+      photoCount: number;
+      feedCount: number;
+    }>
+  > {
+    const accounts: Array<{
+      accountId: string;
+      hasPhotos: boolean;
+      hasFeed: boolean;
+      photoCount: number;
+      feedCount: number;
+    }> = [];
+
+    try {
+      // Ensure output directory exists
+      if (!(await fs.pathExists(this.settings.outputRoot))) {
+        return accounts;
+      }
+
+      // Read all directories in output root
+      const entries = await fs.readdir(this.settings.outputRoot, {
+        withFileTypes: true,
+      });
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) {
+          continue;
+        }
+
+        const accountId = entry.name;
+        const accountDir = path.join(this.settings.outputRoot, accountId);
+        const photosJsonPath = path.join(accountDir, `${accountId}_photos.json`);
+        const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
+
+        let hasPhotos = false;
+        let hasFeed = false;
+        let photoCount = 0;
+        let feedCount = 0;
+
+        // Check for photos metadata
+        if (await fs.pathExists(photosJsonPath)) {
+          try {
+            const photos: Photo[] = await fs.readJson(photosJsonPath);
+            if (Array.isArray(photos) && photos.length > 0) {
+              hasPhotos = true;
+              photoCount = photos.length;
+            }
+          } catch (error) {
+            // Invalid JSON, skip
+            console.log(
+              `Failed to read photos JSON for ${accountId}: ${(error as Error).message}`
+            );
+          }
+        }
+
+        // Check for feed metadata
+        if (await fs.pathExists(feedJsonPath)) {
+          try {
+            const feed: Photo[] = await fs.readJson(feedJsonPath);
+            if (Array.isArray(feed) && feed.length > 0) {
+              hasFeed = true;
+              feedCount = feed.length;
+            }
+          } catch (error) {
+            // Invalid JSON, skip
+            console.log(
+              `Failed to read feed JSON for ${accountId}: ${(error as Error).message}`
+            );
+          }
+        }
+
+        // Only include accounts that have at least one metadata file
+        if (hasPhotos || hasFeed) {
+          accounts.push({
+            accountId,
+            hasPhotos,
+            hasFeed,
+            photoCount,
+            feedCount,
+          });
+        }
+      }
+
+      // Sort by accountId
+      accounts.sort((a, b) => a.accountId.localeCompare(b.accountId));
+    } catch (error) {
+      console.log(
+        `Failed to list available accounts: ${(error as Error).message}`
+      );
+    }
+
+    return accounts;
   }
 }

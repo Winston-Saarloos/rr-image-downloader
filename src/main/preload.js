@@ -39,4 +39,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchAccounts: username => ipcRenderer.invoke('search-accounts', username),
   clearAccountData: accountId =>
     ipcRenderer.invoke('clear-account-data', accountId),
+
+  // Load photos from JSON file
+  loadPhotos: accountId => ipcRenderer.invoke('load-photos', accountId),
+
+  // List available accounts with metadata
+  listAvailableAccounts: () =>
+    ipcRenderer.invoke('list-available-accounts'),
+
+  // Load account data from JSON file
+  loadAccountsData: accountId =>
+    ipcRenderer.invoke('load-accounts-data', accountId),
+
+  // Load room data from JSON file
+  loadRoomsData: accountId => ipcRenderer.invoke('load-rooms-data', accountId),
 });

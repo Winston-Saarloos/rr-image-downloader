@@ -3,6 +3,7 @@ export interface RecNetSettings {
   cdnBase: string;
   globalMaxConcurrentDownloads: number;
   interPageDelayMs: number;
+  maxPhotosToDownload?: number; // Limit for testing - undefined means no limit
 }
 
 export interface Progress {
@@ -18,6 +19,7 @@ export interface Photo {
   ImageName: string;
   sort?: string;
   CreatedAt?: string;
+  localFilePath?: string; // Path to local file on disk (added when loading photos)
   [key: string]: any;
 }
 
@@ -114,6 +116,14 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
+export interface AvailableAccount {
+  accountId: string;
+  hasPhotos: boolean;
+  hasFeed: boolean;
+  photoCount: number;
+  feedCount: number;
+}
+
 export interface ElectronAPI {
   collectPhotos: (params: {
     accountId: string;
@@ -150,6 +160,10 @@ export interface ElectronAPI {
   clearAccountData: (
     accountId: string
   ) => Promise<ApiResponse<{ filesRemoved: number }>>;
+  loadPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
+  listAvailableAccounts: () => Promise<ApiResponse<AvailableAccount[]>>;
+  loadAccountsData: (accountId: string) => Promise<ApiResponse<any[]>>;
+  loadRoomsData: (accountId: string) => Promise<ApiResponse<any[]>>;
 }
 
 declare global {

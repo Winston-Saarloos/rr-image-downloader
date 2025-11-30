@@ -1,24 +1,69 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: ["class"],
   content: ['./src/**/*.{js,jsx,ts,tsx}', './public/index.html'],
-  darkMode: 'class',
   theme: {
+    container: {
+      center: true,
+      padding: "2rem",
+      screens: {
+        "2xl": "1400px",
+      },
+    },
     extend: {
       colors: {
-        // Terminal lime green theme
-        terminal: {
-          bg: '#0a0a0a', // Deep black background
-          surface: '#111111', // Slightly lighter black for panels
-          border: '#1a1a1a', // Dark border
-          text: '#00ff00', // Bright lime green text
-          textDim: '#00cc00', // Dimmed lime green
-          textMuted: '#008800', // Muted lime green
-          accent: '#00ff41', // Matrix green accent
-          warning: '#ffff00', // Yellow warning
-          error: '#ff0000', // Red error
-          success: '#00ff00', // Green success
-          info: '#00ffff', // Cyan info
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
         },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+        // Terminal lime green theme (keeping for compatibility)
+        terminal: {
+          bg: '#0a0a0a',
+          surface: '#111111',
+          border: '#1a1a1a',
+          text: '#00ff00',
+          textDim: '#00cc00',
+          textMuted: '#008800',
+          accent: '#00ff41',
+          warning: '#ffff00',
+          error: '#ff0000',
+          success: '#00ff00',
+          info: '#00ffff',
+        },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
         mono: [
@@ -41,5 +86,5 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [require("tailwindcss-animate")],
 };

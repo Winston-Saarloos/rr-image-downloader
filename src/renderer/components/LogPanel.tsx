@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Terminal } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 
 interface LogEntry {
   message: string;
@@ -99,86 +101,91 @@ export const LogPanel: React.FC<LogPanelProps> = ({ logs, onClearLogs }) => {
   const getLogColor = (type: 'info' | 'success' | 'error' | 'warning') => {
     switch (type) {
       case 'success':
-        return 'text-green-400';
+        return 'text-green-600 dark:text-green-400';
       case 'error':
-        return 'text-red-400';
+        return 'text-red-600 dark:text-red-400';
       case 'warning':
-        return 'text-yellow-400';
+        return 'text-yellow-600 dark:text-yellow-400';
       default:
-        return 'text-blue-400';
+        return 'text-blue-600 dark:text-blue-400';
     }
   };
 
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between mb-6 pb-3 border-b-2 border-terminal-border">
-        <h2 className="text-2xl font-bold text-terminal-text font-mono">
-          TERMINAL_CONSOLE
-        </h2>
-        <div className="flex items-center gap-2">
-          <button
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Terminal className="h-5 w-5" />
+              Console Logs
+            </CardTitle>
+            <CardDescription>
+              View operation logs and messages
+            </CardDescription>
+          </div>
+          <Button
             onClick={onClearLogs}
-            className="btn btn-small flex items-center gap-2 font-mono"
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2"
           >
-            <Trash2 size={14} />
-            CLEAR_CONSOLE
-          </button>
+            <Trash2 className="h-4 w-4" />
+            Clear
+          </Button>
         </div>
-      </div>
-
-      <div
-        className="relative"
-        style={{
-          contain: 'layout style paint',
-          isolation: 'isolate',
-        }}
-      >
+      </CardHeader>
+      <CardContent>
         <div
-          ref={scrollContainerRef}
-          className="bg-terminal-bg border border-terminal-border text-terminal-text rounded-lg p-4 max-h-64 overflow-y-auto font-mono text-sm relative focus:outline-none cursor-pointer"
-          onScroll={handleScroll}
-          onWheel={handleWheel}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          onClick={handleClick}
-          tabIndex={0}
+          className="relative"
           style={{
-            scrollBehavior: 'smooth',
-            overscrollBehavior: 'contain',
+            contain: 'layout style paint',
             isolation: 'isolate',
-            contain: 'strict',
-            height: '230px',
           }}
         >
-          {logs.length === 0 ? (
-            <div className="text-center py-8 text-terminal-textMuted">
-              <p className="text-xs mt-1 font-mono">
-                &gt; Console output will appear here
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-1" style={{ contain: 'layout style' }}>
-              {logs.map((log, index) => (
-                <div
-                  key={index}
-                  className={`log-entry ${log.type} flex items-start gap-2`}
-                >
-                  <span className="text-terminal-textMuted text-xs mt-0.5 flex-shrink-0 font-mono">
-                    &gt; [{log.timestamp}]
-                  </span>
-                  <span
-                    className={`flex-1 break-words font-mono ${getLogColor(
-                      log.type
-                    )}`}
+          <div
+            ref={scrollContainerRef}
+            className="bg-muted border rounded-lg p-4 max-h-64 overflow-y-auto text-sm relative focus:outline-none cursor-pointer font-mono"
+            onScroll={handleScroll}
+            onWheel={handleWheel}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            onClick={handleClick}
+            tabIndex={0}
+            style={{
+              scrollBehavior: 'smooth',
+              overscrollBehavior: 'contain',
+              isolation: 'isolate',
+              contain: 'strict',
+              height: '230px',
+            }}
+          >
+            {logs.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p className="text-sm">
+                  Console output will appear here
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1" style={{ contain: 'layout style' }}>
+                {logs.map((log, index) => (
+                  <div
+                    key={index}
+                    className={`flex items-start gap-2 ${getLogColor(log.type)}`}
                   >
-                    {log.message}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+                    <span className="text-muted-foreground text-xs mt-0.5 flex-shrink-0">
+                      [{log.timestamp}]
+                    </span>
+                    <span className="flex-1 break-words">
+                      {log.message}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 };

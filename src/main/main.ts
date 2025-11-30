@@ -4,8 +4,10 @@ import {
   ipcMain,
   dialog,
   IpcMainInvokeEvent,
+  protocol,
 } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs-extra';
 import { RecNetService } from './services/recnet-service';
 import {
   CollectionResult,
@@ -13,6 +15,7 @@ import {
   RecNetSettings,
   Progress,
   AccountInfo,
+  Photo,
 } from '../shared/types';
 
 // Keep a global reference of the window object
@@ -53,7 +56,7 @@ function createWindow(): void {
       preload: path.join(__dirname, 'preload.js'),
     },
     icon: path.join(__dirname, '../../public/favicon.ico'),
-    title: 'RecNet Photo Downloader',
+    title: 'Rec Room Photo Downloader',
   });
 
   // Load the app
@@ -75,16 +78,51 @@ function createWindow(): void {
   });
 }
 
+// Forward progress events from service to renderer
+function setupProgressForwarding() {
+  if (recNetService && mainWindow && !mainWindow.isDestroyed()) {
+    // Remove any existing listeners to avoid duplicates
+    recNetService.removeAllListeners('progress-update');
+    recNetService.on('progress-update', (progress: Progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('progress-update', progress);
+      }
+    });
+  }
+}
+
+// Register custom protocol for serving local files
+function registerLocalFileProtocol() {
+  protocol.registerFileProtocol('local', (request, callback) => {
+    const filePath = request.url.replace('local://', '');
+    try {
+      // Decode the file path
+      const decodedPath = decodeURIComponent(filePath);
+      callback({ path: decodedPath });
+    } catch (error) {
+      console.error('Error serving local file:', error);
+      callback({ error: -2 }); // FILE_NOT_FOUND
+    }
+  });
+}
+
 // App event handlers
 app.whenReady().then(() => {
+  // Register custom protocol before creating window
+  registerLocalFileProtocol();
+  
   createWindow();
 
   // Initialize RecNet service
   recNetService = new RecNetService();
 
+  // Forward progress events from service to renderer
+  setupProgressForwarding();
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
+      setupProgressForwarding();
     }
   });
 });
@@ -243,6 +281,135 @@ ipcMain.handle(
     try {
       const result = await recNetService.clearAccountData(accountId);
       return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+// Load photos from JSON file, filtering to only include photos that exist on disk
+ipcMain.handle(
+  'load-photos',
+  async (
+    event: IpcMainInvokeEvent,
+    accountId: string
+  ): Promise<ApiResponse<Photo[]>> => {
+    try {
+      const settings = recNetService.getSettings();
+      const accountDir = path.join(settings.outputRoot, accountId);
+      const jsonPath = path.join(accountDir, `${accountId}_photos.json`);
+
+      if (await fs.pathExists(jsonPath)) {
+        const photos: Photo[] = await fs.readJson(jsonPath);
+        
+        // Filter to only include photos that have corresponding image files
+        const photosDir = path.join(accountDir, 'photos');
+        const feedDir = path.join(accountDir, 'feed');
+        
+        const photosWithFiles: Photo[] = [];
+        for (const photo of photos) {
+          if (!photo.Id) {
+            continue;
+          }
+          
+          const photoId = photo.Id.toString();
+          const photoPath = path.join(photosDir, `${photoId}.jpg`);
+          const feedPhotoPath = path.join(feedDir, `${photoId}.jpg`);
+          
+          // Check which file exists and add local file path to photo data
+          let localFilePath: string | undefined;
+          if (await fs.pathExists(photoPath)) {
+            localFilePath = photoPath;
+          } else if (await fs.pathExists(feedPhotoPath)) {
+            localFilePath = feedPhotoPath;
+          }
+          
+          // Include photo if it exists in either photos or feed folder
+          if (localFilePath) {
+            // Add local file path to photo object for use in renderer
+            const photoWithPath = {
+              ...photo,
+              localFilePath: localFilePath,
+            };
+            photosWithFiles.push(photoWithPath);
+          }
+        }
+        
+        return { success: true, data: photosWithFiles };
+      } else {
+        return { success: true, data: [] };
+      }
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+// List available accounts with metadata
+ipcMain.handle(
+  'list-available-accounts',
+  async (): Promise<
+    ApiResponse<
+      Array<{
+        accountId: string;
+        hasPhotos: boolean;
+        hasFeed: boolean;
+        photoCount: number;
+        feedCount: number;
+      }>
+    >
+  > => {
+    try {
+      const accounts = await recNetService.listAvailableAccounts();
+      return { success: true, data: accounts };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+// Load account data from JSON file
+ipcMain.handle(
+  'load-accounts-data',
+  async (
+    event: IpcMainInvokeEvent,
+    accountId: string
+  ): Promise<ApiResponse<any[]>> => {
+    try {
+      const settings = recNetService.getSettings();
+      const accountDir = path.join(settings.outputRoot, accountId);
+      const accountsJsonPath = path.join(accountDir, `${accountId}_accounts.json`);
+
+      if (await fs.pathExists(accountsJsonPath)) {
+        const accountsData: any[] = await fs.readJson(accountsJsonPath);
+        return { success: true, data: accountsData };
+      } else {
+        return { success: true, data: [] };
+      }
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+// Load room data from JSON file
+ipcMain.handle(
+  'load-rooms-data',
+  async (
+    event: IpcMainInvokeEvent,
+    accountId: string
+  ): Promise<ApiResponse<any[]>> => {
+    try {
+      const settings = recNetService.getSettings();
+      const accountDir = path.join(settings.outputRoot, accountId);
+      const roomsJsonPath = path.join(accountDir, `${accountId}_rooms.json`);
+
+      if (await fs.pathExists(roomsJsonPath)) {
+        const roomsData: any[] = await fs.readJson(roomsJsonPath);
+        return { success: true, data: roomsData };
+      } else {
+        return { success: true, data: [] };
+      }
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
