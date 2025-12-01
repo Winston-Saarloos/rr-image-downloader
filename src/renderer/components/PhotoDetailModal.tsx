@@ -26,12 +26,12 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   roomMap = new Map(),
   accountMap = new Map(),
 }) => {
-  if (!photo) return null;
-
   const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl } = usePhotoMetadata(
     roomMap,
     accountMap
   );
+
+  if (!photo) return null;
 
   const extended = photo as ExtendedPhoto;
   const room = getPhotoRoom(photo);

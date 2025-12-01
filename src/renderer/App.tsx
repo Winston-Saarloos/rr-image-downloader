@@ -280,7 +280,7 @@ function App() {
             </div>
           </div>
           <p className="text-muted-foreground">
-            View, organize, and download your photos
+            Download and view your Rec Room photos
           </p>
         </header>
 

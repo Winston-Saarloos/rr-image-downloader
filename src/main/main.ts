@@ -64,7 +64,36 @@ function createWindow(): void {
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000');
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../build/index.html'));
+    // Use app.getAppPath() in production to get the correct app directory
+    const appPath = app.getAppPath();
+    const indexPath = path.join(appPath, 'index.html');
+    console.log('Loading index.html from:', indexPath); // Debug log
+    mainWindow.loadFile(indexPath).catch((error) => {
+      console.error('Error loading index.html:', error);
+      // Fallback: try alternative path
+      if (mainWindow) {
+        const altPath = path.join(__dirname, '../../index.html');
+        console.log('Trying alternative path:', altPath);
+        mainWindow.loadFile(altPath).catch((fallbackError) => {
+          console.error('Fallback path also failed:', fallbackError);
+        });
+      }
+    });
+  }
+
+  // Add error handlers to debug loading issues
+  if (mainWindow) {
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+      console.error('Failed to load:', {
+        errorCode,
+        errorDescription,
+        validatedURL
+      });
+    });
+
+    mainWindow.webContents.on('dom-ready', () => {
+      console.log('DOM ready');
+    });
   }
 
   // Open DevTools in development

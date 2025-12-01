@@ -21,6 +21,16 @@ async function copyElectronFiles() {
       console.log('Copied assets directory');
     }
 
+    // Create package.json in build directory with correct main entry point
+    const packageJson = await fs.readJson('package.json');
+    const { build, ...packageJsonWithoutBuild } = packageJson;
+    const buildPackageJson = {
+      ...packageJsonWithoutBuild,
+      main: 'main/main/main.js',
+    };
+    await fs.writeJson('build/package.json', buildPackageJson, { spaces: 2 });
+    console.log('Created package.json in build directory');
+
     console.log('Electron files copied successfully!');
   } catch (error) {
     console.error('Error copying Electron files:', error);
