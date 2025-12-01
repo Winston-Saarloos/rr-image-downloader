@@ -53,12 +53,8 @@ export const DebugMenu: React.FC<DebugMenuProps> = ({
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Settings className="h-5 w-5" />
               Debug Menu
             </DialogTitle>
-            <DialogDescription>
-              Settings, logs, and operation results
-            </DialogDescription>
           </DialogHeader>
           <div className="space-y-6">
             <SettingsPanel

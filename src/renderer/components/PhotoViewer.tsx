@@ -200,10 +200,14 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     };
   }, [isDownloading, accountId, filePath, loadPhotos, loadRoomData, loadAccountData]);
 
-  const handlePhotoClick = (photo: Photo) => {
+  const handlePhotoClick = useCallback((photo: Photo) => {
     setSelectedPhoto(photo);
     setIsModalOpen(true);
-  };
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setIsModalOpen(false);
+  }, []);
 
   const handleAccountChange = (newAccountId: string) => {
     setSelectedAccountId(newAccountId);
@@ -307,11 +311,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       <PhotoDetailModal
         photo={selectedPhoto}
         open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={handleCloseModal}
         roomMap={roomMap}
         accountMap={accountMap}
       />
     </div>
   );
 };
-

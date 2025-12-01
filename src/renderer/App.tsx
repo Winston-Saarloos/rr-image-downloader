@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { DownloadPanel } from './components/DownloadPanel';
@@ -219,6 +219,16 @@ function App() {
     }
   };
 
+  const handleViewerAccountChange = useCallback(
+    (accountId?: string) => {
+      // Only update if not downloading (to avoid conflicts)
+      if (!isDownloading) {
+        setCurrentAccountId(accountId || '');
+      }
+    },
+    [isDownloading]
+  );
+
   const handleCancelDownload = async () => {
     try {
       if (window.electronAPI) {
@@ -279,12 +289,7 @@ function App() {
           filePath={settings.outputRoot}
           accountId={isDownloading ? currentAccountId : undefined}
           isDownloading={isDownloading}
-          onAccountChange={(accountId) => {
-            // Only update if not downloading (to avoid conflicts)
-            if (!isDownloading) {
-              setCurrentAccountId(accountId || '');
-            }
-          }}
+          onAccountChange={handleViewerAccountChange}
         />
 
         {/* Debug Menu */}
