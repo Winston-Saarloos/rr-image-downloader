@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Filter, User } from 'lucide-react';
+import { Search, Filter, User, ArrowUpDown } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import {
   Select,
@@ -28,6 +28,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [groupBy, setGroupBy] = useState<'none' | 'room' | 'user' | 'date'>('none');
+  const [sortBy, setSortBy] = useState<'oldest-to-newest' | 'newest-to-oldest' | 'most-popular'>('newest-to-oldest');
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -279,6 +280,17 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
             <SelectItem value="date">Group by Date</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={sortBy} onValueChange={(value: 'oldest-to-newest' | 'newest-to-oldest' | 'most-popular') => setSortBy(value)}>
+          <SelectTrigger className="w-full sm:w-[200px]">
+            <ArrowUpDown className="mr-2 h-4 w-4" />
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="oldest-to-newest">Oldest to Newest</SelectItem>
+            <SelectItem value="newest-to-oldest">Newest to Oldest</SelectItem>
+            <SelectItem value="most-popular">Most Popular</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {loadingAccounts ? (
@@ -303,6 +315,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           onPhotoClick={handlePhotoClick}
           groupBy={groupBy}
           searchQuery={searchQuery}
+          sortBy={sortBy}
           roomMap={roomMap}
           accountMap={accountMap}
         />

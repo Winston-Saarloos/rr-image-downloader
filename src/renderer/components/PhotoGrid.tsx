@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { MapPin, Users, Calendar } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/card';
 import { Photo } from '../../shared/types';
@@ -10,6 +10,7 @@ interface PhotoGridProps {
   onPhotoClick: (photo: Photo) => void;
   groupBy?: 'none' | 'room' | 'user' | 'date';
   searchQuery?: string;
+  sortBy?: 'oldest-to-newest' | 'newest-to-oldest' | 'most-popular';
   roomMap?: Map<string, string>;
   accountMap?: Map<string, string>;
 }
@@ -19,6 +20,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   onPhotoClick,
   groupBy = 'none',
   searchQuery = '',
+  sortBy = 'newest-to-oldest',
   roomMap = new Map(),
   accountMap = new Map(),
 }) => {
@@ -27,11 +29,48 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
     accountMap
   );
 
+  // Helper function to get cheers count from a photo
+  const getCheersCount = useCallback((photo: Photo): number => {
+    const extended = photo as ExtendedPhoto;
+    // Try common field names for cheers
+    const cheers = extended.Cheers || extended.cheers || extended.CheerCount || 
+                   extended.cheerCount || extended.CheersCount || extended.cheersCount || 0;
+    return typeof cheers === 'number' ? cheers : 0;
+  }, []);
+
+  // Sort photos based on sortBy option
+  const sortedPhotos = useMemo(() => {
+    const photosCopy = [...photos];
+    
+    switch (sortBy) {
+      case 'oldest-to-newest':
+        return photosCopy.sort((a, b) => {
+          const dateA = a.CreatedAt ? new Date(a.CreatedAt).getTime() : 0;
+          const dateB = b.CreatedAt ? new Date(b.CreatedAt).getTime() : 0;
+          return dateA - dateB;
+        });
+      case 'newest-to-oldest':
+        return photosCopy.sort((a, b) => {
+          const dateA = a.CreatedAt ? new Date(a.CreatedAt).getTime() : 0;
+          const dateB = b.CreatedAt ? new Date(b.CreatedAt).getTime() : 0;
+          return dateB - dateA;
+        });
+      case 'most-popular':
+        return photosCopy.sort((a, b) => {
+          const cheersA = getCheersCount(a);
+          const cheersB = getCheersCount(b);
+          return cheersB - cheersA;
+        });
+      default:
+        return photosCopy;
+    }
+  }, [photos, sortBy, getCheersCount]);
+
   const filteredPhotos = useMemo(() => {
-    if (!searchQuery.trim()) return photos;
+    if (!searchQuery.trim()) return sortedPhotos;
 
     const query = searchQuery.toLowerCase();
-    return photos.filter((photo) => {
+    return sortedPhotos.filter((photo) => {
       const extended = photo as ExtendedPhoto;
       const room = getPhotoRoom(photo).toLowerCase();
       const users = getPhotoUsers(photo).join(' ').toLowerCase();
@@ -42,7 +81,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
         description.includes(query)
       );
     });
-  }, [photos, searchQuery, getPhotoRoom, getPhotoUsers]);
+  }, [sortedPhotos, searchQuery, getPhotoRoom, getPhotoUsers]);
 
   const groupedPhotos = useMemo(() => {
     if (groupBy === 'none') {
