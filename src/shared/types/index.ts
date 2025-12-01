@@ -161,6 +161,7 @@ export interface ElectronAPI {
     accountId: string
   ) => Promise<ApiResponse<{ filesRemoved: number }>>;
   loadPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
+  loadFeedPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
   listAvailableAccounts: () => Promise<ApiResponse<AvailableAccount[]>>;
   loadAccountsData: (accountId: string) => Promise<ApiResponse<any[]>>;
   loadRoomsData: (accountId: string) => Promise<ApiResponse<any[]>>;

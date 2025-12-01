@@ -43,6 +43,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Load photos from JSON file
   loadPhotos: accountId => ipcRenderer.invoke('load-photos', accountId),
 
+  // Load feed photos from JSON file
+  loadFeedPhotos: accountId => ipcRenderer.invoke('load-feed-photos', accountId),
+
   // List available accounts with metadata
   listAvailableAccounts: () =>
     ipcRenderer.invoke('list-available-accounts'),

@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Download } from 'lucide-react';
+import { Download, BarChart3 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { DownloadPanel } from './components/DownloadPanel';
 import { PhotoViewer } from './components/PhotoViewer';
 import { ProgressDisplay } from './components/ProgressDisplay';
 import { DebugMenu } from './components/DebugMenu';
+import { StatsDialog } from './components/StatsDialog';
 import { RecNetSettings, Progress } from '../shared/types';
 
 function App() {
@@ -25,6 +26,7 @@ function App() {
 
   const [currentAccountId, setCurrentAccountId] = useState<string>('');
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
+  const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [logs, setLogs] = useState<
     Array<{
@@ -259,10 +261,20 @@ function App() {
             <div className="flex items-center gap-3">
               <h1 className="text-4xl font-bold">Photo Viewer</h1>
             </div>
-            <Button onClick={() => setDownloadPanelOpen(true)}>
-              <Download className="mr-2 h-4 w-4" />
-              Download
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setStatsDialogOpen(true)}
+                disabled={!currentAccountId}
+              >
+                <BarChart3 className="mr-2 h-4 w-4" />
+                Stats
+              </Button>
+              <Button onClick={() => setDownloadPanelOpen(true)}>
+                <Download className="mr-2 h-4 w-4" />
+                Download
+              </Button>
+            </div>
           </div>
           <p className="text-muted-foreground">
             View, organize, and download your photos
@@ -277,6 +289,14 @@ function App() {
           onCancel={handleCancelDownload}
           isDownloading={isDownloading}
           settings={settings}
+        />
+
+        {/* Stats Dialog */}
+        <StatsDialog
+          open={statsDialogOpen}
+          onOpenChange={setStatsDialogOpen}
+          accountId={currentAccountId}
+          filePath={settings.outputRoot}
         />
 
         {/* Progress Display */}

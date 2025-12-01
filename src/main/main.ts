@@ -345,6 +345,64 @@ ipcMain.handle(
   }
 );
 
+// Load feed photos from JSON file, filtering to only include photos that exist on disk
+ipcMain.handle(
+  'load-feed-photos',
+  async (
+    event: IpcMainInvokeEvent,
+    accountId: string
+  ): Promise<ApiResponse<Photo[]>> => {
+    try {
+      const settings = recNetService.getSettings();
+      const accountDir = path.join(settings.outputRoot, accountId);
+      const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
+
+      if (await fs.pathExists(feedJsonPath)) {
+        const feedPhotos: Photo[] = await fs.readJson(feedJsonPath);
+        
+        // Filter to only include photos that have corresponding image files
+        const feedDir = path.join(accountDir, 'feed');
+        const photosDir = path.join(accountDir, 'photos');
+        
+        const photosWithFiles: Photo[] = [];
+        for (const photo of feedPhotos) {
+          if (!photo.Id) {
+            continue;
+          }
+          
+          const photoId = photo.Id.toString();
+          const feedPhotoPath = path.join(feedDir, `${photoId}.jpg`);
+          const photoPath = path.join(photosDir, `${photoId}.jpg`);
+          
+          // Check which file exists and add local file path to photo data
+          let localFilePath: string | undefined;
+          if (await fs.pathExists(feedPhotoPath)) {
+            localFilePath = feedPhotoPath;
+          } else if (await fs.pathExists(photoPath)) {
+            localFilePath = photoPath;
+          }
+          
+          // Include photo if it exists in either feed or photos folder
+          if (localFilePath) {
+            // Add local file path to photo object for use in renderer
+            const photoWithPath = {
+              ...photo,
+              localFilePath: localFilePath,
+            };
+            photosWithFiles.push(photoWithPath);
+          }
+        }
+        
+        return { success: true, data: photosWithFiles };
+      } else {
+        return { success: true, data: [] };
+      }
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
 // List available accounts with metadata
 ipcMain.handle(
   'list-available-accounts',
