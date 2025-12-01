@@ -37,6 +37,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [roomMap, setRoomMap] = useState<Map<string, string>>(new Map());
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
+  const [downloadedCounts, setDownloadedCounts] = useState<Map<string, number>>(new Map());
 
   // Use propAccountId if provided, otherwise use selectedAccountId
   const accountId = propAccountId || selectedAccountId;
@@ -56,6 +57,22 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
               onAccountChange(firstAccountId);
             }
           }
+          
+          // Load downloaded counts for all accounts
+          const countsMap = new Map<string, number>();
+          for (const account of result.data) {
+            try {
+              const photosResult = await window.electronAPI.loadPhotos(account.accountId);
+              if (photosResult.success && photosResult.data) {
+                countsMap.set(account.accountId, photosResult.data.length);
+              } else {
+                countsMap.set(account.accountId, 0);
+              }
+            } catch (error) {
+              countsMap.set(account.accountId, 0);
+            }
+          }
+          setDownloadedCounts(countsMap);
         }
       }
     } catch (error) {
@@ -143,8 +160,19 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         const result = await window.electronAPI.loadPhotos(accountId);
         if (result.success && result.data) {
           setPhotos(result.data);
+          // Update downloaded count for this account
+          setDownloadedCounts((prev) => {
+            const updated = new Map(prev);
+            updated.set(accountId, result.data!.length);
+            return updated;
+          });
         } else {
           setPhotos([]);
+          setDownloadedCounts((prev) => {
+            const updated = new Map(prev);
+            updated.set(accountId, 0);
+            return updated;
+          });
         }
       } else {
         setPhotos([]);
@@ -218,14 +246,16 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   };
 
   const getAccountDisplayName = (account: AvailableAccount): string => {
-    const parts: string[] = [];
-    if (account.hasPhotos) {
-      parts.push(`${account.photoCount} photos`);
-    }
-    if (account.hasFeed) {
-      parts.push(`${account.feedCount} feed`);
-    }
-    return `${account.accountId} (${parts.join(', ')})`;
+    // Get username from accountMap if available, otherwise use accountId
+    const accountUsername = accountMap.get(account.accountId) || account.accountId;
+    
+    // Get downloaded photo count from the downloadedCounts map, or use photos.length for currently selected account
+    const downloadedPhotoCount = downloadedCounts.get(account.accountId) ?? (account.accountId === accountId ? photos.length : 0);
+    
+    // Total photo count from JSON data
+    const totalPhotoCount = account.photoCount;
+    
+    return `${accountUsername} (${downloadedPhotoCount}/${totalPhotoCount})`;
   };
 
   return (
