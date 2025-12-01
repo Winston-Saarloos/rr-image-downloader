@@ -6,9 +6,11 @@ import { PhotoViewer } from './components/PhotoViewer';
 import { ProgressDisplay } from './components/ProgressDisplay';
 import { DebugMenu } from './components/DebugMenu';
 import { StatsDialog } from './components/StatsDialog';
+import { ThemeToggle } from './components/ThemeToggle';
 import { RecNetSettings, Progress } from '../shared/types';
 
 function App() {
+
   const [settings, setSettings] = useState<RecNetSettings>({
     outputRoot: 'output',
     cdnBase: 'https://img.rec.net/',
@@ -262,6 +264,7 @@ function App() {
               <h1 className="text-4xl font-bold">Photo Viewer</h1>
             </div>
             <div className="flex items-center gap-2">
+              <ThemeToggle />
               <Button
                 variant="outline"
                 onClick={() => setStatsDialogOpen(true)}

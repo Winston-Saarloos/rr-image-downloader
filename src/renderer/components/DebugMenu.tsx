@@ -12,6 +12,7 @@ import { SettingsPanel } from './SettingsPanel';
 import { LogPanel } from './LogPanel';
 import { ResultsPanel } from './ResultsPanel';
 import { RecNetSettings } from '../../shared/types';
+import packageJson from '../../../package.json';
 
 interface DebugMenuProps {
   settings: RecNetSettings;
@@ -52,8 +53,11 @@ export const DebugMenu: React.FC<DebugMenuProps> = ({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              Debug Menu
+            <DialogTitle className="flex items-center justify-between">
+              <span>Debug Menu</span>
+              <span className="text-sm font-normal text-muted-foreground">
+                v{packageJson.version}
+              </span>
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-6">
