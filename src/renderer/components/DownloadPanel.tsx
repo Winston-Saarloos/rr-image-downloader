@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, FolderOpen, Key, HelpCircle, X } from 'lucide-react';
+import { Download, FolderOpen, Key, HelpCircle, X, RefreshCcw } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -15,7 +15,15 @@ import { RecNetSettings } from '../../shared/types';
 interface DownloadPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onDownload: (username: string, token: string, filePath: string) => Promise<void>;
+  onDownload: (
+    username: string,
+    token: string,
+    filePath: string,
+    refreshOptions: {
+      forceAccountsRefresh: boolean;
+      forceRoomsRefresh: boolean;
+    }
+  ) => Promise<void>;
   onCancel?: () => void;
   isDownloading?: boolean;
   settings: RecNetSettings;
@@ -39,6 +47,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const [tokenHelpOpen, setTokenHelpOpen] = useState(false);
   const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
   const [tokenTimeout, setTokenTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [forceAccountsRefresh, setForceAccountsRefresh] = useState(false);
+  const [forceRoomsRefresh, setForceRoomsRefresh] = useState(false);
 
   useEffect(() => {
     setFilePath(settings.outputRoot || '');
@@ -55,6 +65,13 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       }
     };
   }, [searchTimeout, tokenTimeout]);
+
+  useEffect(() => {
+    if (open) {
+      setForceAccountsRefresh(false);
+      setForceRoomsRefresh(false);
+    }
+  }, [open]);
 
   // Re-validate token when accountId changes
   useEffect(() => {
@@ -274,7 +291,10 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     const cleanedToken = cleanToken(token);
     // Close the dialog before starting download
     onOpenChange(false);
-    await onDownload(username, cleanedToken, filePath);
+    await onDownload(username, cleanedToken, filePath, {
+      forceAccountsRefresh,
+      forceRoomsRefresh,
+    });
   };
 
   const isFormValid = username.trim() !== '' && filePath.trim() !== '';
@@ -389,6 +409,35 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             </div>
           </div>
 
+          <div className="space-y-2">
+            <Label>Metadata Refresh</Label>
+            <p className="text-sm text-muted-foreground">
+              User and room details are reused when available. Toggle below to force a fresh download.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={forceAccountsRefresh ? 'destructive' : 'outline'}
+                onClick={() => setForceAccountsRefresh(value => !value)}
+                disabled={isDownloading}
+                className="justify-start"
+              >
+                <RefreshCcw className="mr-2 h-4 w-4" />
+                {forceAccountsRefresh ? 'Force user data refresh' : 'Use cached user data'}
+              </Button>
+              <Button
+                type="button"
+                variant={forceRoomsRefresh ? 'destructive' : 'outline'}
+                onClick={() => setForceRoomsRefresh(value => !value)}
+                disabled={isDownloading}
+                className="justify-start"
+              >
+                <RefreshCcw className="mr-2 h-4 w-4" />
+                {forceRoomsRefresh ? 'Force room data refresh' : 'Use cached room data'}
+              </Button>
+            </div>
+          </div>
+
           <div className="flex gap-2">
             <Button
               onClick={handleDownload}
@@ -446,6 +495,3 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     </Dialog>
   );
 };
-
-
-

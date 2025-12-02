@@ -25,12 +25,16 @@ let recNetService: RecNetService;
 interface CollectPhotosParams {
   accountId: string;
   token?: string;
+  forceAccountsRefresh?: boolean;
+  forceRoomsRefresh?: boolean;
 }
 
 interface CollectFeedPhotosParams {
   accountId: string;
   token?: string;
   incremental?: boolean;
+  forceAccountsRefresh?: boolean;
+  forceRoomsRefresh?: boolean;
 }
 
 interface DownloadPhotosParams {
@@ -172,7 +176,11 @@ ipcMain.handle(
     try {
       const result = await recNetService.collectPhotos(
         params.accountId,
-        params.token
+        params.token,
+        {
+          forceAccountsRefresh: params.forceAccountsRefresh,
+          forceRoomsRefresh: params.forceRoomsRefresh,
+        }
       );
       return { success: true, data: result };
     } catch (error) {
@@ -191,7 +199,11 @@ ipcMain.handle(
       const result = await recNetService.collectFeedPhotos(
         params.accountId,
         params.token,
-        params.incremental ?? true
+        params.incremental ?? true,
+        {
+          forceAccountsRefresh: params.forceAccountsRefresh,
+          forceRoomsRefresh: params.forceRoomsRefresh,
+        }
       );
       return { success: true, data: result };
     } catch (error) {

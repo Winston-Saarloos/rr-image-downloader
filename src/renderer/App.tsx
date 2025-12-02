@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Download, BarChart3 } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Download, BarChart3, ArrowUp } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { DownloadPanel } from './components/DownloadPanel';
 import { PhotoViewer } from './components/PhotoViewer';
@@ -7,7 +7,7 @@ import { ProgressDisplay } from './components/ProgressDisplay';
 import { DebugMenu } from './components/DebugMenu';
 import { StatsDialog } from './components/StatsDialog';
 import { ThemeToggle } from './components/ThemeToggle';
-import { RecNetSettings, Progress } from '../shared/types';
+import { RecNetSettings, Progress, BulkDataRefreshOptions } from '../shared/types';
 
 function App() {
 
@@ -30,6 +30,14 @@ function App() {
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [headerMode, setHeaderMode] = useState<'full' | 'compact' | 'hidden'>(
+    'full'
+  );
+  const [hasScrolledDown, setHasScrolledDown] = useState(false);
+  const [showProgressPanel, setShowProgressPanel] = useState(true);
+  const [hasScrolledPhotos, setHasScrolledPhotos] = useState(false);
+  const scrollPositionRef = useRef(0);
+  const photoScrollRef = useRef<HTMLDivElement | null>(null);
   const [logs, setLogs] = useState<
     Array<{
       message: string;
@@ -50,6 +58,12 @@ function App() {
     loadSettings();
     setupProgressMonitoring();
   }, []);
+
+  useEffect(() => {
+    if (progress.isRunning) {
+      setShowProgressPanel(true);
+    }
+  }, [progress.isRunning]);
 
   useEffect(() => {
     if (currentAccountId) {
@@ -127,10 +141,22 @@ function App() {
     setResults([]);
   };
 
-  const handleDownload = async (username: string, token: string, filePath: string) => {
+  const isProgressIdle =
+    !progress.isRunning &&
+    Math.min(Math.max(Math.round(progress.progress ?? 0), 0), 100) === 0 &&
+    (!progress.currentStep || progress.currentStep === 'Ready');
+
+  const handleDownload = async (
+    username: string,
+    token: string,
+    filePath: string,
+    refreshOptions: BulkDataRefreshOptions = {}
+  ) => {
     if (!username.trim() || !filePath.trim()) {
       return;
     }
+    const { forceAccountsRefresh = false, forceRoomsRefresh = false } =
+      refreshOptions;
 
     setIsDownloading(true);
     addLog(`Starting download for username: ${username}`, 'info');
@@ -160,20 +186,48 @@ function App() {
         const accountId = account.accountId.toString();
         setCurrentAccountId(accountId);
         addLog(`Found account: ${account.displayName} (ID: ${accountId})`, 'success');
+        addLog(
+          forceAccountsRefresh
+            ? 'Forcing refresh of user data for this download'
+            : 'Using existing user data if present',
+          'info'
+        );
+        addLog(
+          forceRoomsRefresh
+            ? 'Forcing refresh of room data for this download'
+            : 'Using existing room data if present',
+          'info'
+        );
 
-        // Step 1: Collect photos metadata
+        // Step 1: Collect photos & feed metadata
         addLog('Step 1: Collecting photos metadata...', 'info');
-        const collectResult = await window.electronAPI.collectPhotos({
+        const collectPhotosResult = await window.electronAPI.collectPhotos({
           accountId,
           token: token.trim() || undefined,
+          forceAccountsRefresh,
+          forceRoomsRefresh,
         });
 
-        if (!collectResult.success) {
-          throw new Error(collectResult.error || 'Failed to collect photos');
+        addLog('Step 1b: Collecting feed photos metadata...', 'info');
+        const collectFeedResult = await window.electronAPI.collectFeedPhotos({
+          accountId,
+          token: token.trim() || undefined,
+          incremental: true,
+          forceAccountsRefresh,
+          forceRoomsRefresh,
+        });
+
+        if (!collectPhotosResult.success) {
+          throw new Error(collectPhotosResult.error || 'Failed to collect photos');
+        }
+        if (!collectFeedResult.success) {
+          throw new Error(collectFeedResult.error || 'Failed to collect feed photos');
         }
 
-        const totalPhotos = collectResult.data?.totalPhotos || 0;
+        const totalPhotos = collectPhotosResult.data?.totalPhotos || 0;
         addLog(`Collected ${totalPhotos} photos metadata`, 'success');
+        const totalFeedPhotos = collectFeedResult.data?.totalPhotos || 0;
+        addLog(`Collected ${totalFeedPhotos} feed photos metadata`, 'success');
 
         // Reload photos immediately after collection so they're visible
         loadPhotosForAccount(accountId);
@@ -197,6 +251,25 @@ function App() {
           addResult('Download', downloadResult.data, 'success');
         }
 
+        // Step 3: Download feed photos
+        addLog('Step 3: Downloading feed photos...', 'info');
+        const downloadFeedResult = await window.electronAPI.downloadFeedPhotos({
+          accountId,
+        });
+
+        if (!downloadFeedResult.success) {
+          throw new Error(downloadFeedResult.error || 'Failed to download feed photos');
+        }
+
+        const downloadFeedStats = downloadFeedResult.data?.downloadStats;
+        if (downloadFeedStats) {
+          addLog(
+            `Feed download complete: ${downloadFeedStats.newDownloads} new, ${downloadFeedStats.alreadyDownloaded} existing, ${downloadFeedStats.failedDownloads} failed`,
+            'success'
+          );
+          addResult('Feed Download', downloadFeedResult.data, 'success');
+        }
+
         // Reload photos after download completes
         setTimeout(() => {
           loadPhotosForAccount(accountId);
@@ -215,11 +288,6 @@ function App() {
         total: 0,
         current: 0,
       });
-      // Clear currentAccountId after a delay to allow PhotoViewer to manage its own selection
-      // This allows users to switch between accounts after download completes
-      setTimeout(() => {
-        setCurrentAccountId('');
-      }, 2000);
     }
   };
 
@@ -254,34 +322,73 @@ function App() {
     }
   };
 
+  const handlePhotoScroll = useCallback((scrollTop: number) => {
+    const last = scrollPositionRef.current;
+    const delta = scrollTop - last;
+    const isScrollingDown = delta > 6;
+    const isScrollingUp = delta < -6;
+
+    if (scrollTop < 24) {
+      setHeaderMode('full');
+      setHasScrolledPhotos(false);
+      setHasScrolledDown(false);
+      scrollPositionRef.current = scrollTop;
+      return;
+    }
+
+    setHasScrolledPhotos(true);
+    setHasScrolledDown(true);
+
+    if (isScrollingDown && scrollTop > 48) {
+      setHeaderMode('hidden');
+    } else if (isScrollingUp && hasScrolledDown) {
+      setHeaderMode('compact');
+    }
+
+    scrollPositionRef.current = scrollTop;
+  }, [hasScrolledDown]);
+
+  const scrollPhotosToTop = useCallback(() => {
+    if (photoScrollRef.current) {
+      photoScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-6 max-w-7xl">
+      <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="mb-8">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-3">
-              <h1 className="text-4xl font-bold">Photo Viewer</h1>
-            </div>
-            <div className="flex items-center gap-2">
-              <ThemeToggle />
-              <Button
-                variant="outline"
-                onClick={() => setStatsDialogOpen(true)}
-                disabled={!currentAccountId}
-              >
-                <BarChart3 className="mr-2 h-4 w-4" />
-                Stats
-              </Button>
-              <Button onClick={() => setDownloadPanelOpen(true)}>
-                <Download className="mr-2 h-4 w-4" />
-                Download
-              </Button>
-            </div>
-          </div>
-          <p className="text-muted-foreground">
-            Download and view your Rec Room photos
-          </p>
+        <header
+          className={`sticky top-0 z-20 bg-background/95 backdrop-blur transition-[max-height,transform,opacity] duration-300 overflow-hidden ${
+            headerMode === 'hidden'
+              ? '-translate-y-full opacity-0 pointer-events-none max-h-0'
+              : 'translate-y-0 opacity-100 max-h-[800px]'
+          }`}
+        >
+        {headerMode === 'full' && (
+          <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <h1 className="text-4xl font-bold">Photo Viewer</h1>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ThemeToggle />
+                  <Button
+                    variant="outline"
+                    onClick={() => setStatsDialogOpen(true)}
+                    disabled={!currentAccountId}
+                  >
+                    <BarChart3 className="mr-2 h-4 w-4" />
+                    Stats
+                  </Button>
+                  <Button onClick={() => setDownloadPanelOpen(true)}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Download
+                  </Button>
+                </div>
+              </div>
+          </div>           
+        )}
         </header>
 
         {/* Download Panel Modal */}
@@ -303,17 +410,46 @@ function App() {
         />
 
         {/* Progress Display */}
-        <div className="mb-6">
-          <ProgressDisplay progress={progress} />
-        </div>
+        {!isProgressIdle && showProgressPanel && (
+          <div className="mb-4">
+            <ProgressDisplay
+              progress={progress}
+              onClose={() => setShowProgressPanel(false)}
+            />
+          </div>
+        )}
 
         {/* Photo Viewer */}
-        <PhotoViewer
-          filePath={settings.outputRoot}
-          accountId={isDownloading ? currentAccountId : undefined}
-          isDownloading={isDownloading}
-          onAccountChange={handleViewerAccountChange}
-        />
+        <div className="flex-1 min-h-0 relative">
+          {hasScrolledDown && headerMode === 'hidden' && (
+            <div
+              className="absolute left-0 right-0 top-0 h-3 z-30"
+              onMouseEnter={() => setHeaderMode('compact')}
+            />
+          )}
+          <PhotoViewer
+            filePath={settings.outputRoot}
+            accountId={isDownloading ? currentAccountId : undefined}
+            isDownloading={isDownloading}
+            onAccountChange={handleViewerAccountChange}
+            onScrollPositionChange={handlePhotoScroll}
+            scrollContainerRef={photoScrollRef}
+            headerMode={headerMode}
+          />
+        </div>
+
+        {/* Scroll To Top */}
+        {hasScrolledPhotos && (
+          <Button
+            variant="secondary"
+            size="icon"
+            className="fixed bottom-16 right-4 shadow-lg"
+            onClick={scrollPhotosToTop}
+            aria-label="Scroll to top"
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+        )}
 
         {/* Debug Menu */}
         <DebugMenu

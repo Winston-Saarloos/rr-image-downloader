@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Filter, User, ArrowUpDown } from 'lucide-react';
+import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import {
   Select,
@@ -19,6 +20,8 @@ interface PhotoViewerProps {
   onAccountChange?: (accountId: string | undefined) => void;
 }
 
+type PhotoSource = 'photos' | 'feed';
+
 export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   filePath,
   accountId: propAccountId,
@@ -37,10 +40,28 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [roomMap, setRoomMap] = useState<Map<string, string>>(new Map());
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
-  const [downloadedCounts, setDownloadedCounts] = useState<Map<string, number>>(new Map());
+  const [downloadedCounts, setDownloadedCounts] = useState<
+    Map<string, { photos: number; feed: number }>
+  >(new Map());
+  const [feedPhotos, setFeedPhotos] = useState<Photo[]>([]);
+  const [photoSource, setPhotoSource] = useState<PhotoSource>('photos');
+
+  const updateDownloadedCounts = useCallback(
+    (account: string, counts: Partial<{ photos: number; feed: number }>) => {
+      setDownloadedCounts((prev) => {
+        const current = prev.get(account) || { photos: 0, feed: 0 };
+        const next = new Map(prev);
+        next.set(account, { ...current, ...counts });
+        return next;
+      });
+    },
+    []
+  );
 
   // Use propAccountId if provided, otherwise use selectedAccountId
   const accountId = propAccountId || selectedAccountId;
+  const activePhotos = photoSource === 'feed' ? feedPhotos : photos;
+  const activeViewLabel = photoSource === 'feed' ? 'feed photos' : 'photos';
 
   const loadAvailableAccounts = useCallback(async () => {
     setLoadingAccounts(true);
@@ -53,6 +74,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           if (!selectedAccountId && !propAccountId && result.data.length > 0) {
             const firstAccountId = result.data[0].accountId;
             setSelectedAccountId(firstAccountId);
+            setPhotoSource('photos');
             if (onAccountChange) {
               onAccountChange(firstAccountId);
             }
@@ -137,39 +159,45 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const loadPhotos = useCallback(async () => {
     if (!filePath || !accountId) {
       setPhotos([]);
+      setFeedPhotos([]);
       return;
     }
 
     setLoading(true);
     try {
       if (window.electronAPI) {
-        const result = await window.electronAPI.loadPhotos(accountId);
-        if (result.success && result.data) {
-          setPhotos(result.data);
-          // Update downloaded count for this account
-          setDownloadedCounts((prev) => {
-            const updated = new Map(prev);
-            updated.set(accountId, result.data!.length);
-            return updated;
-          });
+        const [photosResult, feedPhotosResult] = await Promise.all([
+          window.electronAPI.loadPhotos(accountId),
+          window.electronAPI.loadFeedPhotos(accountId),
+        ]);
+
+        if (photosResult.success && photosResult.data) {
+          setPhotos(photosResult.data);
+          updateDownloadedCounts(accountId, { photos: photosResult.data.length });
         } else {
           setPhotos([]);
-          setDownloadedCounts((prev) => {
-            const updated = new Map(prev);
-            updated.set(accountId, 0);
-            return updated;
-          });
+          updateDownloadedCounts(accountId, { photos: 0 });
+        }
+
+        if (feedPhotosResult.success && feedPhotosResult.data) {
+          setFeedPhotos(feedPhotosResult.data);
+          updateDownloadedCounts(accountId, { feed: feedPhotosResult.data.length });
+        } else {
+          setFeedPhotos([]);
+          updateDownloadedCounts(accountId, { feed: 0 });
         }
       } else {
         setPhotos([]);
+        setFeedPhotos([]);
       }
     } catch (error) {
       // Failed to load photos
       setPhotos([]);
+      setFeedPhotos([]);
     } finally {
       setLoading(false);
     }
-  }, [filePath, accountId]);
+  }, [filePath, accountId, updateDownloadedCounts]);
 
   // Load available accounts on mount and when filePath changes
   useEffect(() => {
@@ -182,6 +210,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   useEffect(() => {
     if (propAccountId !== undefined) {
       setSelectedAccountId(propAccountId);
+      setPhotoSource('photos');
     }
   }, [propAccountId]);
 
@@ -192,6 +221,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       loadAccountData();
     } else {
       setPhotos([]);
+      setFeedPhotos([]);
       setRoomMap(new Map());
       setAccountMap(new Map());
     }
@@ -226,6 +256,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
 
   const handleAccountChange = (newAccountId: string) => {
     setSelectedAccountId(newAccountId);
+    setPhotoSource('photos');
     if (onAccountChange) {
       onAccountChange(newAccountId);
     }
@@ -235,13 +266,18 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     // Get username from accountMap if available, otherwise use accountId
     const accountUsername = accountMap.get(account.accountId) || account.accountId;
     
-    // Get downloaded photo count from the downloadedCounts map, or use photos.length for currently selected account
-    const downloadedPhotoCount = downloadedCounts.get(account.accountId) ?? (account.accountId === accountId ? photos.length : 0);
+    const counts =
+      downloadedCounts.get(account.accountId) ||
+      (account.accountId === accountId
+        ? { photos: photos.length, feed: feedPhotos.length }
+        : { photos: 0, feed: 0 });
+
+    const photoLabel = `${counts.photos}/${account.photoCount} photos`;
+    const feedLabel = account.hasFeed
+      ? `${counts.feed}/${account.feedCount} feed`
+      : null;
     
-    // Total photo count from JSON data
-    const totalPhotoCount = account.photoCount;
-    
-    return `${accountUsername} (${downloadedPhotoCount}/${totalPhotoCount})`;
+    return `${accountUsername} (${[photoLabel, feedLabel].filter(Boolean).join(', ')})`;
   };
 
   return (
@@ -273,6 +309,24 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           )}
         </div>
       )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-muted-foreground">Viewing</span>
+        <Button
+          size="sm"
+          variant={photoSource === 'photos' ? 'default' : 'outline'}
+          onClick={() => setPhotoSource('photos')}
+        >
+          My Photos ({photos.length})
+        </Button>
+        <Button
+          size="sm"
+          variant={photoSource === 'feed' ? 'default' : 'outline'}
+          onClick={() => setPhotoSource('feed')}
+        >
+          Feed ({feedPhotos.length})
+        </Button>
+      </div>
 
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
@@ -321,13 +375,13 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         <div className="text-center py-12 text-muted-foreground">
           <p>Loading photos...</p>
         </div>
-      ) : photos.length === 0 ? (
+      ) : activePhotos.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
-          <p>No photos available for this account.</p>
+          <p>No {activeViewLabel} available for this account.</p>
         </div>
       ) : (
         <PhotoGrid
-          photos={photos}
+          photos={activePhotos}
           onPhotoClick={handlePhotoClick}
           groupBy={groupBy}
           searchQuery={searchQuery}

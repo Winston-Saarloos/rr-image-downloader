@@ -13,6 +13,7 @@ import {
   DownloadResultItem,
   DownloadStats,
   AccountInfo,
+  BulkDataRefreshOptions,
 } from '../../shared/types';
 
 interface CurrentOperation {
@@ -133,12 +134,15 @@ export class RecNetService extends EventEmitter {
 
   async collectPhotos(
     accountId: string,
-    token?: string
+    token?: string,
+    options?: BulkDataRefreshOptions
   ): Promise<CollectionResult> {
     this.currentOperation = { cancelled: false };
+    const { forceAccountsRefresh = false, forceRoomsRefresh = false } =
+      options || {};
 
     try {
-      this.updateProgress('Collecting photos...', 0, 0, 0);
+      this.updateProgress('Downloading user photo data...', 0, 0, 0);
 
       const client = this.createHttpClient(token);
       const all: Photo[] = [];
@@ -368,7 +372,8 @@ export class RecNetService extends EventEmitter {
         const bulkData = await this.fetchAndSaveBulkData(
           accountId,
           combinedForMetadata,
-          token
+          token,
+          { forceAccountsRefresh, forceRoomsRefresh }
         );
         console.log(
           `Fetched ${bulkData.accountsFetched} accounts and ${bulkData.roomsFetched} rooms`
@@ -405,12 +410,15 @@ export class RecNetService extends EventEmitter {
   async collectFeedPhotos(
     accountId: string,
     token?: string,
-    incremental = true
+    incremental = true,
+    options?: BulkDataRefreshOptions
   ): Promise<CollectionResult> {
     this.currentOperation = { cancelled: false };
+    const { forceAccountsRefresh = false, forceRoomsRefresh = false } =
+      options || {};
 
     try {
-      this.updateProgress('Collecting feed photos...', 0, 0, 0);
+      this.updateProgress('Downloading user feed data...', 0, 0, 0);
 
       const client = this.createHttpClient(token);
       const accountDir = path.join(this.settings.outputRoot, accountId);
@@ -616,7 +624,8 @@ export class RecNetService extends EventEmitter {
         const bulkData = await this.fetchAndSaveBulkData(
           accountId,
           combinedForMetadata,
-          token
+          token,
+          { forceAccountsRefresh, forceRoomsRefresh }
         );
         console.log(
           `Fetched (feed) ${bulkData.accountsFetched} accounts and ${bulkData.roomsFetched} rooms`
@@ -654,6 +663,7 @@ export class RecNetService extends EventEmitter {
     this.currentOperation = { cancelled: false };
 
     try {
+      this.updateProgress('Downloading user photos...', 0, 0, 0);
       const accountDir = path.join(this.settings.outputRoot, accountId);
       const jsonPath = path.join(accountDir, `${accountId}_photos.json`);
 
@@ -674,14 +684,56 @@ export class RecNetService extends EventEmitter {
         throw new Error('No photos found in the JSON file.');
       }
 
+      const sortedPhotos = [...photos].sort((a, b) => {
+        const timeA = a.CreatedAt ? new Date(a.CreatedAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const timeB = b.CreatedAt ? new Date(b.CreatedAt).getTime() : Number.MAX_SAFE_INTEGER;
+        if (timeA !== timeB) return timeA - timeB;
+        return (a.Id || 0) - (b.Id || 0);
+      });
+
       const client = this.createHttpClient();
-      const totalPhotos = photos.length;
+      const totalPhotos = sortedPhotos.length;
       const maxPhotosToDownload = this.settings.maxPhotosToDownload;
       const hasDownloadLimit =
         typeof maxPhotosToDownload === 'number' && maxPhotosToDownload > 0;
+      const existingPhotoFiles = (await fs.readdir(photosDir)).filter(file =>
+        file.toLowerCase().endsWith('.jpg')
+      ).length;
       let remainingDownloadSlots = hasDownloadLimit
-        ? maxPhotosToDownload
+        ? Math.max(0, maxPhotosToDownload - existingPhotoFiles)
         : undefined;
+      const decrementRemainingSlots = () => {
+        if (remainingDownloadSlots === undefined) return;
+        if (remainingDownloadSlots > 0) {
+          remainingDownloadSlots--;
+        }
+      };
+      if (hasDownloadLimit && remainingDownloadSlots === 0) {
+        console.log(
+          `Skipping photo downloads: limit ${maxPhotosToDownload} reached by existing files (${existingPhotoFiles})`
+        );
+        this.updateProgress(
+          'Download limit reached for photos',
+          totalPhotos,
+          totalPhotos,
+          100
+        );
+        this.setOperationComplete();
+        return {
+          accountId,
+          photosDirectory: photosDir,
+          processedCount: 0,
+          downloadStats: {
+            totalPhotos,
+            alreadyDownloaded: existingPhotoFiles,
+            newDownloads: 0,
+            failedDownloads: 0,
+            skipped: totalPhotos,
+          },
+          downloadResults: [],
+          totalResults: 0,
+        };
+      }
       console.log(
         `Starting download of ${totalPhotos} photos from ${jsonPath}`
       );
@@ -698,9 +750,9 @@ export class RecNetService extends EventEmitter {
       const rateLimitMs = 1000;
       let processedCount = 0;
 
-      this.updateProgress('Downloading photos...', 0, totalPhotos, 0);
+      this.updateProgress('Downloading user photos...', 0, totalPhotos, 0);
 
-      for (const photo of photos) {
+      for (const photo of sortedPhotos) {
         if (this.currentOperation.cancelled) {
           throw new Error('Operation cancelled');
         }
@@ -733,9 +785,6 @@ export class RecNetService extends EventEmitter {
         // Check if photo already exists
         if (await fs.pathExists(photoPath)) {
           alreadyDownloaded++;
-          if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
-            remainingDownloadSlots--;
-          }
           downloadResults.push({
             photoId,
             status: 'already_exists_in_photos',
@@ -750,9 +799,7 @@ export class RecNetService extends EventEmitter {
         if (await fs.pathExists(feedPhotoPath)) {
           await fs.copy(feedPhotoPath, photoPath);
           alreadyDownloaded++;
-          if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
-            remainingDownloadSlots--;
-          }
+          decrementRemainingSlots();
           downloadResults.push({
             photoId,
             status: 'copied_from_feed',
@@ -786,9 +833,7 @@ export class RecNetService extends EventEmitter {
           if (response.status === 200) {
             await fs.writeFile(photoPath, response.data);
             newDownloads++;
-            if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
-              remainingDownloadSlots--;
-            }
+            decrementRemainingSlots();
             downloadResults.push({
               photoId,
               status: 'downloaded',
@@ -857,6 +902,7 @@ export class RecNetService extends EventEmitter {
     this.currentOperation = { cancelled: false };
 
     try {
+      this.updateProgress('Downloading feed photos...', 0, 0, 0);
       const accountDir = path.join(this.settings.outputRoot, accountId);
       const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
@@ -876,14 +922,56 @@ export class RecNetService extends EventEmitter {
         throw new Error('No feed photos found in the JSON file.');
       }
 
+      const sortedPhotos = [...photos].sort((a, b) => {
+        const timeA = a.CreatedAt ? new Date(a.CreatedAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const timeB = b.CreatedAt ? new Date(b.CreatedAt).getTime() : Number.MAX_SAFE_INTEGER;
+        if (timeA !== timeB) return timeA - timeB;
+        return (a.Id || 0) - (b.Id || 0);
+      });
+
       const client = this.createHttpClient();
-      const totalPhotos = photos.length;
+      const totalPhotos = sortedPhotos.length;
       const maxPhotosToDownload = this.settings.maxPhotosToDownload;
       const hasDownloadLimit =
         typeof maxPhotosToDownload === 'number' && maxPhotosToDownload > 0;
+      const existingFeedFiles = (await fs.readdir(feedPhotosDir)).filter(file =>
+        file.toLowerCase().endsWith('.jpg')
+      ).length;
       let remainingDownloadSlots = hasDownloadLimit
-        ? maxPhotosToDownload
+        ? Math.max(0, maxPhotosToDownload - existingFeedFiles)
         : undefined;
+      const decrementRemainingSlots = () => {
+        if (remainingDownloadSlots === undefined) return;
+        if (remainingDownloadSlots > 0) {
+          remainingDownloadSlots--;
+        }
+      };
+      if (hasDownloadLimit && remainingDownloadSlots === 0) {
+        console.log(
+          `Skipping feed photo downloads: limit ${maxPhotosToDownload} reached by existing files (${existingFeedFiles})`
+        );
+        this.updateProgress(
+          'Download limit reached for feed photos',
+          totalPhotos,
+          totalPhotos,
+          100
+        );
+        this.setOperationComplete();
+        return {
+          accountId,
+          feedPhotosDirectory: feedPhotosDir,
+          processedCount: 0,
+          downloadStats: {
+            totalPhotos,
+            alreadyDownloaded: existingFeedFiles,
+            newDownloads: 0,
+            failedDownloads: 0,
+            skipped: totalPhotos,
+          },
+          downloadResults: [],
+          totalResults: 0,
+        };
+      }
       console.log(
         `Starting download of ${totalPhotos} feed photos from ${feedJsonPath}`
       );
@@ -902,7 +990,7 @@ export class RecNetService extends EventEmitter {
 
       this.updateProgress('Downloading feed photos...', 0, totalPhotos, 0);
 
-      for (const photo of photos) {
+      for (const photo of sortedPhotos) {
         if (this.currentOperation.cancelled) {
           throw new Error('Operation cancelled');
         }
@@ -935,9 +1023,6 @@ export class RecNetService extends EventEmitter {
         // Check if photo already exists
         if (await fs.pathExists(photoPath)) {
           alreadyDownloaded++;
-          if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
-            remainingDownloadSlots--;
-          }
           downloadResults.push({
             photoId,
             status: 'already_exists_in_feed',
@@ -952,9 +1037,7 @@ export class RecNetService extends EventEmitter {
         if (await fs.pathExists(regularPhotoPath)) {
           await fs.copy(regularPhotoPath, photoPath);
           alreadyDownloaded++;
-          if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
-            remainingDownloadSlots--;
-          }
+          decrementRemainingSlots();
           downloadResults.push({
             photoId,
             status: 'copied_from_photos',
@@ -986,9 +1069,7 @@ export class RecNetService extends EventEmitter {
           if (response.status === 200) {
             await fs.writeFile(photoPath, response.data);
             newDownloads++;
-            if (remainingDownloadSlots !== undefined && remainingDownloadSlots > 0) {
-              remainingDownloadSlots--;
-            }
+            decrementRemainingSlots();
             downloadResults.push({
               photoId,
               status: 'downloaded',
@@ -1237,15 +1318,20 @@ export class RecNetService extends EventEmitter {
   async fetchAndSaveBulkData(
     accountId: string,
     photos: Photo[],
-    token?: string
+    token?: string,
+    options: BulkDataRefreshOptions = {}
   ): Promise<{ accountsFetched: number; roomsFetched: number }> {
     try {
+      const { forceAccountsRefresh = false, forceRoomsRefresh = false } =
+        options;
       this.updateProgress('Extracting IDs from photos...', 0, 0, 0);
 
       // Extract unique IDs
       const { accountIds, roomIds } = this.extractUniqueIds(photos);
       const accountIdsArray = Array.from(accountIds);
       const roomIdsArray = Array.from(roomIds);
+      this.updateProgress('Grabbing unique accounts', 0, 0, 0);
+      this.updateProgress('Grabbing unique rooms', 0, 0, 0);
 
       console.log(
         `Found ${accountIdsArray.length} unique account IDs and ${roomIdsArray.length} unique room IDs`
@@ -1256,37 +1342,73 @@ export class RecNetService extends EventEmitter {
 
       let accountsFetched = 0;
       let roomsFetched = 0;
+      const accountsJsonPath = path.join(
+        accountDir,
+        `${accountId}_accounts.json`
+      );
+      const roomsJsonPath = path.join(accountDir, `${accountId}_rooms.json`);
+      const accountsFileExists = await fs.pathExists(accountsJsonPath);
+      const roomsFileExists = await fs.pathExists(roomsJsonPath);
 
       // Fetch and save account data
       if (accountIdsArray.length > 0) {
-        this.updateProgress(
-          `Fetching account data (${accountIdsArray.length} accounts)...`,
-          0,
-          0,
-          0
-        );
-        const accountsData = await this.fetchBulkAccounts(accountIdsArray, token);
-        accountsFetched = accountsData.length;
+        this.updateProgress('Checking account cache', 0, accountIdsArray.length, 0);
+        if (accountsFileExists && !forceAccountsRefresh) {
+          console.log(
+            `Account data already exists at ${accountsJsonPath}, skipping fetch (force refresh disabled)`
+          );
+          this.updateProgress(
+            'Using cached account data',
+            accountIdsArray.length,
+            accountIdsArray.length,
+            100
+          );
+        } else {
+          this.updateProgress(
+            `Downloading new account data and updating cache (${accountIdsArray.length} accounts)...`,
+            0,
+            0,
+            0
+          );
+          const accountsData = await this.fetchBulkAccounts(
+            accountIdsArray,
+            token
+          );
+          accountsFetched = accountsData.length;
 
-        const accountsJsonPath = path.join(accountDir, `${accountId}_accounts.json`);
-        await fs.writeJson(accountsJsonPath, accountsData, { spaces: 2 });
-        console.log(`Saved ${accountsData.length} accounts to ${accountsJsonPath}`);
+          await fs.writeJson(accountsJsonPath, accountsData, { spaces: 2 });
+          console.log(
+            `Saved ${accountsData.length} accounts to ${accountsJsonPath}`
+          );
+        }
       }
 
       // Fetch and save room data
       if (roomIdsArray.length > 0) {
-        this.updateProgress(
-          `Fetching room data (${roomIdsArray.length} rooms)...`,
-          0,
-          0,
-          0
-        );
-        const roomsData = await this.fetchBulkRooms(roomIdsArray, token);
-        roomsFetched = roomsData.length;
+        this.updateProgress('Checking rooms cache', 0, roomIdsArray.length, 0);
+        if (roomsFileExists && !forceRoomsRefresh) {
+          console.log(
+            `Room data already exists at ${roomsJsonPath}, skipping fetch (force refresh disabled)`
+          );
+          this.updateProgress(
+            'Using cached room data',
+            roomIdsArray.length,
+            roomIdsArray.length,
+            100
+          );
+        } else {
+          this.updateProgress(
+            `Downloading new rooms data and updating cache (${roomIdsArray.length} rooms)...`,
+            0,
+            0,
+            0
+          );
+          const roomsData = await this.fetchBulkRooms(roomIdsArray, token);
+          roomsFetched = roomsData.length;
 
-        const roomsJsonPath = path.join(accountDir, `${accountId}_rooms.json`);
-        await fs.writeJson(roomsJsonPath, roomsData, { spaces: 2 });
-        console.log(`Saved ${roomsData.length} rooms to ${roomsJsonPath}`);
+          await fs.writeJson(roomsJsonPath, roomsData, { spaces: 2 });
+          console.log(`Saved ${roomsData.length} rooms to ${roomsJsonPath}`);
+        }
       }
 
       return { accountsFetched, roomsFetched };

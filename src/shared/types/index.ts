@@ -6,6 +6,11 @@ export interface RecNetSettings {
   maxPhotosToDownload?: number; // Limit for testing - undefined means no limit
 }
 
+export interface BulkDataRefreshOptions {
+  forceAccountsRefresh?: boolean;
+  forceRoomsRefresh?: boolean;
+}
+
 export interface Progress {
   isRunning: boolean;
   currentStep: string;
@@ -128,12 +133,16 @@ export interface ElectronAPI {
   collectPhotos: (params: {
     accountId: string;
     token?: string;
+    forceAccountsRefresh?: boolean;
+    forceRoomsRefresh?: boolean;
   }) => Promise<ApiResponse<CollectionResult>>;
 
   collectFeedPhotos: (params: {
     accountId: string;
     token?: string;
     incremental?: boolean;
+    forceAccountsRefresh?: boolean;
+    forceRoomsRefresh?: boolean;
   }) => Promise<ApiResponse<CollectionResult>>;
 
   downloadPhotos: (params: {
