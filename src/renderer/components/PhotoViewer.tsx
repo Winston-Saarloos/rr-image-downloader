@@ -57,22 +57,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
               onAccountChange(firstAccountId);
             }
           }
-          
-          // Load downloaded counts for all accounts
-          const countsMap = new Map<string, number>();
-          for (const account of result.data) {
-            try {
-              const photosResult = await window.electronAPI.loadPhotos(account.accountId);
-              if (photosResult.success && photosResult.data) {
-                countsMap.set(account.accountId, photosResult.data.length);
-              } else {
-                countsMap.set(account.accountId, 0);
-              }
-            } catch (error) {
-              countsMap.set(account.accountId, 0);
-            }
-          }
-          setDownloadedCounts(countsMap);
+          // Start downloaded counts at 0; they get updated lazily when a specific account's photos are loaded
+          setDownloadedCounts(new Map());
         }
       }
     } catch (error) {

@@ -328,46 +328,63 @@ ipcMain.handle(
       const accountDir = path.join(settings.outputRoot, accountId);
       const jsonPath = path.join(accountDir, `${accountId}_photos.json`);
 
-      if (await fs.pathExists(jsonPath)) {
-        const photos: Photo[] = await fs.readJson(jsonPath);
-        
-        // Filter to only include photos that have corresponding image files
-        const photosDir = path.join(accountDir, 'photos');
-        const feedDir = path.join(accountDir, 'feed');
-        
-        const photosWithFiles: Photo[] = [];
-        for (const photo of photos) {
-          if (!photo.Id) {
-            continue;
-          }
-          
-          const photoId = photo.Id.toString();
-          const photoPath = path.join(photosDir, `${photoId}.jpg`);
-          const feedPhotoPath = path.join(feedDir, `${photoId}.jpg`);
-          
-          // Check which file exists and add local file path to photo data
-          let localFilePath: string | undefined;
-          if (await fs.pathExists(photoPath)) {
-            localFilePath = photoPath;
-          } else if (await fs.pathExists(feedPhotoPath)) {
-            localFilePath = feedPhotoPath;
-          }
-          
-          // Include photo if it exists in either photos or feed folder
-          if (localFilePath) {
-            // Add local file path to photo object for use in renderer
-            const photoWithPath = {
-              ...photo,
-              localFilePath: localFilePath,
-            };
-            photosWithFiles.push(photoWithPath);
-          }
-        }
-        
-        return { success: true, data: photosWithFiles };
-      } else {
+      if (!(await fs.pathExists(jsonPath))) {
         return { success: true, data: [] };
       }
+
+      const photos: Photo[] = await fs.readJson(jsonPath);
+
+      // Pre-scan directories once to avoid thousands of individual path checks
+      const photosDir = path.join(accountDir, 'photos');
+      const feedDir = path.join(accountDir, 'feed');
+
+      const photoFileIds = new Set<string>();
+      const feedFileIds = new Set<string>();
+
+      if (await fs.pathExists(photosDir)) {
+        const files = await fs.readdir(photosDir);
+        for (const file of files) {
+          const id = path.parse(file).name;
+          if (id) {
+            photoFileIds.add(id);
+          }
+        }
+      }
+
+      if (await fs.pathExists(feedDir)) {
+        const files = await fs.readdir(feedDir);
+        for (const file of files) {
+          const id = path.parse(file).name;
+          if (id) {
+            feedFileIds.add(id);
+          }
+        }
+      }
+
+      const photosWithFiles: Photo[] = [];
+      for (const photo of photos) {
+        if (!photo.Id) {
+          continue;
+        }
+
+        const photoId = photo.Id.toString();
+
+        let localFilePath: string | undefined;
+        if (photoFileIds.has(photoId)) {
+          localFilePath = path.join(photosDir, `${photoId}.jpg`);
+        } else if (feedFileIds.has(photoId)) {
+          localFilePath = path.join(feedDir, `${photoId}.jpg`);
+        }
+
+        if (localFilePath) {
+          photosWithFiles.push({
+            ...photo,
+            localFilePath,
+          });
+        }
+      }
+
+      return { success: true, data: photosWithFiles };
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }

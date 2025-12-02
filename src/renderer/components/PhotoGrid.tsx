@@ -1,4 +1,11 @@
-import React, { useMemo, useCallback } from 'react';
+import React, {
+  useMemo,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { MapPin, Users, Calendar } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/card';
 import { Photo } from '../../shared/types';
@@ -24,10 +31,15 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   roomMap = new Map(),
   accountMap = new Map(),
 }) => {
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl } = usePhotoMetadata(
     roomMap,
     accountMap
   );
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 700 });
+  const [scrollTop, setScrollTop] = useState(0);
+  const rafRef = useRef<number | null>(null);
 
   // Helper function to get cheers count from a photo
   const getCheersCount = useCallback((photo: Photo): number => {
@@ -67,9 +79,9 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   }, [photos, sortBy, getCheersCount]);
 
   const filteredPhotos = useMemo(() => {
-    if (!searchQuery.trim()) return sortedPhotos;
+    if (!deferredSearchQuery.trim()) return sortedPhotos;
 
-    const query = searchQuery.toLowerCase();
+    const query = deferredSearchQuery.toLowerCase();
     return sortedPhotos.filter((photo) => {
       const extended = photo as ExtendedPhoto;
       const room = getPhotoRoom(photo).toLowerCase();
@@ -81,11 +93,11 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
         description.includes(query)
       );
     });
-  }, [sortedPhotos, searchQuery, getPhotoRoom, getPhotoUsers]);
+  }, [sortedPhotos, deferredSearchQuery, getPhotoRoom, getPhotoUsers]);
 
   const groupedPhotos = useMemo(() => {
     if (groupBy === 'none') {
-      return { 'All Photos': filteredPhotos };
+      return null;
     }
 
     const groups: Record<string, Photo[]> = {};
@@ -117,6 +129,121 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
     return groups;
   }, [filteredPhotos, groupBy, getPhotoRoom, getPhotoUsers]);
 
+  // Track container size for responsive virtualization
+  useEffect(() => {
+    const node = scrollContainerRef.current;
+    if (!node) return;
+
+    const updateSize = () => {
+      setContainerSize({
+        width: node.clientWidth,
+        height: node.clientHeight,
+      });
+    };
+
+    updateSize();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateSize();
+    });
+
+    resizeObserver.observe(node);
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  // Track scroll position with rAF to avoid thrashing renders
+  useEffect(() => {
+    const node = scrollContainerRef.current;
+    if (!node) return;
+
+    const handleScroll = () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+      rafRef.current = requestAnimationFrame(() => {
+        setScrollTop(node.scrollTop);
+      });
+    };
+
+    node.addEventListener('scroll', handleScroll);
+    return () => {
+      node.removeEventListener('scroll', handleScroll);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
+
+  const MIN_COLUMN_WIDTH = 240;
+  const ROW_HEIGHT = 340; // approximate card height including metadata text
+  const OVERSCAN_ROWS = 2;
+
+  const columns = useMemo(
+    () => Math.max(1, Math.floor(containerSize.width / MIN_COLUMN_WIDTH)),
+    [containerSize.width]
+  );
+  const totalRows = Math.ceil(filteredPhotos.length / columns);
+  const startRow = Math.max(
+    0,
+    Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS
+  );
+  const endRow = Math.min(
+    totalRows,
+    Math.ceil((scrollTop + containerSize.height) / ROW_HEIGHT) + OVERSCAN_ROWS
+  );
+  const startIndex = startRow * columns;
+  const endIndex = Math.min(filteredPhotos.length, endRow * columns);
+  const virtualPhotos = filteredPhotos.slice(startIndex, endIndex);
+  const paddingTop = startRow * ROW_HEIGHT;
+  const paddingBottom = Math.max(0, (totalRows - endRow) * ROW_HEIGHT);
+
+  const renderVirtualizedGrid = () => (
+    <div className="space-y-4">
+      <div
+        ref={scrollContainerRef}
+        className="max-h-[70vh] overflow-auto"
+      >
+        <div
+          style={{
+            paddingTop,
+            paddingBottom,
+            display: 'grid',
+            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+            gap: '1rem',
+          }}
+        >
+          {virtualPhotos.map((photo, index) => {
+            const room = getPhotoRoom(photo);
+            const users = getPhotoUsers(photo);
+            const imageUrl = getPhotoImageUrl(photo);
+            const formattedDate = photo.CreatedAt
+              ? format(new Date(photo.CreatedAt), 'MMM d, yyyy')
+              : undefined;
+
+            return (
+              <PhotoCard
+                key={`${photo.Id}-${startIndex + index}`}
+                photo={photo}
+                onClick={onPhotoClick}
+                room={room}
+                users={users}
+                imageUrl={imageUrl}
+                formattedDate={formattedDate}
+              />
+            );
+          })}
+        </div>
+      </div>
+      {filteredPhotos.length === 0 && (
+        <div className="text-center py-12 text-muted-foreground">
+          <p>No photos found</p>
+        </div>
+      )}
+    </div>
+  );
+
   const renderGroup = (groupName: string, groupPhotos: Photo[]) => (
     <div key={groupName}>
       {groupBy !== 'none' && (
@@ -147,11 +274,16 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
     </div>
   );
 
+  if (groupBy === 'none') {
+    return renderVirtualizedGrid();
+  }
+
   return (
     <div className="space-y-8">
-      {Object.entries(groupedPhotos).map(([groupName, groupPhotos]) =>
-        renderGroup(groupName, groupPhotos)
-      )}
+      {groupedPhotos &&
+        Object.entries(groupedPhotos).map(([groupName, groupPhotos]) =>
+          renderGroup(groupName, groupPhotos)
+        )}
       {filteredPhotos.length === 0 && (
         <div className="text-center py-12 text-muted-foreground">
           <p>No photos found</p>
