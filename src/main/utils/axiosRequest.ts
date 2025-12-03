@@ -8,6 +8,21 @@ const JSONbigString = JSONbig({ storeAsString: true });
 const httpClient = axios.create({
   transformResponse: [
     function (data) {
+      // If data is binary (ArrayBuffer, Buffer), return it unmodified
+      if (data instanceof ArrayBuffer) {
+        return data;
+      }
+      // Check for Buffer (Node.js global, safe to check with typeof)
+      if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data)) {
+        return data;
+      }
+
+      // If data is not a string, return it as-is (could be object, null, etc.)
+      if (typeof data !== 'string') {
+        return data;
+      }
+
+      // Only try to parse string data as JSON
       try {
         if (data) {
           return JSONbigString.parse(data);
