@@ -20,7 +20,7 @@ export interface Progress {
 }
 
 export interface Photo {
-  Id: number;
+  Id: string;
   ImageName: string;
   sort?: string;
   CreatedAt?: string;
@@ -29,7 +29,7 @@ export interface Photo {
 }
 
 export interface AccountInfo {
-  accountId: number;
+  accountId: string;
   username: string;
   displayName: string;
   displayEmoji: string;

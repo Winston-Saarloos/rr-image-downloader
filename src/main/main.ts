@@ -347,7 +347,8 @@ ipcMain.handle(
         return { success: true, data: [] };
       }
 
-      const photos: Photo[] = await fs.readJson(jsonPath);
+      const rawPhotos: Photo[] = await fs.readJson(jsonPath);
+      const photos = rawPhotos;
 
       // Pre-scan directories once to avoid thousands of individual path checks
       const photosDir = path.join(accountDir, 'photos');
@@ -419,7 +420,7 @@ ipcMain.handle(
       const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
       if (await fs.pathExists(feedJsonPath)) {
-        const feedPhotos: Photo[] = await fs.readJson(feedJsonPath);
+        const feedPhotos = await fs.readJson(feedJsonPath);
 
         // Filter to only include photos that have corresponding image files
         const feedDir = path.join(accountDir, 'feed');
@@ -504,7 +505,10 @@ ipcMain.handle(
 
       if (await fs.pathExists(accountsJsonPath)) {
         const accountsData: any[] = await fs.readJson(accountsJsonPath);
-        return { success: true, data: accountsData };
+        return {
+          success: true,
+          data: accountsData,
+        };
       } else {
         return { success: true, data: [] };
       }

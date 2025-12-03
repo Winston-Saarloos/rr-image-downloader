@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import { AxiosRequestConfig } from 'axios';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { EventEmitter } from 'events';
@@ -15,6 +15,8 @@ import {
   AccountInfo,
   BulkDataRefreshOptions,
 } from '../../shared/types';
+import { GenericResponse } from '../models/GenericResponse';
+import { axiosRequest } from '../utils/axiosRequest';
 
 interface CurrentOperation {
   cancelled: boolean;
@@ -144,7 +146,6 @@ export class RecNetService extends EventEmitter {
     try {
       this.updateProgress('Downloading user photo data...', 0, 0, 0);
 
-      const client = this.createHttpClient(token);
       const all: Photo[] = [];
       let skip = 0;
       let totalFetched = 0;
@@ -174,7 +175,9 @@ export class RecNetService extends EventEmitter {
           `Found old photos file at: ${oldJsonPath}, migrating to: ${jsonPath}`
         );
         const oldData = await fs.readJson(oldJsonPath);
-        await fs.writeJson(jsonPath, oldData, { spaces: 2 });
+        await fs.writeJson(jsonPath, oldData, {
+          spaces: 2,
+        });
         console.log(`Migration completed`);
 
         // Remove the old file after successful migration
@@ -257,13 +260,10 @@ export class RecNetService extends EventEmitter {
           url += `&after=${encodeURIComponent(lastSortValue)}`;
         }
 
-        const response: AxiosResponse<Photo[]> = await client.get(url);
-
-        if (response.status !== 200) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const photos = response.data;
+        const photos = await this.requestOrThrow<Photo[]>(
+          { url, method: 'GET' },
+          token
+        );
         if (!Array.isArray(photos)) {
           throw new Error('Unexpected response format: expected array');
         }
@@ -279,9 +279,10 @@ export class RecNetService extends EventEmitter {
           let shouldAdd = true;
 
           // Check if photo already exists by ID
-          if (photo.Id) {
+          const photoId = this.normalizeId(photo.Id);
+          if (photoId) {
             for (const existingPhoto of all) {
-              if (existingPhoto.Id === photo.Id) {
+              if (this.normalizeId(existingPhoto.Id) === photoId) {
                 shouldAdd = false;
                 break;
               }
@@ -347,7 +348,9 @@ export class RecNetService extends EventEmitter {
       // Save updated collection
       await fs.ensureDir(path.dirname(jsonPath));
       console.log(`Saving photos metadata to: ${jsonPath}`);
-      await fs.writeJson(jsonPath, all, { spaces: 2 });
+      await fs.writeJson(jsonPath, all, {
+        spaces: 2,
+      });
       console.log(`Photos metadata saved successfully`);
 
       const totalNewPhotosAdded = all.length - existingPhotoCount;
@@ -420,7 +423,6 @@ export class RecNetService extends EventEmitter {
     try {
       this.updateProgress('Downloading user feed data...', 0, 0, 0);
 
-      const client = this.createHttpClient(token);
       const accountDir = path.join(this.settings.outputRoot, accountId);
       console.log(`Creating account directory for feed: ${accountDir}`);
       await fs.ensureDir(accountDir);
@@ -527,13 +529,10 @@ export class RecNetService extends EventEmitter {
           accountId
         )}?skip=${skip}&take=${150}&since=${encodeURIComponent(sinceParam)}`;
 
-        const response: AxiosResponse<Photo[]> = await client.get(url);
-
-        if (response.status !== 200) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const photos = response.data;
+        const photos = await this.requestOrThrow<Photo[]>(
+          { url, method: 'GET' },
+          token
+        );
         if (!Array.isArray(photos)) {
           throw new Error('Unexpected response format: expected array');
         }
@@ -547,10 +546,11 @@ export class RecNetService extends EventEmitter {
           }
 
           let shouldAdd = true;
-          if (photo.Id) {
+          const photoId = this.normalizeId(photo.Id);
+          if (photoId) {
             // Check if this photo already exists
             for (const existingPhoto of all) {
-              if (existingPhoto.Id === photo.Id) {
+              if (this.normalizeId(existingPhoto.Id) === photoId) {
                 shouldAdd = false;
                 break;
               }
@@ -600,7 +600,9 @@ export class RecNetService extends EventEmitter {
       }
 
       // Save updated feed collection
-      await fs.writeJson(feedJsonPath, all, { spaces: 2 });
+      await fs.writeJson(feedJsonPath, all, {
+        spaces: 2,
+      });
 
       const totalNewPhotosAdded = all.length - existingPhotoCount;
 
@@ -695,10 +697,9 @@ export class RecNetService extends EventEmitter {
           ? new Date(b.CreatedAt).getTime()
           : Number.MAX_SAFE_INTEGER;
         if (timeA !== timeB) return timeA - timeB;
-        return (a.Id || 0) - (b.Id || 0);
+        return this.compareIds(a.Id, b.Id);
       });
 
-      const client = this.createHttpClient();
       const totalPhotos = sortedPhotos.length;
       const maxPhotosToDownload = this.settings.maxPhotosToDownload;
       const hasDownloadLimit =
@@ -764,16 +765,7 @@ export class RecNetService extends EventEmitter {
           throw new Error('Operation cancelled');
         }
 
-        if (!photo.Id || !photo.ImageName) {
-          downloadResults.push({
-            error: 'missing_photo_data',
-            photo: JSON.stringify(photo),
-          });
-          processedCount++;
-          continue;
-        }
-
-        const photoId = photo.Id.toString();
+        const photoId = this.normalizeId(photo.Id);
         const imageName = photo.ImageName;
         const photoUrl = `https://img.rec.net/${imageName}`;
 
@@ -782,6 +774,7 @@ export class RecNetService extends EventEmitter {
             error: 'invalid_photo_data',
             photoId,
             imageName,
+            photo: JSON.stringify(photo),
           });
           processedCount++;
           continue;
@@ -834,17 +827,20 @@ export class RecNetService extends EventEmitter {
 
         // Check if we've reached the download limit (only for new downloads)
         try {
-          const response = await client.get(photoUrl, {
+          const response = await this.sendRequest<ArrayBuffer>({
+            url: photoUrl,
+            method: 'GET',
             responseType: 'arraybuffer',
           });
-          if (response.status === 200) {
-            await fs.writeFile(photoPath, response.data);
+          if (response.success && response.value) {
+            const data = Buffer.from(response.value);
+            await fs.writeFile(photoPath, data);
             newDownloads++;
             decrementRemainingSlots();
             downloadResults.push({
               photoId,
               status: 'downloaded',
-              size: response.data.length,
+              size: data.length,
               path: photoPath,
               url: photoUrl,
             });
@@ -854,7 +850,7 @@ export class RecNetService extends EventEmitter {
               photoId,
               status: 'failed',
               statusCode: response.status,
-              reason: response.statusText,
+              reason: (response.message || response.error) ?? undefined,
               url: photoUrl,
             });
           }
@@ -937,10 +933,9 @@ export class RecNetService extends EventEmitter {
           ? new Date(b.CreatedAt).getTime()
           : Number.MAX_SAFE_INTEGER;
         if (timeA !== timeB) return timeA - timeB;
-        return (a.Id || 0) - (b.Id || 0);
+        return this.compareIds(a.Id, b.Id);
       });
 
-      const client = this.createHttpClient();
       const totalPhotos = sortedPhotos.length;
       const maxPhotosToDownload = this.settings.maxPhotosToDownload;
       const hasDownloadLimit =
@@ -1006,16 +1001,7 @@ export class RecNetService extends EventEmitter {
           throw new Error('Operation cancelled');
         }
 
-        if (!photo.Id || !photo.ImageName) {
-          downloadResults.push({
-            error: 'missing_photo_data',
-            photo: JSON.stringify(photo),
-          });
-          processedCount++;
-          continue;
-        }
-
-        const photoId = photo.Id.toString();
+        const photoId = this.normalizeId(photo.Id);
         const imageName = photo.ImageName;
         const photoUrl = `https://img.rec.net/${imageName}`;
 
@@ -1024,6 +1010,7 @@ export class RecNetService extends EventEmitter {
             error: 'invalid_photo_data',
             photoId,
             imageName,
+            photo: JSON.stringify(photo),
           });
           processedCount++;
           continue;
@@ -1074,17 +1061,20 @@ export class RecNetService extends EventEmitter {
         }
 
         try {
-          const response = await client.get(photoUrl, {
+          const response = await this.sendRequest<ArrayBuffer>({
+            url: photoUrl,
+            method: 'GET',
             responseType: 'arraybuffer',
           });
-          if (response.status === 200) {
-            await fs.writeFile(photoPath, response.data);
+          if (response.success && response.value) {
+            const data = Buffer.from(response.value);
+            await fs.writeFile(photoPath, data);
             newDownloads++;
             decrementRemainingSlots();
             downloadResults.push({
               photoId,
               status: 'downloaded',
-              size: response.data.length,
+              size: data.length,
               path: photoPath,
               url: photoUrl,
             });
@@ -1094,7 +1084,7 @@ export class RecNetService extends EventEmitter {
               photoId,
               status: 'failed',
               statusCode: response.status,
-              reason: response.statusText,
+              reason: (response.message || response.error) ?? undefined,
               url: photoUrl,
             });
           }
@@ -1145,19 +1135,104 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  private createHttpClient(token?: string): AxiosInstance {
-    const client = axios.create({
-      timeout: 30000,
-      headers: {
-        'User-Agent': 'RecNetPhotoDownloader/1.0',
-      },
-    });
+  private buildRequestConfig(
+    config: AxiosRequestConfig,
+    token?: string
+  ): AxiosRequestConfig {
+    const headers: Record<string, string> = {
+      'User-Agent': 'RecNetPhotoDownloader/1.0',
+      ...((config.headers as Record<string, string>) || {}),
+    };
 
     if (token) {
-      client.defaults.headers.Authorization = `Bearer ${token}`;
+      headers.Authorization = `Bearer ${token}`;
     }
 
-    return client;
+    return {
+      timeout: 30000,
+      ...config,
+      headers,
+    };
+  }
+
+  private async sendRequest<T>(
+    config: AxiosRequestConfig,
+    token?: string
+  ): Promise<GenericResponse<T>> {
+    return axiosRequest<T>(this.buildRequestConfig(config, token));
+  }
+
+  private async requestOrThrow<T>(
+    config: AxiosRequestConfig,
+    token?: string
+  ): Promise<T> {
+    const response = await this.sendRequest<T>(config, token);
+    if (
+      !response.success ||
+      response.value === null ||
+      response.value === undefined
+    ) {
+      const statusText = response.status
+        ? `HTTP ${response.status}`
+        : 'Request failed';
+      const message = response.message || response.error || 'Request failed';
+      throw new Error(`${statusText}: ${message}`);
+    }
+
+    return response.value;
+  }
+
+  private normalizeId(value: unknown): string {
+    if (value === null || value === undefined) {
+      return '';
+    }
+
+    if (typeof value === 'bigint') {
+      return value.toString();
+    }
+
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) {
+        return '';
+      }
+      return Math.trunc(value).toString();
+    }
+
+    if (typeof value === 'string') {
+      return value.trim();
+    }
+
+    return '';
+  }
+
+  private toBigIntSafe(value: unknown): bigint | null {
+    const normalized = this.normalizeId(value);
+    if (!normalized || !/^-?\d+$/.test(normalized)) {
+      return null;
+    }
+
+    try {
+      return BigInt(normalized);
+    } catch {
+      return null;
+    }
+  }
+
+  private compareIds(a: unknown, b: unknown): number {
+    const aBig = this.toBigIntSafe(a);
+    const bBig = this.toBigIntSafe(b);
+
+    if (aBig !== null && bBig !== null) {
+      if (aBig === bBig) return 0;
+      return aBig < bBig ? -1 : 1;
+    }
+
+    const aStr = this.normalizeId(a);
+    const bStr = this.normalizeId(b);
+    if (!aStr && !bStr) return 0;
+    if (!aStr) return -1;
+    if (!bStr) return 1;
+    return aStr.localeCompare(bStr);
   }
 
   private delay(ms: number): Promise<void> {
@@ -1236,7 +1311,6 @@ export class RecNetService extends EventEmitter {
       return [];
     }
 
-    const client = this.createHttpClient(token);
     const results: any[] = [];
 
     // Process in batches to avoid URL length limits
@@ -1250,18 +1324,24 @@ export class RecNetService extends EventEmitter {
           formData.append('id', id);
         }
 
-        const response = await client.post(
-          'https://accounts.rec.net/account/bulk',
-          formData.toString(),
+        const response = await this.sendRequest<any[]>(
           {
+            url: 'https://accounts.rec.net/account/bulk',
+            method: 'POST',
+            data: formData.toString(),
             headers: {
               'Content-Type': 'application/x-www-form-urlencoded',
             },
-          }
+          },
+          token
         );
 
-        if (response.status === 200 && Array.isArray(response.data)) {
-          results.push(...response.data);
+        if (response.success && Array.isArray(response.value)) {
+          results.push(...response.value);
+        } else {
+          console.log(
+            `Failed to fetch batch of accounts: status ${response.status} - ${response.message || response.error}`
+          );
         }
       } catch (error) {
         console.log(
@@ -1283,7 +1363,6 @@ export class RecNetService extends EventEmitter {
       return [];
     }
 
-    const client = this.createHttpClient(token);
     const results: any[] = [];
 
     // Process in batches to avoid URL length limits
@@ -1297,18 +1376,24 @@ export class RecNetService extends EventEmitter {
           formData.append('id', id);
         }
 
-        const response = await client.post(
-          'https://rooms.rec.net/rooms/bulk',
-          formData.toString(),
+        const response = await this.sendRequest<any[]>(
           {
+            url: 'https://rooms.rec.net/rooms/bulk',
+            method: 'POST',
+            data: formData.toString(),
             headers: {
               'Content-Type': 'application/x-www-form-urlencoded',
             },
-          }
+          },
+          token
         );
 
-        if (response.status === 200 && Array.isArray(response.data)) {
-          results.push(...response.data);
+        if (response.success && Array.isArray(response.value)) {
+          results.push(...response.value);
+        } else {
+          console.log(
+            `Failed to fetch batch of rooms: status ${response.status} - ${response.message || response.error}`
+          );
         }
       } catch (error) {
         console.log(
@@ -1437,11 +1522,11 @@ export class RecNetService extends EventEmitter {
 
   async lookupAccount(accountId: string): Promise<AccountInfo[]> {
     try {
-      const client = this.createHttpClient();
-      const response = await client.get(
-        `https://accounts.rec.net/account/bulk?id=${encodeURIComponent(accountId)}`
-      );
-      return response.data;
+      const response = await this.requestOrThrow<AccountInfo[]>({
+        url: `https://accounts.rec.net/account/bulk?id=${encodeURIComponent(accountId)}`,
+        method: 'GET',
+      });
+      return response;
     } catch (error) {
       throw new Error(`Failed to lookup account: ${(error as Error).message}`);
     }
@@ -1449,11 +1534,11 @@ export class RecNetService extends EventEmitter {
 
   async searchAccounts(username: string): Promise<AccountInfo[]> {
     try {
-      const client = this.createHttpClient();
-      const response = await client.get(
-        `https://apim.rec.net/accounts/account/search?name=${encodeURIComponent(username)}`
-      );
-      return response.data;
+      const response = await this.requestOrThrow<AccountInfo[]>({
+        url: `https://apim.rec.net/accounts/account/search?name=${encodeURIComponent(username)}`,
+        method: 'GET',
+      });
+      return response;
     } catch (error) {
       throw new Error(`Failed to search accounts: ${(error as Error).message}`);
     }

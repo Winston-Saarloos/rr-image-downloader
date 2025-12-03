@@ -2,13 +2,13 @@ import { useCallback, useMemo } from 'react';
 import { Photo } from '../../shared/types';
 
 export interface ExtendedPhoto extends Photo {
-  RoomId?: number | string | null;
-  roomId?: number | string | null;
+  RoomId?: string | null;
+  roomId?: string | null;
   Room?: string;
   RoomName?: string;
   Users?: string[];
   TaggedUsers?: string[];
-  TaggedPlayerIds?: number[];
+  TaggedPlayerIds?: string[];
   Description?: string;
 }
 
