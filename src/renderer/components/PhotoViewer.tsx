@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Filter, User, ArrowUpDown } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Search, Filter, ArrowUpDown } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import {
@@ -18,6 +18,10 @@ interface PhotoViewerProps {
   accountId?: string;
   isDownloading?: boolean;
   onAccountChange?: (accountId: string | undefined) => void;
+  onScrollPositionChange?: (scrollTop: number) => void;
+  scrollContainerRef?: React.RefObject<HTMLDivElement>;
+  headerMode?: 'full' | 'compact' | 'hidden';
+  onHeaderInteraction?: () => void;
 }
 
 type PhotoSource = 'photos' | 'feed';
@@ -27,6 +31,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   accountId: propAccountId,
   isDownloading = false,
   onAccountChange,
+  onScrollPositionChange,
+  scrollContainerRef,
+  headerMode = 'full',
 }) => {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,6 +52,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   >(new Map());
   const [feedPhotos, setFeedPhotos] = useState<Photo[]>([]);
   const [photoSource, setPhotoSource] = useState<PhotoSource>('photos');
+  const internalScrollRef = useRef<HTMLDivElement | null>(null);
+  const activeScrollRef = scrollContainerRef ?? internalScrollRef;
+  const isHeaderVisible = headerMode !== 'hidden';
+  const showFullControls = headerMode === 'full';
 
   const updateDownloadedCounts = useCallback(
     (account: string, counts: Partial<{ photos: number; feed: number }>) => {
@@ -281,115 +292,131 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   };
 
   return (
-    <div className="space-y-4">
-      {/* Account Selector */}
-      {availableAccounts.length > 0 && (
-        <div className="flex items-center gap-2">
-          <User className="h-4 w-4 text-muted-foreground" />
-          <Select
-            value={accountId || ''}
-            onValueChange={handleAccountChange}
-            disabled={!!propAccountId}
-          >
-            <SelectTrigger className="w-full sm:w-[250px]">
-              <SelectValue placeholder="Select an account" />
+    <div className="flex h-full flex-col gap-4 overflow-hidden">
+      <div
+        className={`transition-[transform,opacity,max-height] duration-300 bg-background/95 backdrop-blur sticky top-0 z-10 ${
+          isHeaderVisible
+            ? 'translate-y-0 opacity-100 max-h-[600px]'
+            : '-translate-y-full opacity-0 pointer-events-none max-h-0'
+        } px-3 sm:px-4 lg:px-6 py-3 space-y-3`}
+      >
+        {showFullControls && (
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            {availableAccounts.length > 0 && (
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <Select
+                  value={accountId || ''}
+                  onValueChange={handleAccountChange}
+                  disabled={!!propAccountId}
+                >
+                  <SelectTrigger className="w-full sm:w-[250px]">
+                    <SelectValue placeholder="Select an account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableAccounts.map((account) => (
+                      <SelectItem key={account.accountId} value={account.accountId}>
+                        {getAccountDisplayName(account)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {propAccountId && (
+                  <span className="text-sm text-muted-foreground">
+                    (Downloading...)
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3 md:justify-end">
+              <span className="text-sm text-muted-foreground">Viewing</span>
+              <Button
+                size="sm"
+                variant={photoSource === 'photos' ? 'default' : 'outline'}
+                onClick={() => setPhotoSource('photos')}
+              >
+                My Photos ({photos.length})
+              </Button>
+              <Button
+                size="sm"
+                variant={photoSource === 'feed' ? 'default' : 'outline'}
+                onClick={() => setPhotoSource('feed')}
+              >
+                Feed ({feedPhotos.length})
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {(showFullControls || headerMode === 'compact') && (
+          <div className="flex flex-col sm:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search photos..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <Select value={groupBy} onValueChange={(value: 'none' | 'room' | 'user' | 'date') => setGroupBy(value)}>
+            <SelectTrigger className="w-full sm:w-[180px]">
+              <Filter className="mr-2 h-4 w-4" />
+              <SelectValue placeholder="Group by" />
             </SelectTrigger>
             <SelectContent>
-              {availableAccounts.map((account) => (
-                <SelectItem key={account.accountId} value={account.accountId}>
-                  {getAccountDisplayName(account)}
-                </SelectItem>
-              ))}
+              <SelectItem value="none">No Grouping</SelectItem>
+              <SelectItem value="room">Group by Room</SelectItem>
+              <SelectItem value="user">Group by User</SelectItem>
+              <SelectItem value="date">Group by Date</SelectItem>
             </SelectContent>
           </Select>
-          {propAccountId && (
-            <span className="text-sm text-muted-foreground">
-              (Downloading...)
-            </span>
-          )}
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-muted-foreground">Viewing</span>
-        <Button
-          size="sm"
-          variant={photoSource === 'photos' ? 'default' : 'outline'}
-          onClick={() => setPhotoSource('photos')}
-        >
-          My Photos ({photos.length})
-        </Button>
-        <Button
-          size="sm"
-          variant={photoSource === 'feed' ? 'default' : 'outline'}
-          onClick={() => setPhotoSource('feed')}
-        >
-          Feed ({feedPhotos.length})
-        </Button>
+          <Select value={sortBy} onValueChange={(value: 'oldest-to-newest' | 'newest-to-oldest' | 'most-popular') => setSortBy(value)}>
+            <SelectTrigger className="w-full sm:w-[200px]">
+              <ArrowUpDown className="mr-2 h-4 w-4" />
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="oldest-to-newest">Oldest to Newest</SelectItem>
+              <SelectItem value="newest-to-oldest">Newest to Oldest</SelectItem>
+              <SelectItem value="most-popular">Most Popular</SelectItem>
+            </SelectContent>
+          </Select>
+          </div>
+        )}
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search photos..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
+      <div className="flex-1 min-h-0">
+        {loadingAccounts ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <p>Loading accounts...</p>
+          </div>
+        ) : !accountId && availableAccounts.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <p>No accounts with metadata found. Download photos to get started.</p>
+          </div>
+        ) : loading ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <p>Loading photos...</p>
+          </div>
+        ) : activePhotos.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <p>No {activeViewLabel} available for this account.</p>
+          </div>
+        ) : (
+          <PhotoGrid
+            photos={activePhotos}
+            onPhotoClick={handlePhotoClick}
+            groupBy={groupBy}
+            searchQuery={searchQuery}
+            sortBy={sortBy}
+            roomMap={roomMap}
+            accountMap={accountMap}
+            onScrollPositionChange={onScrollPositionChange}
+            scrollContainerRef={activeScrollRef}
           />
-        </div>
-        <Select value={groupBy} onValueChange={(value: 'none' | 'room' | 'user' | 'date') => setGroupBy(value)}>
-          <SelectTrigger className="w-full sm:w-[180px]">
-            <Filter className="mr-2 h-4 w-4" />
-            <SelectValue placeholder="Group by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">No Grouping</SelectItem>
-            <SelectItem value="room">Group by Room</SelectItem>
-            <SelectItem value="user">Group by User</SelectItem>
-            <SelectItem value="date">Group by Date</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={sortBy} onValueChange={(value: 'oldest-to-newest' | 'newest-to-oldest' | 'most-popular') => setSortBy(value)}>
-          <SelectTrigger className="w-full sm:w-[200px]">
-            <ArrowUpDown className="mr-2 h-4 w-4" />
-            <SelectValue placeholder="Sort by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="oldest-to-newest">Oldest to Newest</SelectItem>
-            <SelectItem value="newest-to-oldest">Newest to Oldest</SelectItem>
-            <SelectItem value="most-popular">Most Popular</SelectItem>
-          </SelectContent>
-        </Select>
+        )}
       </div>
-
-      {loadingAccounts ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <p>Loading accounts...</p>
-        </div>
-      ) : !accountId && availableAccounts.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <p>No accounts with metadata found. Download photos to get started.</p>
-        </div>
-      ) : loading ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <p>Loading photos...</p>
-        </div>
-      ) : activePhotos.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <p>No {activeViewLabel} available for this account.</p>
-        </div>
-      ) : (
-        <PhotoGrid
-          photos={activePhotos}
-          onPhotoClick={handlePhotoClick}
-          groupBy={groupBy}
-          searchQuery={searchQuery}
-          sortBy={sortBy}
-          roomMap={roomMap}
-          accountMap={accountMap}
-        />
-      )}
 
       <PhotoDetailModal
         photo={selectedPhoto}

@@ -365,11 +365,11 @@ function App() {
               : 'translate-y-0 opacity-100 max-h-[800px]'
           }`}
         >
-        {headerMode === 'full' && (
-          <div className="space-y-4">
-              <div className="flex items-center justify-between">
+          {headerMode === 'full' && (
+            <div className="space-y-3 px-3 sm:px-4 lg:px-6 py-3">
+              <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <h1 className="text-4xl font-bold">Photo Viewer</h1>
+                  <h1 className="text-4xl font-bold leading-tight">Photo Viewer</h1>
                 </div>
                 <div className="flex items-center gap-2">
                   <ThemeToggle />
@@ -387,8 +387,8 @@ function App() {
                   </Button>
                 </div>
               </div>
-          </div>           
-        )}
+            </div>
+          )}
         </header>
 
         {/* Download Panel Modal */}

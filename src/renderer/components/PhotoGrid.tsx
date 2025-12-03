@@ -20,6 +20,9 @@ interface PhotoGridProps {
   sortBy?: 'oldest-to-newest' | 'newest-to-oldest' | 'most-popular';
   roomMap?: Map<string, string>;
   accountMap?: Map<string, string>;
+  scrollContainerRef?: React.RefObject<HTMLDivElement>;
+  onScrollPositionChange?: (scrollTop: number) => void;
+  className?: string;
 }
 
 const PhotoGridComponent: React.FC<PhotoGridProps> = ({
@@ -30,13 +33,17 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   sortBy = 'newest-to-oldest',
   roomMap = new Map(),
   accountMap = new Map(),
+  scrollContainerRef: scrollContainerRefProp,
+  onScrollPositionChange,
+  className = '',
 }) => {
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl } = usePhotoMetadata(
     roomMap,
     accountMap
   );
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const internalScrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = scrollContainerRefProp ?? internalScrollRef;
   const [containerSize, setContainerSize] = useState({ width: 0, height: 700 });
   const [scrollTop, setScrollTop] = useState(0);
   const rafRef = useRef<number | null>(null);
@@ -131,7 +138,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
 
   // Track container size for responsive virtualization
   useEffect(() => {
-    const node = scrollContainerRef.current;
+    const node = scrollRef.current;
     if (!node) return;
 
     const updateSize = () => {
@@ -151,11 +158,11 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
     return () => {
       resizeObserver.disconnect();
     };
-  }, []);
+  }, [scrollRef]);
 
   // Track scroll position with rAF to avoid thrashing renders
   useEffect(() => {
-    const node = scrollContainerRef.current;
+    const node = scrollRef.current;
     if (!node) return;
 
     const handleScroll = () => {
@@ -164,6 +171,9 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
       }
       rafRef.current = requestAnimationFrame(() => {
         setScrollTop(node.scrollTop);
+        if (onScrollPositionChange) {
+          onScrollPositionChange(node.scrollTop);
+        }
       });
     };
 
@@ -174,10 +184,16 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
         cancelAnimationFrame(rafRef.current);
       }
     };
-  }, []);
+  }, [onScrollPositionChange, scrollRef]);
 
   const MIN_COLUMN_WIDTH = 240;
-  const ROW_HEIGHT = 340; // approximate card height including metadata text
+  // Card height calculation for 16:9 aspect ratio:
+  // Image (16:9 at 240px width): 240 * 9/16 = 135px
+  // CardContent padding: 32px (p-4 = 16px top + 16px bottom)
+  // Metadata lines: ~80px (room + users + date with spacing)
+  // Card border/shadow: ~2px
+  // Total: ~250px (rounded up for safety)
+  const ROW_HEIGHT = 250; // approximate card height with 16:9 image and metadata text
   const OVERSCAN_ROWS = 2;
 
   const columns = useMemo(
@@ -200,10 +216,10 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   const paddingBottom = Math.max(0, (totalRows - endRow) * ROW_HEIGHT);
 
   const renderVirtualizedGrid = () => (
-    <div className="space-y-4">
+    <div className={`flex h-full flex-col space-y-4 ${className}`}>
       <div
-        ref={scrollContainerRef}
-        className="max-h-[70vh] overflow-auto"
+        ref={scrollRef}
+        className="h-full overflow-auto"
       >
         <div
           style={{
@@ -279,16 +295,18 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   }
 
   return (
-    <div className="space-y-8">
-      {groupedPhotos &&
-        Object.entries(groupedPhotos).map(([groupName, groupPhotos]) =>
-          renderGroup(groupName, groupPhotos)
+    <div className={`flex h-full flex-col ${className}`}>
+      <div ref={scrollRef} className="h-full overflow-auto space-y-8">
+        {groupedPhotos &&
+          Object.entries(groupedPhotos).map(([groupName, groupPhotos]) =>
+            renderGroup(groupName, groupPhotos)
+          )}
+        {filteredPhotos.length === 0 && (
+          <div className="text-center py-12 text-muted-foreground">
+            <p>No photos found</p>
+          </div>
         )}
-      {filteredPhotos.length === 0 && (
-        <div className="text-center py-12 text-muted-foreground">
-          <p>No photos found</p>
-        </div>
-      )}
+      </div>
     </div>
   );
 };
@@ -311,7 +329,7 @@ const PhotoCard: React.FC<PhotoCardProps> = React.memo(
         className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
         onClick={handleClick}
       >
-        <div className="aspect-square relative overflow-hidden bg-muted">
+        <div className="aspect-video relative overflow-hidden bg-muted">
           {imageUrl ? (
             <img
               src={imageUrl}
@@ -331,9 +349,9 @@ const PhotoCard: React.FC<PhotoCardProps> = React.memo(
             <span className="truncate">{room}</span>
           </div>
           {users.length > 0 && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Users className="h-4 w-4" />
-              <span className="truncate">{users.join(', ')}</span>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+              <Users className="h-4 w-4 flex-shrink-0" />
+              <span className="truncate min-w-0">{users.join(', ')}</span>
             </div>
           )}
           {formattedDate && (

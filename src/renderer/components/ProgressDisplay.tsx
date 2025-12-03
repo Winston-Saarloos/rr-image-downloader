@@ -2,13 +2,15 @@ import React from 'react';
 import { Progress } from '../../components/ui/progress';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Progress as ProgressType } from '../../shared/types';
-import { Loader2, CheckCircle2 } from 'lucide-react';
+import { Loader2, CheckCircle2, X } from 'lucide-react';
+import { Button } from '../../components/ui/button';
 
 interface ProgressDisplayProps {
   progress: ProgressType;
+  onClose?: () => void;
 }
 
-export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({ progress }) => {
+export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({ progress, onClose }) => {
   const percent = Math.min(Math.max(Math.round(progress.progress ?? 0), 0), 100);
   const hasTotals = progress.total > 0;
   const isComplete = !progress.isRunning && percent >= 100;
@@ -29,12 +31,24 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({ progress }) =>
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {progress.isRunning && <Loader2 className="h-5 w-5 animate-spin" />}
-          {isComplete && !progress.isRunning && (
-            <CheckCircle2 className="h-5 w-5 text-green-500" />
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            {progress.isRunning && <Loader2 className="h-5 w-5 animate-spin" />}
+            {isComplete && !progress.isRunning && (
+              <CheckCircle2 className="h-5 w-5 text-green-500" />
+            )}
+            Download Progress
+          </span>
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Hide download info"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+            </Button>
           )}
-          Download Progress
         </CardTitle>
         <CardDescription>
           {progress.currentStep || (isComplete ? 'Complete' : 'Ready')}

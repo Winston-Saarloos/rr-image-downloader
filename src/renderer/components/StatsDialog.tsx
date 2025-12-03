@@ -19,6 +19,7 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  LabelList,
 } from 'recharts';
 
 interface StatsDialogProps {
@@ -37,7 +38,7 @@ interface PhotoStats {
   firstPhotoDate: Date | null;
   latestPhotoDate: Date | null;
   timeSpan: { days: number; hours: number; minutes: number } | null;
-  photosPerYear: Array<{ year: string; count: number }>;
+  photosPerYear: Array<{ year: string; userPhotos: number; feedPhotos: number }>;
   photosPerRoom: Array<{ room: string; count: number }>;
   photosPerUser: Array<{ user: string; count: number }>;
 }
@@ -238,16 +239,32 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
       timeSpan = { days, hours, minutes };
     }
 
-    // Photos per year
-    const yearMap = new Map<string, number>();
-    allPhotos.forEach((photo) => {
+    // Photos per year - separate user photos and feed photos
+    const userPhotosYearMap = new Map<string, number>();
+    const feedPhotosYearMap = new Map<string, number>();
+    
+    photos.forEach((photo) => {
       if (photo.CreatedAt) {
         const year = new Date(photo.CreatedAt).getFullYear().toString();
-        yearMap.set(year, (yearMap.get(year) || 0) + 1);
+        userPhotosYearMap.set(year, (userPhotosYearMap.get(year) || 0) + 1);
       }
     });
-    const photosPerYear = Array.from(yearMap.entries())
-      .map(([year, count]) => ({ year, count }))
+    
+    feedPhotos.forEach((photo) => {
+      if (photo.CreatedAt) {
+        const year = new Date(photo.CreatedAt).getFullYear().toString();
+        feedPhotosYearMap.set(year, (feedPhotosYearMap.get(year) || 0) + 1);
+      }
+    });
+    
+    // Combine all years from both maps
+    const allYears = new Set([...userPhotosYearMap.keys(), ...feedPhotosYearMap.keys()]);
+    const photosPerYear = Array.from(allYears)
+      .map((year) => ({ 
+        year, 
+        userPhotos: userPhotosYearMap.get(year) || 0,
+        feedPhotos: feedPhotosYearMap.get(year) || 0
+      }))
       .sort((a, b) => a.year.localeCompare(b.year));
 
     // Photos per room
@@ -399,7 +416,8 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
                     <YAxis />
                     <Tooltip />
                     <Legend />
-                    <Bar dataKey="count" fill="#8884d8" />
+                    <Bar dataKey="userPhotos" fill="#f6511d" name="User Photos" />
+                    <Bar dataKey="feedPhotos" fill="#ffb400" name="Feed Photos" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -440,7 +458,9 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
                     <YAxis dataKey="room" type="category" width={90} />
                     <Tooltip />
                     <Legend />
-                    <Bar dataKey="count" fill="#82ca9d" />
+                    <Bar dataKey="count" fill="#00a6ed">
+                      <LabelList dataKey="count" position="right" />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -481,7 +501,9 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
                     <YAxis dataKey="user" type="category" width={90} />
                     <Tooltip />
                     <Legend />
-                    <Bar dataKey="count" fill="#ffc658" />
+                    <Bar dataKey="count" fill="#7fb800">
+                      <LabelList dataKey="count" position="right" />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
