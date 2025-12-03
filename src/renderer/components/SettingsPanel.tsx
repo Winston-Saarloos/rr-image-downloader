@@ -3,7 +3,13 @@ import { FolderOpen, Settings as SettingsIcon } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/card';
 import { RecNetSettings } from '../../shared/types';
 
 interface SettingsPanelProps {
@@ -46,7 +52,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  const handleMaxPhotosChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMaxPhotosChange = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const value = e.target.value.trim();
     if (value === '') {
       await onUpdateSettings({ maxPhotosToDownload: undefined });
@@ -120,7 +128,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             placeholder="No limit"
           />
           <p className="text-sm text-muted-foreground">
-            Limit the number of new photos to download for testing. Leave empty for no limit.
+            Limit the number of new photos to download for testing. Leave empty
+            for no limit.
           </p>
         </div>
       </CardContent>

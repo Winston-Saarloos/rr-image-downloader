@@ -21,4 +21,3 @@ export const ThemeToggle: React.FC = () => {
     </Button>
   );
 };
-

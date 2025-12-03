@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  ReactNode,
+} from 'react';
 
 interface FavoritesContextType {
   favorites: Set<string>;
@@ -7,7 +14,9 @@ interface FavoritesContextType {
   isFavorite: (photoId: string) => boolean;
 }
 
-const FavoritesContext = createContext<FavoritesContextType | undefined>(undefined);
+const FavoritesContext = createContext<FavoritesContextType | undefined>(
+  undefined
+);
 
 export function FavoritesProvider({ children }: { children: ReactNode }) {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -41,7 +50,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
         const result = await window.electronAPI.toggleFavorite(photoId);
         if (result.success) {
           // Update local state optimistically
-          setFavorites((prev) => {
+          setFavorites(prev => {
             const newFavorites = new Set(prev);
             if (result.data) {
               newFavorites.add(photoId);
@@ -88,4 +97,3 @@ export function useFavorites() {
   }
   return context;
 }
-

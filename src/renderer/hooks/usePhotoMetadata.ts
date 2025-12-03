@@ -34,16 +34,16 @@ export const usePhotoMetadata = (
         return 'null';
       }
       const roomId =
-        rawRoomId !== undefined && rawRoomId !== ''
-          ? rawRoomId
-          : undefined;
+        rawRoomId !== undefined && rawRoomId !== '' ? rawRoomId : undefined;
 
       if (roomId !== undefined) {
         const roomIdStr = String(roomId);
         const mappedRoomName =
           safeRoomMap.get(roomIdStr) ||
           safeRoomMap.get(String(Number(roomIdStr))) ||
-          (typeof extended.RoomName === 'string' ? extended.RoomName : undefined);
+          (typeof extended.RoomName === 'string'
+            ? extended.RoomName
+            : undefined);
 
         if (mappedRoomName) {
           return mappedRoomName;
@@ -61,13 +61,17 @@ export const usePhotoMetadata = (
   const getPhotoUsers = useCallback(
     (photo: Photo): string[] => {
       const extended = photo as ExtendedPhoto;
-      const userIds = extended.TaggedPlayerIds || extended.Users || extended.TaggedUsers || [];
+      const userIds =
+        extended.TaggedPlayerIds ||
+        extended.Users ||
+        extended.TaggedUsers ||
+        [];
 
       if (!Array.isArray(userIds)) {
         return [];
       }
 
-      return userIds.map((userId) => {
+      return userIds.map(userId => {
         const userName = safeAccountMap.get(String(userId));
         return userName || String(userId);
       });

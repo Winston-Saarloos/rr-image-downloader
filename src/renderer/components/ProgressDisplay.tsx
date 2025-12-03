@@ -1,6 +1,12 @@
 import React from 'react';
 import { Progress } from '../../components/ui/progress';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/card';
 import { Progress as ProgressType } from '../../shared/types';
 import { Loader2, CheckCircle2, X } from 'lucide-react';
 import { Button } from '../../components/ui/button';
@@ -10,8 +16,14 @@ interface ProgressDisplayProps {
   onClose?: () => void;
 }
 
-export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({ progress, onClose }) => {
-  const percent = Math.min(Math.max(Math.round(progress.progress ?? 0), 0), 100);
+export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
+  progress,
+  onClose,
+}) => {
+  const percent = Math.min(
+    Math.max(Math.round(progress.progress ?? 0), 0),
+    100
+  );
   const hasTotals = progress.total > 0;
   const isComplete = !progress.isRunning && percent >= 100;
   const isIdle =
@@ -57,8 +69,16 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({ progress, onCl
       <CardContent className="space-y-4">
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Status</span>
-          <span className={progress.isRunning ? 'text-primary' : 'text-muted-foreground'}>
-            {progress.isRunning ? 'In progress' : isComplete ? 'Complete' : 'Idle'}
+          <span
+            className={
+              progress.isRunning ? 'text-primary' : 'text-muted-foreground'
+            }
+          >
+            {progress.isRunning
+              ? 'In progress'
+              : isComplete
+                ? 'Complete'
+                : 'Idle'}
           </span>
         </div>
 

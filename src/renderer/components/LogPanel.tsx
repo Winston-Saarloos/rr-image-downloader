@@ -1,7 +1,13 @@
 import React, { useEffect, useRef } from 'react';
 import { Trash2, Terminal } from 'lucide-react';
 import { Button } from '../../components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/card';
 
 interface LogEntry {
   message: string;
@@ -120,9 +126,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({ logs, onClearLogs }) => {
               <Terminal className="h-5 w-5" />
               Console Logs
             </CardTitle>
-            <CardDescription>
-              View operation logs and messages
-            </CardDescription>
+            <CardDescription>View operation logs and messages</CardDescription>
           </div>
           <Button
             onClick={onClearLogs}
@@ -162,9 +166,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({ logs, onClearLogs }) => {
           >
             {logs.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                <p className="text-sm">
-                  Console output will appear here
-                </p>
+                <p className="text-sm">Console output will appear here</p>
               </div>
             ) : (
               <div className="space-y-1" style={{ contain: 'layout style' }}>
@@ -176,9 +178,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({ logs, onClearLogs }) => {
                     <span className="text-muted-foreground text-xs mt-0.5 flex-shrink-0">
                       [{log.timestamp}]
                     </span>
-                    <span className="flex-1 break-words">
-                      {log.message}
-                    </span>
+                    <span className="flex-1 break-words">{log.message}</span>
                   </div>
                 ))}
               </div>

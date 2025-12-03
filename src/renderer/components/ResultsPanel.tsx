@@ -1,6 +1,18 @@
 import React from 'react';
-import { CheckCircle, XCircle, Info, AlertTriangle, FileText } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import {
+  CheckCircle,
+  XCircle,
+  Info,
+  AlertTriangle,
+  FileText,
+} from 'lucide-react';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/card';
 
 interface Result {
   operation: string;
@@ -36,7 +48,9 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ results }) => {
           <XCircle className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
           <div>
             <p className="text-red-600 dark:text-red-400 font-medium">Error:</p>
-            <p className="text-red-600 dark:text-red-400 text-sm">{errorData.error || 'Unknown error'}</p>
+            <p className="text-red-600 dark:text-red-400 text-sm">
+              {errorData.error || 'Unknown error'}
+            </p>
           </div>
         </div>
       );
@@ -148,9 +162,7 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ results }) => {
           {results.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Info className="w-12 h-12 mx-auto mb-3 text-muted-foreground" />
-              <p className="text-lg font-medium">
-                No operations completed yet
-              </p>
+              <p className="text-lg font-medium">No operations completed yet</p>
               <p className="text-sm">
                 Results will appear here after running operations
               </p>
@@ -166,9 +178,7 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ results }) => {
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     {getResultIcon(result.type)}
-                    <h3 className="font-semibold">
-                      {result.operation}
-                    </h3>
+                    <h3 className="font-semibold">{result.operation}</h3>
                   </div>
                   <span className="text-xs text-muted-foreground">
                     {result.timestamp}

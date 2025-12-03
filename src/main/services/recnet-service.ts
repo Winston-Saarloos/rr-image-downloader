@@ -609,7 +609,10 @@ export class RecNetService extends EventEmitter {
         this.updateProgress('Fetching feed account and room data...', 0, 0, 0);
 
         let combinedForMetadata: Photo[] = [...all];
-        const photosJsonPath = path.join(accountDir, `${accountId}_photos.json`);
+        const photosJsonPath = path.join(
+          accountDir,
+          `${accountId}_photos.json`
+        );
         if (await fs.pathExists(photosJsonPath)) {
           try {
             const photoMetadata: Photo[] = await fs.readJson(photosJsonPath);
@@ -685,8 +688,12 @@ export class RecNetService extends EventEmitter {
       }
 
       const sortedPhotos = [...photos].sort((a, b) => {
-        const timeA = a.CreatedAt ? new Date(a.CreatedAt).getTime() : Number.MAX_SAFE_INTEGER;
-        const timeB = b.CreatedAt ? new Date(b.CreatedAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const timeA = a.CreatedAt
+          ? new Date(a.CreatedAt).getTime()
+          : Number.MAX_SAFE_INTEGER;
+        const timeB = b.CreatedAt
+          ? new Date(b.CreatedAt).getTime()
+          : Number.MAX_SAFE_INTEGER;
         if (timeA !== timeB) return timeA - timeB;
         return (a.Id || 0) - (b.Id || 0);
       });
@@ -923,8 +930,12 @@ export class RecNetService extends EventEmitter {
       }
 
       const sortedPhotos = [...photos].sort((a, b) => {
-        const timeA = a.CreatedAt ? new Date(a.CreatedAt).getTime() : Number.MAX_SAFE_INTEGER;
-        const timeB = b.CreatedAt ? new Date(b.CreatedAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const timeA = a.CreatedAt
+          ? new Date(a.CreatedAt).getTime()
+          : Number.MAX_SAFE_INTEGER;
+        const timeB = b.CreatedAt
+          ? new Date(b.CreatedAt).getTime()
+          : Number.MAX_SAFE_INTEGER;
         if (timeA !== timeB) return timeA - timeB;
         return (a.Id || 0) - (b.Id || 0);
       });
@@ -1232,7 +1243,7 @@ export class RecNetService extends EventEmitter {
     const batchSize = 100;
     for (let i = 0; i < accountIds.length; i += batchSize) {
       const batch = accountIds.slice(i, i + batchSize);
-      
+
       try {
         const formData = new URLSearchParams();
         for (const id of batch) {
@@ -1267,10 +1278,7 @@ export class RecNetService extends EventEmitter {
     return results;
   }
 
-  async fetchBulkRooms(
-    roomIds: string[],
-    token?: string
-  ): Promise<any[]> {
+  async fetchBulkRooms(roomIds: string[], token?: string): Promise<any[]> {
     if (roomIds.length === 0) {
       return [];
     }
@@ -1282,7 +1290,7 @@ export class RecNetService extends EventEmitter {
     const batchSize = 100;
     for (let i = 0; i < roomIds.length; i += batchSize) {
       const batch = roomIds.slice(i, i + batchSize);
-      
+
       try {
         const formData = new URLSearchParams();
         for (const id of batch) {
@@ -1303,7 +1311,9 @@ export class RecNetService extends EventEmitter {
           results.push(...response.data);
         }
       } catch (error) {
-        console.log(`Failed to fetch batch of rooms: ${(error as Error).message}`);
+        console.log(
+          `Failed to fetch batch of rooms: ${(error as Error).message}`
+        );
       }
 
       // Small delay between batches
@@ -1352,7 +1362,12 @@ export class RecNetService extends EventEmitter {
 
       // Fetch and save account data
       if (accountIdsArray.length > 0) {
-        this.updateProgress('Checking account cache', 0, accountIdsArray.length, 0);
+        this.updateProgress(
+          'Checking account cache',
+          0,
+          accountIdsArray.length,
+          0
+        );
         if (accountsFileExists && !forceAccountsRefresh) {
           console.log(
             `Account data already exists at ${accountsJsonPath}, skipping fetch (force refresh disabled)`
@@ -1523,7 +1538,10 @@ export class RecNetService extends EventEmitter {
 
         const accountId = entry.name;
         const accountDir = path.join(this.settings.outputRoot, accountId);
-        const photosJsonPath = path.join(accountDir, `${accountId}_photos.json`);
+        const photosJsonPath = path.join(
+          accountDir,
+          `${accountId}_photos.json`
+        );
         const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
         let hasPhotos = false;

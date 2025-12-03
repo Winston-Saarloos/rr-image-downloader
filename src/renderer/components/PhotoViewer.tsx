@@ -140,14 +140,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
               }
             }
           }
-          console.log(
-            `Loaded ${roomMapping.size} rooms into mapping`,
-            Array.from(roomMapping.entries()).slice(0, 5)
-          );
           setRoomMap(roomMapping);
-        } else {
-          console.log('No room data found or failed to load');
-          setRoomMap(new Map());
         }
       }
     } catch (error) {

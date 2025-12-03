@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Download, FolderOpen, Key, HelpCircle, X, RefreshCcw } from 'lucide-react';
+import {
+  Download,
+  FolderOpen,
+  Key,
+  HelpCircle,
+  X,
+  RefreshCcw,
+} from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -40,12 +47,18 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const [username, setUsername] = useState('');
   const [token, setToken] = useState('');
   const [filePath, setFilePath] = useState(settings.outputRoot || '');
-  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'found' | 'not-found'>('idle');
-  const [tokenStatus, setTokenStatus] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle');
+  const [usernameStatus, setUsernameStatus] = useState<
+    'idle' | 'checking' | 'found' | 'not-found'
+  >('idle');
+  const [tokenStatus, setTokenStatus] = useState<
+    'idle' | 'checking' | 'valid' | 'invalid'
+  >('idle');
   const [tokenExpiringSoon, setTokenExpiringSoon] = useState(false);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [tokenHelpOpen, setTokenHelpOpen] = useState(false);
-  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(
+    null
+  );
   const [tokenTimeout, setTokenTimeout] = useState<NodeJS.Timeout | null>(null);
   const [forceAccountsRefresh, setForceAccountsRefresh] = useState(false);
   const [forceRoomsRefresh, setForceRoomsRefresh] = useState(false);
@@ -171,7 +184,10 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     return timeUntilExpiration <= twentyMinutesInMs && timeUntilExpiration > 0;
   };
 
-  const validateToken = (tokenValue: string, expectedAccountId: string | null) => {
+  const validateToken = (
+    tokenValue: string,
+    expectedAccountId: string | null
+  ) => {
     if (!tokenValue.trim()) {
       setTokenStatus('idle');
       setTokenExpiringSoon(false);
@@ -190,10 +206,10 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     try {
       // Clean the token
       const cleaned = cleanToken(tokenValue);
-      
+
       // Decode the JWT
       const decoded = decodeJWT(cleaned);
-      
+
       if (!decoded || !decoded.sub) {
         setTokenStatus('invalid');
         setTokenExpiringSoon(false);
@@ -257,10 +273,10 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
 
   const handleTokenChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
-    
+
     // Clean the token immediately
     const cleaned = cleanToken(value);
-    
+
     // Update state with cleaned value
     setToken(cleaned);
 
@@ -369,7 +385,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             )}
             {tokenStatus === 'invalid' && (
               <p className="text-sm text-red-600 dark:text-red-400">
-                Token validation failed - Account ID does not match or token is invalid
+                Token validation failed - Account ID does not match or token is
+                invalid
               </p>
             )}
             {tokenStatus === 'checking' && (
@@ -379,12 +396,14 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             )}
             {tokenStatus === 'idle' && (
               <p className="text-sm text-muted-foreground">
-                Required if you want to download private photos as well as public ones
+                Required if you want to download private photos as well as
+                public ones
               </p>
             )}
             {tokenExpiringSoon && (
               <p className="text-sm text-red-600 dark:text-red-400">
-                Warning: Your token is expiring in 20 minutes or less. Please get a fresh token (tokens last 1 hour).
+                Warning: Your token is expiring in 20 minutes or less. Please
+                get a fresh token (tokens last 1 hour).
               </p>
             )}
           </div>
@@ -396,7 +415,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                 id="filepath"
                 placeholder="/photos/2024/image.jpg"
                 value={filePath}
-                onChange={(e) => setFilePath(e.target.value)}
+                onChange={e => setFilePath(e.target.value)}
               />
               <Button
                 type="button"
@@ -412,7 +431,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
           <div className="space-y-2">
             <Label>Metadata Refresh</Label>
             <p className="text-sm text-muted-foreground">
-              User and room details are reused when available. Toggle below to force a fresh download.
+              User and room details are reused when available. Toggle below to
+              force a fresh download.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <Button
@@ -423,7 +443,9 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                 className="justify-start"
               >
                 <RefreshCcw className="mr-2 h-4 w-4" />
-                {forceAccountsRefresh ? 'Force user data refresh' : 'Use cached user data'}
+                {forceAccountsRefresh
+                  ? 'Force user data refresh'
+                  : 'Use cached user data'}
               </Button>
               <Button
                 type="button"
@@ -433,7 +455,9 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                 className="justify-start"
               >
                 <RefreshCcw className="mr-2 h-4 w-4" />
-                {forceRoomsRefresh ? 'Force room data refresh' : 'Use cached room data'}
+                {forceRoomsRefresh
+                  ? 'Force room data refresh'
+                  : 'Use cached room data'}
               </Button>
             </div>
           </div>
@@ -473,20 +497,33 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
           <div className="space-y-4">
             <div className="space-y-2">
               <p className="text-sm">
-                To download private photos, you need to obtain an access token from RecNet:
+                To download private photos, you need to obtain an access token
+                from RecNet:
               </p>
               <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
                 <li>Log in to your RecNet account in a web browser</li>
-                <li>Open your browser&apos;s Developer Tools (F12 or right-click → Inspect)</li>
+                <li>
+                  Open your browser&apos;s Developer Tools (F12 or right-click →
+                  Inspect)
+                </li>
                 <li>Go to the Network tab</li>
-                <li>Navigate to any page on RecNet that requires authentication</li>
+                <li>
+                  Navigate to any page on RecNet that requires authentication
+                </li>
                 <li>Look for requests to the RecNet API</li>
                 <li>Find the Authorization header in the request headers</li>
-                <li>Copy the token value (it usually starts with &quot;Bearer &quot;)</li>
-                <li>Paste the token (without &quot;Bearer &quot;) into the token field above</li>
+                <li>
+                  Copy the token value (it usually starts with &quot;Bearer
+                  &quot;)
+                </li>
+                <li>
+                  Paste the token (without &quot;Bearer &quot;) into the token
+                  field above
+                </li>
               </ol>
               <p className="text-sm text-muted-foreground mt-4">
-                <strong>Note:</strong> Tokens may expire after some time. If downloads fail, you may need to obtain a new token.
+                <strong>Note:</strong> Tokens may expire after some time. If
+                downloads fail, you may need to obtain a new token.
               </p>
             </div>
           </div>

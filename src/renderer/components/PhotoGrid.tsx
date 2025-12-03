@@ -54,15 +54,21 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   const getCheersCount = useCallback((photo: Photo): number => {
     const extended = photo as ExtendedPhoto;
     // Try common field names for cheers
-    const cheers = extended.Cheers || extended.cheers || extended.CheerCount || 
-                   extended.cheerCount || extended.CheersCount || extended.cheersCount || 0;
+    const cheers =
+      extended.Cheers ||
+      extended.cheers ||
+      extended.CheerCount ||
+      extended.cheerCount ||
+      extended.CheersCount ||
+      extended.cheersCount ||
+      0;
     return typeof cheers === 'number' ? cheers : 0;
   }, []);
 
   // Sort photos based on sortBy option
   const sortedPhotos = useMemo(() => {
     const photosCopy = [...photos];
-    
+
     switch (sortBy) {
       case 'oldest-to-newest':
         return photosCopy.sort((a, b) => {
@@ -91,7 +97,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
     if (!deferredSearchQuery.trim()) return sortedPhotos;
 
     const query = deferredSearchQuery.toLowerCase();
-    return sortedPhotos.filter((photo) => {
+    return sortedPhotos.filter(photo => {
       const extended = photo as ExtendedPhoto;
       const room = getPhotoRoom(photo).toLowerCase();
       const users = getPhotoUsers(photo).join(' ').toLowerCase();
@@ -111,7 +117,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
 
     const groups: Record<string, Photo[]> = {};
 
-    filteredPhotos.forEach((photo) => {
+    filteredPhotos.forEach(photo => {
       const key =
         groupBy === 'room'
           ? getPhotoRoom(photo)
@@ -219,10 +225,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
 
   const renderVirtualizedGrid = () => (
     <div className={`flex h-full flex-col space-y-4 ${className}`}>
-      <div
-        ref={scrollRef}
-        className="h-full overflow-auto"
-      >
+      <div ref={scrollRef} className="h-full overflow-auto">
         <div
           style={{
             paddingTop,
@@ -268,7 +271,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
         <h2 className="text-xl font-semibold mb-4">{groupName}</h2>
       )}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {groupPhotos.map((photo) => {
+        {groupPhotos.map(photo => {
           const room = getPhotoRoom(photo);
           const users = getPhotoUsers(photo);
           const imageUrl = getPhotoImageUrl(photo);
@@ -324,7 +327,10 @@ interface PhotoCardProps {
 
 const PhotoCard: React.FC<PhotoCardProps> = React.memo(
   ({ photo, onClick, room, users, imageUrl, formattedDate }) => {
-    const handleClick = React.useCallback(() => onClick(photo), [onClick, photo]);
+    const handleClick = React.useCallback(
+      () => onClick(photo),
+      [onClick, photo]
+    );
     const { isFavorite, toggleFavorite } = useFavorites();
     const photoId = photo.Id.toString();
     const favorited = isFavorite(photoId);
@@ -364,11 +370,11 @@ const PhotoCard: React.FC<PhotoCardProps> = React.memo(
                 : 'bg-background/80 hover:bg-background text-muted-foreground opacity-0 group-hover:opacity-100'
             }`}
             onClick={handleFavoriteClick}
-            aria-label={favorited ? 'Remove from favorites' : 'Add to favorites'}
+            aria-label={
+              favorited ? 'Remove from favorites' : 'Add to favorites'
+            }
           >
-            <Heart
-              className={`h-4 w-4 ${favorited ? 'fill-current' : ''}`}
-            />
+            <Heart className={`h-4 w-4 ${favorited ? 'fill-current' : ''}`} />
           </Button>
         </div>
         <CardContent className="p-4 space-y-2">

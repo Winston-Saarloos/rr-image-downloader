@@ -7,11 +7,14 @@ import { ProgressDisplay } from './components/ProgressDisplay';
 import { DebugMenu } from './components/DebugMenu';
 import { StatsDialog } from './components/StatsDialog';
 import { ThemeToggle } from './components/ThemeToggle';
-import { RecNetSettings, Progress, BulkDataRefreshOptions } from '../shared/types';
+import {
+  RecNetSettings,
+  Progress,
+  BulkDataRefreshOptions,
+} from '../shared/types';
 import { FavoritesProvider } from './contexts/FavoritesContext';
 
 function App() {
-
   const [settings, setSettings] = useState<RecNetSettings>({
     outputRoot: 'output',
     cdnBase: 'https://img.rec.net/',
@@ -173,20 +176,27 @@ function App() {
       // Update settings with new file path
       if (window.electronAPI) {
         await window.electronAPI.updateSettings({ outputRoot: filePath });
-        setSettings((prev) => ({ ...prev, outputRoot: filePath }));
+        setSettings(prev => ({ ...prev, outputRoot: filePath }));
         addLog(`Output path set to: ${filePath}`, 'info');
 
         // Search for account by username
         addLog(`Searching for account: ${username}`, 'info');
         const searchResult = await window.electronAPI.searchAccounts(username);
-        if (!searchResult.success || !searchResult.data || searchResult.data.length === 0) {
+        if (
+          !searchResult.success ||
+          !searchResult.data ||
+          searchResult.data.length === 0
+        ) {
           throw new Error('Account not found');
         }
 
         const account = searchResult.data[0];
         const accountId = account.accountId.toString();
         setCurrentAccountId(accountId);
-        addLog(`Found account: ${account.displayName} (ID: ${accountId})`, 'success');
+        addLog(
+          `Found account: ${account.displayName} (ID: ${accountId})`,
+          'success'
+        );
         addLog(
           forceAccountsRefresh
             ? 'Forcing refresh of user data for this download'
@@ -219,10 +229,14 @@ function App() {
         });
 
         if (!collectPhotosResult.success) {
-          throw new Error(collectPhotosResult.error || 'Failed to collect photos');
+          throw new Error(
+            collectPhotosResult.error || 'Failed to collect photos'
+          );
         }
         if (!collectFeedResult.success) {
-          throw new Error(collectFeedResult.error || 'Failed to collect feed photos');
+          throw new Error(
+            collectFeedResult.error || 'Failed to collect feed photos'
+          );
         }
 
         const totalPhotos = collectPhotosResult.data?.totalPhotos || 0;
@@ -259,7 +273,9 @@ function App() {
         });
 
         if (!downloadFeedResult.success) {
-          throw new Error(downloadFeedResult.error || 'Failed to download feed photos');
+          throw new Error(
+            downloadFeedResult.error || 'Failed to download feed photos'
+          );
         }
 
         const downloadFeedStats = downloadFeedResult.data?.downloadStats;
@@ -277,7 +293,8 @@ function App() {
         }, 1000);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Download failed';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Download failed';
       addLog(`Download failed: ${errorMessage}`, 'error');
       addResult('Download', { error: errorMessage }, 'error');
     } finally {
@@ -323,31 +340,34 @@ function App() {
     }
   };
 
-  const handlePhotoScroll = useCallback((scrollTop: number) => {
-    const last = scrollPositionRef.current;
-    const delta = scrollTop - last;
-    const isScrollingDown = delta > 6;
-    const isScrollingUp = delta < -6;
+  const handlePhotoScroll = useCallback(
+    (scrollTop: number) => {
+      const last = scrollPositionRef.current;
+      const delta = scrollTop - last;
+      const isScrollingDown = delta > 6;
+      const isScrollingUp = delta < -6;
 
-    if (scrollTop < 24) {
-      setHeaderMode('full');
-      setHasScrolledPhotos(false);
-      setHasScrolledDown(false);
+      if (scrollTop < 24) {
+        setHeaderMode('full');
+        setHasScrolledPhotos(false);
+        setHasScrolledDown(false);
+        scrollPositionRef.current = scrollTop;
+        return;
+      }
+
+      setHasScrolledPhotos(true);
+      setHasScrolledDown(true);
+
+      if (isScrollingDown && scrollTop > 48) {
+        setHeaderMode('hidden');
+      } else if (isScrollingUp && hasScrolledDown) {
+        setHeaderMode('compact');
+      }
+
       scrollPositionRef.current = scrollTop;
-      return;
-    }
-
-    setHasScrolledPhotos(true);
-    setHasScrolledDown(true);
-
-    if (isScrollingDown && scrollTop > 48) {
-      setHeaderMode('hidden');
-    } else if (isScrollingUp && hasScrolledDown) {
-      setHeaderMode('compact');
-    }
-
-    scrollPositionRef.current = scrollTop;
-  }, [hasScrolledDown]);
+    },
+    [hasScrolledDown]
+  );
 
   const scrollPhotosToTop = useCallback(() => {
     if (photoScrollRef.current) {
@@ -359,110 +379,112 @@ function App() {
     <FavoritesProvider>
       <div className="min-h-screen bg-background">
         <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden">
-        {/* Header */}
-        <header
-          className={`sticky top-0 z-20 bg-background/95 backdrop-blur transition-[max-height,transform,opacity] duration-300 overflow-hidden ${
-            headerMode === 'hidden'
-              ? '-translate-y-full opacity-0 pointer-events-none max-h-0'
-              : 'translate-y-0 opacity-100 max-h-[800px]'
-          }`}
-        >
-          {headerMode === 'full' && (
-            <div className="space-y-3 px-3 sm:px-4 lg:px-6 py-3">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <h1 className="text-4xl font-bold leading-tight">Photo Viewer</h1>
-                </div>
-                <div className="flex items-center gap-2">
-                  <ThemeToggle />
-                  <Button
-                    variant="outline"
-                    onClick={() => setStatsDialogOpen(true)}
-                    disabled={!currentAccountId}
-                  >
-                    <BarChart3 className="mr-2 h-4 w-4" />
-                    Stats
-                  </Button>
-                  <Button onClick={() => setDownloadPanelOpen(true)}>
-                    <Download className="mr-2 h-4 w-4" />
-                    Download
-                  </Button>
+          {/* Header */}
+          <header
+            className={`sticky top-0 z-20 bg-background/95 backdrop-blur transition-[max-height,transform,opacity] duration-300 overflow-hidden ${
+              headerMode === 'hidden'
+                ? '-translate-y-full opacity-0 pointer-events-none max-h-0'
+                : 'translate-y-0 opacity-100 max-h-[800px]'
+            }`}
+          >
+            {headerMode === 'full' && (
+              <div className="space-y-3 px-3 sm:px-4 lg:px-6 py-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <h1 className="text-4xl font-bold leading-tight">
+                      Photo Viewer
+                    </h1>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <ThemeToggle />
+                    <Button
+                      variant="outline"
+                      onClick={() => setStatsDialogOpen(true)}
+                      disabled={!currentAccountId}
+                    >
+                      <BarChart3 className="mr-2 h-4 w-4" />
+                      Stats
+                    </Button>
+                    <Button onClick={() => setDownloadPanelOpen(true)}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Download
+                    </Button>
+                  </div>
                 </div>
               </div>
+            )}
+          </header>
+
+          {/* Download Panel Modal */}
+          <DownloadPanel
+            open={downloadPanelOpen}
+            onOpenChange={setDownloadPanelOpen}
+            onDownload={handleDownload}
+            onCancel={handleCancelDownload}
+            isDownloading={isDownloading}
+            settings={settings}
+          />
+
+          {/* Stats Dialog */}
+          <StatsDialog
+            open={statsDialogOpen}
+            onOpenChange={setStatsDialogOpen}
+            accountId={currentAccountId}
+            filePath={settings.outputRoot}
+          />
+
+          {/* Progress Display */}
+          {!isProgressIdle && showProgressPanel && (
+            <div className="mb-4">
+              <ProgressDisplay
+                progress={progress}
+                onClose={() => setShowProgressPanel(false)}
+              />
             </div>
           )}
-        </header>
 
-        {/* Download Panel Modal */}
-        <DownloadPanel
-          open={downloadPanelOpen}
-          onOpenChange={setDownloadPanelOpen}
-          onDownload={handleDownload}
-          onCancel={handleCancelDownload}
-          isDownloading={isDownloading}
-          settings={settings}
-        />
-
-        {/* Stats Dialog */}
-        <StatsDialog
-          open={statsDialogOpen}
-          onOpenChange={setStatsDialogOpen}
-          accountId={currentAccountId}
-          filePath={settings.outputRoot}
-        />
-
-        {/* Progress Display */}
-        {!isProgressIdle && showProgressPanel && (
-          <div className="mb-4">
-            <ProgressDisplay
-              progress={progress}
-              onClose={() => setShowProgressPanel(false)}
+          {/* Photo Viewer */}
+          <div className="flex-1 min-h-0 relative">
+            {hasScrolledDown && headerMode === 'hidden' && (
+              <div
+                className="absolute left-0 right-0 top-0 h-3 z-30"
+                onMouseEnter={() => setHeaderMode('compact')}
+              />
+            )}
+            <PhotoViewer
+              filePath={settings.outputRoot}
+              accountId={isDownloading ? currentAccountId : undefined}
+              isDownloading={isDownloading}
+              onAccountChange={handleViewerAccountChange}
+              onScrollPositionChange={handlePhotoScroll}
+              scrollContainerRef={photoScrollRef}
+              headerMode={headerMode}
             />
           </div>
-        )}
 
-        {/* Photo Viewer */}
-        <div className="flex-1 min-h-0 relative">
-          {hasScrolledDown && headerMode === 'hidden' && (
-            <div
-              className="absolute left-0 right-0 top-0 h-3 z-30"
-              onMouseEnter={() => setHeaderMode('compact')}
-            />
+          {/* Scroll To Top */}
+          {hasScrolledPhotos && (
+            <Button
+              variant="secondary"
+              size="icon"
+              className="fixed bottom-16 right-4 shadow-lg"
+              onClick={scrollPhotosToTop}
+              aria-label="Scroll to top"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
           )}
-          <PhotoViewer
-            filePath={settings.outputRoot}
-            accountId={isDownloading ? currentAccountId : undefined}
-            isDownloading={isDownloading}
-            onAccountChange={handleViewerAccountChange}
-            onScrollPositionChange={handlePhotoScroll}
-            scrollContainerRef={photoScrollRef}
-            headerMode={headerMode}
+
+          {/* Debug Menu */}
+          <DebugMenu
+            settings={settings}
+            onUpdateSettings={updateSettings}
+            logs={logs}
+            results={results}
+            onClearLogs={clearLogs}
           />
         </div>
-
-        {/* Scroll To Top */}
-        {hasScrolledPhotos && (
-          <Button
-            variant="secondary"
-            size="icon"
-            className="fixed bottom-16 right-4 shadow-lg"
-            onClick={scrollPhotosToTop}
-            aria-label="Scroll to top"
-          >
-            <ArrowUp className="h-4 w-4" />
-          </Button>
-        )}
-
-        {/* Debug Menu */}
-        <DebugMenu
-          settings={settings}
-          onUpdateSettings={updateSettings}
-          logs={logs}
-          results={results}
-          onClearLogs={clearLogs}
-        />
       </div>
-    </div>
     </FavoritesProvider>
   );
 }
