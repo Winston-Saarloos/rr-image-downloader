@@ -7,6 +7,13 @@ import {
   DialogTitle,
   DialogDescription,
 } from '../../components/ui/dialog';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
 import { Photo } from '../../shared/types';
 import { usePhotoMetadata, ExtendedPhoto } from '../hooks/usePhotoMetadata';
 import { format } from 'date-fns';
@@ -22,6 +29,7 @@ import {
   LabelList,
 } from 'recharts';
 import { useTheme } from '../hooks/useTheme';
+import { cn } from '../../lib/utils';
 
 interface StatsDialogProps {
   open: boolean;
@@ -42,34 +50,19 @@ interface CustomTooltipProps {
   label?: string;
 }
 
-// Custom Tooltip component with rounded corners and dark mode support
 const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
-
   if (active && payload && payload.length) {
     return (
-      <div
-        className={`rounded-lg border shadow-lg p-3 ${
-          isDark
-            ? 'bg-gray-800 border-gray-700 text-gray-100'
-            : 'bg-white border-gray-200 text-gray-900'
-        }`}
-      >
-        <p
-          className={`font-semibold mb-2 ${
-            isDark ? 'text-gray-100' : 'text-gray-900'
-          }`}
-        >
-          {label}
-        </p>
+      <div className="rounded-md border bg-popover text-popover-foreground shadow-md p-3">
+        <p className="font-semibold mb-2 text-foreground">{label}</p>
         {payload.map((entry: TooltipPayload, index: number) => (
           <p
             key={index}
-            className={`text-sm ${isDark ? 'text-gray-300' : 'text-gray-600'}`}
+            className="text-sm text-muted-foreground"
             style={{ color: entry.color }}
           >
-            {entry.name}: <span className="font-semibold">{entry.value}</span>
+            {entry.name}:{' '}
+            <span className="font-semibold text-foreground">{entry.value}</span>
           </p>
         ))}
       </div>
@@ -79,12 +72,273 @@ const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
   return null;
 };
 
-// Custom Legend formatter to capitalize text
+interface CustomCursorProps {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+const CustomCursor: React.FC<CustomCursorProps> = ({ x, y, width, height }) => {
+  return (
+    <rect
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+      fill="hsl(var(--muted))"
+      stroke="hsl(var(--border))"
+      strokeWidth={1}
+      strokeOpacity={0.3}
+      rx={4}
+    />
+  );
+};
+
 const capitalizeLegend = (value: string) => {
   return value
     .split(' ')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ');
+};
+
+const hexToRgba = (hex: string, opacity = 1): string => {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+};
+
+const getThemeAwareColorWithOpacity = (
+  baseColor: string,
+  isDark: boolean
+): string => {
+  if (isDark) {
+    return baseColor;
+  } else {
+    if (baseColor.startsWith('#')) {
+      return hexToRgba(baseColor, 0.9);
+    }
+    return baseColor;
+  }
+};
+
+interface StatCardProps {
+  label: string;
+  value: string | number;
+  subtitle?: string;
+  className?: string;
+}
+
+const StatCard: React.FC<StatCardProps> = ({
+  label,
+  value,
+  subtitle,
+  className,
+}) => {
+  return (
+    <Card className={cn('p-4', className)}>
+      <div className="text-sm text-muted-foreground">{label}</div>
+      <div className="text-2xl font-bold mt-1">{value}</div>
+      {subtitle && (
+        <div className="text-xs text-muted-foreground mt-1">{subtitle}</div>
+      )}
+    </Card>
+  );
+};
+
+interface PhotosPerYearChartProps {
+  data: Array<{
+    year: string;
+    userPhotos: number;
+    feedPhotos: number;
+  }>;
+}
+
+const PhotosPerYearChart: React.FC<PhotosPerYearChartProps> = ({ data }) => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const userPhotosColor = getThemeAwareColorWithOpacity('#f6511d', isDark);
+  const feedPhotosColor = getThemeAwareColorWithOpacity('#ffb400', isDark);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">Photos per Year</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={data}>
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="hsl(var(--border))"
+              opacity={0.3}
+            />
+            <XAxis
+              dataKey="year"
+              stroke="hsl(var(--muted-foreground))"
+              tick={{
+                fill: 'hsl(var(--muted-foreground))',
+                fontSize: 12,
+              }}
+            />
+            <YAxis
+              stroke="hsl(var(--muted-foreground))"
+              tick={{
+                fill: 'hsl(var(--muted-foreground))',
+                fontSize: 12,
+              }}
+            />
+            <Tooltip content={<CustomTooltip />} cursor={<CustomCursor />} />
+            <Legend
+              iconType="circle"
+              formatter={capitalizeLegend}
+              wrapperStyle={{ color: 'hsl(var(--foreground))' }}
+            />
+            <Bar
+              dataKey="userPhotos"
+              fill={userPhotosColor}
+              name="User Photos"
+              radius={[4, 4, 0, 0]}
+            >
+              <LabelList
+                dataKey="userPhotos"
+                position="top"
+                formatter={(value: number) => value || ''}
+                style={{
+                  fill: 'hsl(var(--muted-foreground))',
+                  fontSize: 12,
+                }}
+              />
+            </Bar>
+            <Bar
+              dataKey="feedPhotos"
+              fill={feedPhotosColor}
+              name="Feed Photos"
+              radius={[4, 4, 0, 0]}
+            >
+              <LabelList
+                dataKey="feedPhotos"
+                position="top"
+                formatter={(value: number) => value || ''}
+                style={{
+                  fill: 'hsl(var(--muted-foreground))',
+                  fontSize: 12,
+                }}
+              />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+};
+
+interface ExpandableChartSectionProps {
+  title: string;
+  data: Array<{ [key: string]: string | number }>;
+  dataKey: string;
+  categoryKey: string;
+  color: string;
+  expanded: boolean;
+  onToggle: () => void;
+  showExpandButton: boolean;
+}
+
+const ExpandableChartSection: React.FC<ExpandableChartSectionProps> = ({
+  title,
+  data,
+  dataKey,
+  categoryKey,
+  color,
+  expanded,
+  onToggle,
+  showExpandButton,
+}) => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const displayedData = expanded ? data.slice(0, 100) : data.slice(0, 10);
+  const themeAwareColor = getThemeAwareColorWithOpacity(color, isDark);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg">{title}</CardTitle>
+          {showExpandButton && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onToggle}
+              className="h-8"
+            >
+              {expanded ? (
+                <>
+                  <ChevronUp className="h-4 w-4 mr-1" />
+                  Show Less
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-4 w-4 mr-1" />
+                  Show Top 100
+                </>
+              )}
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer
+          width="100%"
+          height={Math.max(300, displayedData.length * 30)}
+        >
+          <BarChart
+            data={displayedData}
+            layout="vertical"
+            margin={{ top: 5, right: 80, left: 100, bottom: 5 }}
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="hsl(var(--border))"
+              opacity={0.3}
+            />
+            <XAxis
+              type="number"
+              stroke="hsl(var(--muted-foreground))"
+              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+            />
+            <YAxis
+              dataKey={categoryKey}
+              type="category"
+              width={90}
+              interval={0}
+              stroke="hsl(var(--muted-foreground))"
+              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+            />
+            <Tooltip content={<CustomTooltip />} cursor={<CustomCursor />} />
+            <Legend
+              iconType="circle"
+              formatter={capitalizeLegend}
+              wrapperStyle={{ color: 'hsl(var(--foreground))' }}
+            />
+            <Bar
+              dataKey={dataKey}
+              fill={themeAwareColor}
+              name="Count"
+              radius={[0, 4, 4, 0]}
+            >
+              <LabelList
+                dataKey={dataKey}
+                position="right"
+                formatter={(value: number) => value}
+                style={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+              />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
 };
 
 interface PhotoStats {
@@ -457,13 +711,6 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
     return parts.join(', ');
   };
 
-  const displayedRooms = expandedRooms
-    ? stats.photosPerRoom.slice(0, 100)
-    : stats.photosPerRoom.slice(0, 10);
-  const displayedUsers = expandedUsers
-    ? stats.photosPerUser.slice(0, 100)
-    : stats.photosPerUser.slice(0, 10);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -490,247 +737,112 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
           <div className="space-y-6 mt-4">
             {/* Summary Statistics */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              <div className="p-4 border rounded-lg">
-                <div className="text-sm text-muted-foreground">
-                  Total Photos
-                </div>
-                <div className="text-2xl font-bold">
-                  {photos.length + feedPhotos.length}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {photos.length} photos, {feedPhotos.length} feed photos
-                </div>
-              </div>
-              <div className="p-4 border rounded-lg">
-                <div className="text-sm text-muted-foreground">
-                  Unique Rooms
-                </div>
-                <div className="text-2xl font-bold">
-                  {stats.totalUniqueRooms}
-                </div>
-              </div>
-              <div className="p-4 border rounded-lg">
-                <div className="text-sm text-muted-foreground">
-                  Unique Users Tagged
-                </div>
-                <div className="text-2xl font-bold">
-                  {stats.totalUniqueUsers}
-                </div>
-              </div>
-              <div className="p-4 border rounded-lg">
-                <div className="text-sm text-muted-foreground">
-                  Total Cheers
-                </div>
-                <div className="text-2xl font-bold">
-                  {stats.totalCheers.toLocaleString()}
-                </div>
-              </div>
-              <div className="p-4 border rounded-lg">
-                <div className="text-sm text-muted-foreground">
-                  Largest Time Gap
-                </div>
-                <div className="text-lg font-semibold">
-                  {formatTimeGap(stats.largestTimeGap)}
-                </div>
-                {stats.largestTimeGap?.photo1Date &&
-                  stats.largestTimeGap?.photo2Date && (
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {format(stats.largestTimeGap.photo1Date, 'MMM d, yyyy')} →{' '}
-                      {format(stats.largestTimeGap.photo2Date, 'MMM d, yyyy')}
-                    </div>
-                  )}
-              </div>
-              <div className="p-4 border rounded-lg">
-                <div className="text-sm text-muted-foreground">
-                  Smallest Time Gap
-                </div>
-                <div className="text-lg font-semibold">
-                  {formatTimeGap(stats.smallestTimeGap)}
-                </div>
-                {stats.smallestTimeGap?.photo1Date &&
-                  stats.smallestTimeGap?.photo2Date && (
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {format(stats.smallestTimeGap.photo1Date, 'MMM d, yyyy')}{' '}
-                      →{' '}
-                      {format(stats.smallestTimeGap.photo2Date, 'MMM d, yyyy')}
-                    </div>
-                  )}
-              </div>
+              <StatCard
+                label="Total Photos"
+                value={photos.length + feedPhotos.length}
+                subtitle={`${photos.length} photos, ${feedPhotos.length} feed photos`}
+              />
+              <StatCard label="Unique Rooms" value={stats.totalUniqueRooms} />
+              <StatCard
+                label="Unique Users Tagged"
+                value={stats.totalUniqueUsers}
+              />
+              <StatCard
+                label="Total Cheers"
+                value={stats.totalCheers.toLocaleString()}
+              />
+              <StatCard
+                label="Largest Time Gap"
+                value={formatTimeGap(stats.largestTimeGap)}
+                subtitle={
+                  stats.largestTimeGap?.photo1Date &&
+                  stats.largestTimeGap?.photo2Date
+                    ? `${format(stats.largestTimeGap.photo1Date, 'MMM d, yyyy')} → ${format(stats.largestTimeGap.photo2Date, 'MMM d, yyyy')}`
+                    : undefined
+                }
+              />
+              <StatCard
+                label="Smallest Time Gap"
+                value={formatTimeGap(stats.smallestTimeGap)}
+                subtitle={
+                  stats.smallestTimeGap?.photo1Date &&
+                  stats.smallestTimeGap?.photo2Date
+                    ? `${format(stats.smallestTimeGap.photo1Date, 'MMM d, yyyy')} → ${format(stats.smallestTimeGap.photo2Date, 'MMM d, yyyy')}`
+                    : undefined
+                }
+              />
             </div>
 
             {/* Date Range */}
             {stats.firstPhotoDate &&
               stats.latestPhotoDate &&
               stats.timeSpan && (
-                <div className="p-4 border rounded-lg">
-                  <div className="text-sm text-muted-foreground mb-2">
-                    Photo Timeline
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-sm">First Photo:</span>
-                      <span className="font-semibold">
-                        {format(stats.firstPhotoDate, 'MMMM d, yyyy')}
-                      </span>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Photo Timeline</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">
+                          First Photo:
+                        </span>
+                        <span className="font-semibold text-foreground">
+                          {format(stats.firstPhotoDate, 'MMMM d, yyyy')}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">
+                          Latest Photo:
+                        </span>
+                        <span className="font-semibold text-foreground">
+                          {format(stats.latestPhotoDate, 'MMMM d, yyyy')}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">
+                          Time Span:
+                        </span>
+                        <span className="font-semibold text-foreground">
+                          {formatTimeGap(stats.timeSpan)}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm">Latest Photo:</span>
-                      <span className="font-semibold">
-                        {format(stats.latestPhotoDate, 'MMMM d, yyyy')}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm">Time Span:</span>
-                      <span className="font-semibold">
-                        {formatTimeGap(stats.timeSpan)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               )}
 
             {/* Photos per Year Chart */}
             {stats.photosPerYear.length > 0 && (
-              <div className="p-4 border rounded-lg">
-                <h3 className="text-lg font-semibold mb-4">Photos per Year</h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={stats.photosPerYear}>
-                    <CartesianGrid vertical={false} horizontal={false} />
-                    <XAxis dataKey="year" />
-                    <YAxis />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend iconType="circle" formatter={capitalizeLegend} />
-                    <Bar dataKey="userPhotos" fill="#f6511d" name="User Photos">
-                      <LabelList
-                        dataKey="userPhotos"
-                        position="top"
-                        formatter={(value: number) => value || ''}
-                        style={{ fill: 'currentColor', fontSize: '12px' }}
-                      />
-                    </Bar>
-                    <Bar dataKey="feedPhotos" fill="#ffb400" name="Feed Photos">
-                      <LabelList
-                        dataKey="feedPhotos"
-                        position="top"
-                        formatter={(value: number) => value || ''}
-                        style={{ fill: 'currentColor', fontSize: '12px' }}
-                      />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <PhotosPerYearChart data={stats.photosPerYear} />
             )}
 
             {/* Photos per Room Chart */}
             {stats.photosPerRoom.length > 0 && (
-              <div className="p-4 border rounded-lg">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold">Photos per Room</h3>
-                  {stats.photosPerRoom.length > 10 && (
-                    <button
-                      onClick={() => setExpandedRooms(!expandedRooms)}
-                      className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
-                    >
-                      {expandedRooms ? (
-                        <>
-                          <ChevronUp className="h-4 w-4" />
-                          Show Less
-                        </>
-                      ) : (
-                        <>
-                          <ChevronDown className="h-4 w-4" />
-                          Show Top 100
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
-                <ResponsiveContainer
-                  width="100%"
-                  height={Math.max(300, displayedRooms.length * 30)}
-                >
-                  <BarChart
-                    data={displayedRooms}
-                    layout="vertical"
-                    margin={{ top: 5, right: 80, left: 100, bottom: 5 }}
-                  >
-                    <CartesianGrid vertical={false} horizontal={false} />
-                    <XAxis type="number" />
-                    <YAxis
-                      dataKey="room"
-                      type="category"
-                      width={90}
-                      interval={0}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend iconType="circle" formatter={capitalizeLegend} />
-                    <Bar dataKey="count" fill="#00a6ed" name="Count">
-                      <LabelList
-                        dataKey="count"
-                        position="right"
-                        formatter={(value: number) => value}
-                        style={{ fill: 'currentColor' }}
-                      />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <ExpandableChartSection
+                title="Photos per Room"
+                data={stats.photosPerRoom}
+                dataKey="count"
+                categoryKey="room"
+                color="#00a6ed"
+                expanded={expandedRooms}
+                onToggle={() => setExpandedRooms(!expandedRooms)}
+                showExpandButton={stats.photosPerRoom.length > 10}
+              />
             )}
 
             {/* Photos per User Chart */}
             {stats.photosPerUser.length > 0 && (
-              <div className="p-4 border rounded-lg">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold">Photos per User</h3>
-                  {stats.photosPerUser.length > 10 && (
-                    <button
-                      onClick={() => setExpandedUsers(!expandedUsers)}
-                      className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
-                    >
-                      {expandedUsers ? (
-                        <>
-                          <ChevronUp className="h-4 w-4" />
-                          Show Less
-                        </>
-                      ) : (
-                        <>
-                          <ChevronDown className="h-4 w-4" />
-                          Show Top 100
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
-                <ResponsiveContainer
-                  width="100%"
-                  height={Math.max(300, displayedUsers.length * 30)}
-                >
-                  <BarChart
-                    data={displayedUsers}
-                    layout="vertical"
-                    margin={{ top: 5, right: 80, left: 100, bottom: 5 }}
-                  >
-                    <CartesianGrid vertical={false} horizontal={false} />
-                    <XAxis type="number" />
-                    <YAxis
-                      dataKey="user"
-                      type="category"
-                      width={90}
-                      interval={0}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend iconType="circle" formatter={capitalizeLegend} />
-                    <Bar dataKey="count" fill="#7fb800" name="Count">
-                      <LabelList
-                        dataKey="count"
-                        position="right"
-                        formatter={(value: number) => value}
-                        style={{ fill: 'currentColor' }}
-                      />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <ExpandableChartSection
+                title="Photos per User"
+                data={stats.photosPerUser}
+                dataKey="count"
+                categoryKey="user"
+                color="#7fb800"
+                expanded={expandedUsers}
+                onToggle={() => setExpandedUsers(!expandedUsers)}
+                showExpandButton={stats.photosPerUser.length > 10}
+              />
             )}
           </div>
         )}
