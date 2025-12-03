@@ -14,7 +14,7 @@
     "build:main": "tsc && npm run copy:assets",
     "copy:assets": "node -e \"require('fs-extra').copySync('assets', 'dist/main/assets')\"",
     "build:react": "react-scripts build",
-    "build:win": "npm run build:main && npm run build:react && node build-electron.js && electron-builder --win",
+    "build:win": "npm run build:main && npm run build:react && node build-electron.js && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
     "build:win:dir": "npm run build:main && npm run build:react && node build-electron.js && electron-builder --win --dir",
     "dist": "npm run build:main && npm run build:react && node build-electron.js && electron-builder --publish=never",
     "eject": "react-scripts eject",
@@ -92,19 +92,19 @@
     "files": [
       "**/*"
     ],
-    "icon": "public/favicon.ico",
+    "icon": "assets/icon.png",
     "win": {
       "target": [
         "nsis"
       ],
-      "icon": "public/favicon.ico"
+      "icon": "assets/icon.png"
     },
     "mac": {
       "target": [
         "dmg",
         "zip"
       ],
-      "icon": "public/favicon.ico",
+      "icon": "assets/icon.png",
       "category": "public.app-category.utilities"
     },
     "linux": {
@@ -112,7 +112,7 @@
         "AppImage",
         "deb"
       ],
-      "icon": "public/favicon.ico",
+      "icon": "assets/icon.png",
       "category": "Utility"
     }
   },
