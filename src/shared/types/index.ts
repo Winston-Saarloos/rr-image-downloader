@@ -24,6 +24,7 @@ export interface Photo {
   ImageName: string;
   sort?: string;
   CreatedAt?: string;
+  Description?: string;
   localFilePath?: string; // Path to local file on disk (added when loading photos)
   [key: string]: any;
 }
@@ -179,6 +180,9 @@ export interface ElectronAPI {
   getFavorites: () => Promise<ApiResponse<string[]>>;
   toggleFavorite: (photoId: string) => Promise<ApiResponse<boolean>>;
   isFavorite: (photoId: string) => Promise<ApiResponse<boolean>>;
+
+  // Open external URL in system browser
+  openExternal: (url: string) => Promise<void>;
 }
 
 declare global {

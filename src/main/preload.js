@@ -61,4 +61,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getFavorites: () => ipcRenderer.invoke('get-favorites'),
   toggleFavorite: photoId => ipcRenderer.invoke('toggle-favorite', photoId),
   isFavorite: photoId => ipcRenderer.invoke('is-favorite', photoId),
+
+  // Open external URL in system browser
+  openExternal: url => ipcRenderer.invoke('open-external', url),
 });

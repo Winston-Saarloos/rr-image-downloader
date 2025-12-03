@@ -60,6 +60,8 @@ export async function axiosRequest<T = unknown>(
 
     const isOk = status >= 200 && status < 300;
 
+    console.log('Received response: ', isOk);
+
     if (isOk) {
       if (isGenericResponse(data)) {
         return data as GenericResponse<T>;

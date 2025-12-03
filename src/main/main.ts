@@ -5,6 +5,7 @@ import {
   dialog,
   IpcMainInvokeEvent,
   protocol,
+  shell,
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -616,5 +617,13 @@ ipcMain.handle(
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
+  }
+);
+
+// Open external URL in system browser
+ipcMain.handle(
+  'open-external',
+  async (event: IpcMainInvokeEvent, url: string): Promise<void> => {
+    await shell.openExternal(url);
   }
 );

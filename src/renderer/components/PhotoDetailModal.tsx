@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog';
 import { Button } from '../../components/ui/button';
+import { Chip } from '../../components/ui/chip';
 import { Photo } from '../../shared/types';
 import { format } from 'date-fns';
 import { ExtendedPhoto, usePhotoMetadata } from '../hooks/usePhotoMetadata';
@@ -89,6 +90,14 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
               />
             </div>
           )}
+          {description && (
+            <div>
+              <div className="pt-2 border-t">
+                <p className="font-medium mb-2">Description:</p>
+                <p className="text-muted-foreground">{description}</p>
+              </div>
+            </div>
+          )}
 
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -102,7 +111,13 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
                 <Users className="h-4 w-4 text-muted-foreground mt-0.5" />
                 <div>
                   <span className="font-medium">Tagged Users: </span>
-                  <span>{users.join(', ')}</span>
+                  {users.map(user => {
+                    return (
+                      <Chip className="mr-1" key={user}>
+                        @{user}
+                      </Chip>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -125,6 +140,20 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
             <div className="pt-2 border-t text-sm text-muted-foreground">
               <p>Photo ID: {photo.Id}</p>
               {photo.ImageName && <p>Image: {photo.ImageName}</p>}
+              <p>
+                URL:
+                <button
+                  className="text-blue-500 hover:text-blue-600 underline ml-1 cursor-pointer"
+                  onClick={() => {
+                    const url = `https://rec.net/image/${photo.Id}`;
+                    if (window.electronAPI) {
+                      window.electronAPI.openExternal(url);
+                    }
+                  }}
+                >
+                  https://rec.net/image/{photo.Id}
+                </button>
+              </p>
             </div>
           </div>
         </div>
