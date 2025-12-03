@@ -8,6 +8,7 @@ import { DebugMenu } from './components/DebugMenu';
 import { StatsDialog } from './components/StatsDialog';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RecNetSettings, Progress, BulkDataRefreshOptions } from '../shared/types';
+import { FavoritesProvider } from './contexts/FavoritesContext';
 
 function App() {
 
@@ -355,8 +356,9 @@ function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden">
+    <FavoritesProvider>
+      <div className="min-h-screen bg-background">
+        <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden">
         {/* Header */}
         <header
           className={`sticky top-0 z-20 bg-background/95 backdrop-blur transition-[max-height,transform,opacity] duration-300 overflow-hidden ${
@@ -461,6 +463,7 @@ function App() {
         />
       </div>
     </div>
+    </FavoritesProvider>
   );
 }
 

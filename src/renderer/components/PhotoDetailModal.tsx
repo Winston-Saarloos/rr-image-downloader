@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapPin, Users, Calendar } from 'lucide-react';
+import { MapPin, Users, Calendar, Heart } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -7,9 +7,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog';
+import { Button } from '../../components/ui/button';
 import { Photo } from '../../shared/types';
 import { format } from 'date-fns';
 import { ExtendedPhoto, usePhotoMetadata } from '../hooks/usePhotoMetadata';
+import { useFavorites } from '../hooks/useFavorites';
 
 interface PhotoDetailModalProps {
   photo: Photo | null;
@@ -30,6 +32,7 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
     roomMap,
     accountMap
   );
+  const { isFavorite, toggleFavorite } = useFavorites();
 
   if (!photo) return null;
 
@@ -39,13 +42,42 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   const description = extended.Description || '';
   const imageUrl = getPhotoImageUrl(photo);
   const createdAt = photo.CreatedAt ? new Date(photo.CreatedAt) : null;
+  const photoId = photo.Id.toString();
+  const favorited = isFavorite(photoId);
+
+  const handleFavoriteClick = () => {
+    toggleFavorite(photoId);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Photo Details</DialogTitle>
-          <DialogDescription>View full resolution and details</DialogDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <DialogTitle>Photo Details</DialogTitle>
+              <DialogDescription>
+                View full resolution and details
+              </DialogDescription>
+            </div>
+            <div className="mt-4">
+              <Button
+                variant={favorited ? 'default' : 'outline'}
+                size="icon"
+                className={
+                  favorited ? 'bg-red-500 hover:bg-red-600 text-white' : ''
+                }
+                onClick={handleFavoriteClick}
+                aria-label={
+                  favorited ? 'Remove from favorites' : 'Add to favorites'
+                }
+              >
+                <Heart
+                  className={`h-5 w-5 ${favorited ? 'fill-current' : ''}`}
+                />
+              </Button>
+            </div>
+          </div>
         </DialogHeader>
         <div className="space-y-4">
           {imageUrl && (

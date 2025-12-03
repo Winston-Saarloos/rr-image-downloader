@@ -174,6 +174,11 @@ export interface ElectronAPI {
   listAvailableAccounts: () => Promise<ApiResponse<AvailableAccount[]>>;
   loadAccountsData: (accountId: string) => Promise<ApiResponse<any[]>>;
   loadRoomsData: (accountId: string) => Promise<ApiResponse<any[]>>;
+  
+  // Favorites management
+  getFavorites: () => Promise<ApiResponse<string[]>>;
+  toggleFavorite: (photoId: string) => Promise<ApiResponse<boolean>>;
+  isFavorite: (photoId: string) => Promise<ApiResponse<boolean>>;
 }
 
 declare global {

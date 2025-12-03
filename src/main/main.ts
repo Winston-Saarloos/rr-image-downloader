@@ -72,13 +72,13 @@ function createWindow(): void {
     const appPath = app.getAppPath();
     const indexPath = path.join(appPath, 'index.html');
     console.log('Loading index.html from:', indexPath); // Debug log
-    mainWindow.loadFile(indexPath).catch((error) => {
+    mainWindow.loadFile(indexPath).catch(error => {
       console.error('Error loading index.html:', error);
       // Fallback: try alternative path
       if (mainWindow) {
         const altPath = path.join(__dirname, '../../index.html');
         console.log('Trying alternative path:', altPath);
-        mainWindow.loadFile(altPath).catch((fallbackError) => {
+        mainWindow.loadFile(altPath).catch(fallbackError => {
           console.error('Fallback path also failed:', fallbackError);
         });
       }
@@ -87,13 +87,16 @@ function createWindow(): void {
 
   // Add error handlers to debug loading issues
   if (mainWindow) {
-    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
-      console.error('Failed to load:', {
-        errorCode,
-        errorDescription,
-        validatedURL
-      });
-    });
+    mainWindow.webContents.on(
+      'did-fail-load',
+      (event, errorCode, errorDescription, validatedURL) => {
+        console.error('Failed to load:', {
+          errorCode,
+          errorDescription,
+          validatedURL,
+        });
+      }
+    );
 
     mainWindow.webContents.on('dom-ready', () => {
       console.log('DOM ready');
@@ -143,7 +146,7 @@ function registerLocalFileProtocol() {
 app.whenReady().then(() => {
   // Register custom protocol before creating window
   registerLocalFileProtocol();
-  
+
   createWindow();
 
   // Initialize RecNet service
@@ -417,21 +420,21 @@ ipcMain.handle(
 
       if (await fs.pathExists(feedJsonPath)) {
         const feedPhotos: Photo[] = await fs.readJson(feedJsonPath);
-        
+
         // Filter to only include photos that have corresponding image files
         const feedDir = path.join(accountDir, 'feed');
         const photosDir = path.join(accountDir, 'photos');
-        
+
         const photosWithFiles: Photo[] = [];
         for (const photo of feedPhotos) {
           if (!photo.Id) {
             continue;
           }
-          
+
           const photoId = photo.Id.toString();
           const feedPhotoPath = path.join(feedDir, `${photoId}.jpg`);
           const photoPath = path.join(photosDir, `${photoId}.jpg`);
-          
+
           // Check which file exists and add local file path to photo data
           let localFilePath: string | undefined;
           if (await fs.pathExists(feedPhotoPath)) {
@@ -439,7 +442,7 @@ ipcMain.handle(
           } else if (await fs.pathExists(photoPath)) {
             localFilePath = photoPath;
           }
-          
+
           // Include photo if it exists in either feed or photos folder
           if (localFilePath) {
             // Add local file path to photo object for use in renderer
@@ -450,7 +453,7 @@ ipcMain.handle(
             photosWithFiles.push(photoWithPath);
           }
         }
-        
+
         return { success: true, data: photosWithFiles };
       } else {
         return { success: true, data: [] };
@@ -494,7 +497,10 @@ ipcMain.handle(
     try {
       const settings = recNetService.getSettings();
       const accountDir = path.join(settings.outputRoot, accountId);
-      const accountsJsonPath = path.join(accountDir, `${accountId}_accounts.json`);
+      const accountsJsonPath = path.join(
+        accountDir,
+        `${accountId}_accounts.json`
+      );
 
       if (await fs.pathExists(accountsJsonPath)) {
         const accountsData: any[] = await fs.readJson(accountsJsonPath);
@@ -525,6 +531,83 @@ ipcMain.handle(
         return { success: true, data: roomsData };
       } else {
         return { success: true, data: [] };
+      }
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+const getFavoritesPath = (): string => {
+  const userDataPath = app.getPath('userData');
+  return path.join(userDataPath, 'favorites.json');
+};
+
+ipcMain.handle('get-favorites', async (): Promise<ApiResponse<string[]>> => {
+  try {
+    const favoritesPath = getFavoritesPath();
+    if (await fs.pathExists(favoritesPath)) {
+      const favoritesArray: string[] = await fs.readJson(favoritesPath);
+      return { success: true, data: favoritesArray };
+    } else {
+      return { success: true, data: [] };
+    }
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+});
+
+ipcMain.handle(
+  'toggle-favorite',
+  async (
+    event: IpcMainInvokeEvent,
+    photoId: string
+  ): Promise<ApiResponse<boolean>> => {
+    try {
+      const favoritesPath = getFavoritesPath();
+      let favorites: Set<string>;
+
+      if (await fs.pathExists(favoritesPath)) {
+        const favoritesArray: string[] = await fs.readJson(favoritesPath);
+        favorites = new Set(favoritesArray);
+      } else {
+        favorites = new Set<string>();
+      }
+
+      const isFavorite = favorites.has(photoId);
+      if (isFavorite) {
+        favorites.delete(photoId);
+      } else {
+        favorites.add(photoId);
+      }
+
+      // Ensure directory exists
+      await fs.ensureDir(path.dirname(favoritesPath));
+
+      // Save as array for JSON serialization
+      await fs.writeJson(favoritesPath, Array.from(favorites), { spaces: 2 });
+
+      return { success: true, data: !isFavorite };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'is-favorite',
+  async (
+    event: IpcMainInvokeEvent,
+    photoId: string
+  ): Promise<ApiResponse<boolean>> => {
+    try {
+      const favoritesPath = getFavoritesPath();
+      if (await fs.pathExists(favoritesPath)) {
+        const favoritesArray: string[] = await fs.readJson(favoritesPath);
+        const favorites = new Set(favoritesArray);
+        return { success: true, data: favorites.has(photoId) };
+      } else {
+        return { success: true, data: false };
       }
     } catch (error) {
       return { success: false, error: (error as Error).message };

@@ -1,5 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Filter, ArrowUpDown } from 'lucide-react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from 'react';
+import { Search, Filter, ArrowUpDown, Heart } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import {
@@ -12,6 +18,7 @@ import {
 import { Photo, AvailableAccount } from '../../shared/types';
 import { PhotoGrid } from './PhotoGrid';
 import { PhotoDetailModal } from './PhotoDetailModal';
+import { useFavorites } from '../hooks/useFavorites';
 
 interface PhotoViewerProps {
   filePath: string;
@@ -57,14 +64,23 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
   const [feedPhotos, setFeedPhotos] = useState<Photo[]>([]);
   const [photoSource, setPhotoSource] = useState<PhotoSource>('photos');
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
   const activeScrollRef = scrollContainerRef ?? internalScrollRef;
   const isHeaderVisible = headerMode !== 'hidden';
   const showFullControls = headerMode === 'full';
+  const { favorites } = useFavorites();
 
   // Use propAccountId if provided, otherwise use selectedAccountId
   const accountId = propAccountId || selectedAccountId;
-  const activePhotos = photoSource === 'feed' ? feedPhotos : photos;
+  const basePhotos = photoSource === 'feed' ? feedPhotos : photos;
+
+  // Filter photos based on favorites filter
+  const activePhotos = useMemo(() => {
+    if (!showFavoritesOnly) return basePhotos;
+    return basePhotos.filter(photo => favorites.has(photo.Id.toString()));
+  }, [basePhotos, showFavoritesOnly, favorites]);
+
   const activeViewLabel = photoSource === 'feed' ? 'feed photos' : 'photos';
 
   const loadAvailableAccounts = useCallback(async () => {
@@ -340,6 +356,21 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                 onClick={() => setPhotoSource('feed')}
               >
                 Feed ({feedPhotos.length})
+              </Button>
+              <Button
+                size="sm"
+                variant={showFavoritesOnly ? 'default' : 'outline'}
+                onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+                className={
+                  showFavoritesOnly
+                    ? 'bg-red-500 hover:bg-red-600 text-white'
+                    : ''
+                }
+              >
+                <Heart
+                  className={`mr-2 h-4 w-4 ${showFavoritesOnly ? 'fill-current' : ''}`}
+                />
+                Favorites
               </Button>
             </div>
           </div>

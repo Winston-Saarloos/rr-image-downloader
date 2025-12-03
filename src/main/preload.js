@@ -56,4 +56,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Load room data from JSON file
   loadRoomsData: accountId => ipcRenderer.invoke('load-rooms-data', accountId),
+
+  // Favorites management
+  getFavorites: () => ipcRenderer.invoke('get-favorites'),
+  toggleFavorite: photoId => ipcRenderer.invoke('toggle-favorite', photoId),
+  isFavorite: photoId => ipcRenderer.invoke('is-favorite', photoId),
 });

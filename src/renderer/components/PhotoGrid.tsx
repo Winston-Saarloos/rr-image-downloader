@@ -6,11 +6,13 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { MapPin, Users, Calendar } from 'lucide-react';
+import { MapPin, Users, Calendar, Heart } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
 import { Photo } from '../../shared/types';
 import { format } from 'date-fns';
 import { ExtendedPhoto, usePhotoMetadata } from '../hooks/usePhotoMetadata';
+import { useFavorites } from '../hooks/useFavorites';
 
 interface PhotoGridProps {
   photos: Photo[];
@@ -323,13 +325,24 @@ interface PhotoCardProps {
 const PhotoCard: React.FC<PhotoCardProps> = React.memo(
   ({ photo, onClick, room, users, imageUrl, formattedDate }) => {
     const handleClick = React.useCallback(() => onClick(photo), [onClick, photo]);
+    const { isFavorite, toggleFavorite } = useFavorites();
+    const photoId = photo.Id.toString();
+    const favorited = isFavorite(photoId);
+
+    const handleFavoriteClick = React.useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent card click
+        toggleFavorite(photoId);
+      },
+      [toggleFavorite, photoId]
+    );
 
     return (
       <Card
         className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
         onClick={handleClick}
       >
-        <div className="aspect-video relative overflow-hidden bg-muted">
+        <div className="aspect-video relative overflow-hidden bg-muted group">
           {imageUrl ? (
             <img
               src={imageUrl}
@@ -342,6 +355,21 @@ const PhotoCard: React.FC<PhotoCardProps> = React.memo(
               No Image
             </div>
           )}
+          <Button
+            variant="secondary"
+            size="icon"
+            className={`absolute top-2 right-2 h-8 w-8 rounded-full shadow-lg transition-all ${
+              favorited
+                ? 'bg-red-500 hover:bg-red-600 text-white'
+                : 'bg-background/80 hover:bg-background text-muted-foreground opacity-0 group-hover:opacity-100'
+            }`}
+            onClick={handleFavoriteClick}
+            aria-label={favorited ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Heart
+              className={`h-4 w-4 ${favorited ? 'fill-current' : ''}`}
+            />
+          </Button>
         </div>
         <CardContent className="p-4 space-y-2">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
