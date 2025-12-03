@@ -37,37 +37,30 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
 }) => {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [groupBy, setGroupBy] = useState<'none' | 'room' | 'user' | 'date'>('none');
-  const [sortBy, setSortBy] = useState<'oldest-to-newest' | 'newest-to-oldest' | 'most-popular'>('newest-to-oldest');
+  const [groupBy, setGroupBy] = useState<'none' | 'room' | 'user' | 'date'>(
+    'none'
+  );
+  const [sortBy, setSortBy] = useState<
+    'oldest-to-newest' | 'newest-to-oldest' | 'most-popular'
+  >('newest-to-oldest');
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [availableAccounts, setAvailableAccounts] = useState<AvailableAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>(propAccountId);
+  const [availableAccounts, setAvailableAccounts] = useState<
+    AvailableAccount[]
+  >([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<
+    string | undefined
+  >(propAccountId);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [roomMap, setRoomMap] = useState<Map<string, string>>(new Map());
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
-  const [downloadedCounts, setDownloadedCounts] = useState<
-    Map<string, { photos: number; feed: number }>
-  >(new Map());
   const [feedPhotos, setFeedPhotos] = useState<Photo[]>([]);
   const [photoSource, setPhotoSource] = useState<PhotoSource>('photos');
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
   const activeScrollRef = scrollContainerRef ?? internalScrollRef;
   const isHeaderVisible = headerMode !== 'hidden';
   const showFullControls = headerMode === 'full';
-
-  const updateDownloadedCounts = useCallback(
-    (account: string, counts: Partial<{ photos: number; feed: number }>) => {
-      setDownloadedCounts((prev) => {
-        const current = prev.get(account) || { photos: 0, feed: 0 };
-        const next = new Map(prev);
-        next.set(account, { ...current, ...counts });
-        return next;
-      });
-    },
-    []
-  );
 
   // Use propAccountId if provided, otherwise use selectedAccountId
   const accountId = propAccountId || selectedAccountId;
@@ -90,8 +83,6 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
               onAccountChange(firstAccountId);
             }
           }
-          // Start downloaded counts at 0; they get updated lazily when a specific account's photos are loaded
-          setDownloadedCounts(new Map());
         }
       }
     } catch (error) {
@@ -115,9 +106,16 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           // Room data structure may vary, try common field names
           for (const room of result.data) {
             // Try multiple possible field names for room ID
-            const roomId = room.id || room.roomId || room.Id || room.RoomId || room.room_id;
+            const roomId =
+              room.id || room.roomId || room.Id || room.RoomId || room.room_id;
             // Try multiple possible field names for room name
-            const roomName = room.name || room.roomName || room.Name || room.RoomName || room.title || room.Title;
+            const roomName =
+              room.name ||
+              room.roomName ||
+              room.Name ||
+              room.RoomName ||
+              room.title ||
+              room.Title;
             if (roomId && roomName) {
               roomMapping.set(String(roomId), roomName);
               // Also try with different string formats
@@ -126,7 +124,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
               }
             }
           }
-          console.log(`Loaded ${roomMapping.size} rooms into mapping`, Array.from(roomMapping.entries()).slice(0, 5));
+          console.log(
+            `Loaded ${roomMapping.size} rooms into mapping`,
+            Array.from(roomMapping.entries()).slice(0, 5)
+          );
           setRoomMap(roomMapping);
         } else {
           console.log('No room data found or failed to load');
@@ -153,7 +154,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           // Account data structure may vary, try common field names
           for (const account of result.data) {
             const accountId = account.accountId || account.id || account.Id;
-            const accountName = account.username || account.displayName || account.name;
+            const accountName =
+              account.username || account.displayName || account.name;
             if (accountId && accountName) {
               accountMapping.set(String(accountId), accountName);
             }
@@ -184,18 +186,14 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
 
         if (photosResult.success && photosResult.data) {
           setPhotos(photosResult.data);
-          updateDownloadedCounts(accountId, { photos: photosResult.data.length });
         } else {
           setPhotos([]);
-          updateDownloadedCounts(accountId, { photos: 0 });
         }
 
         if (feedPhotosResult.success && feedPhotosResult.data) {
           setFeedPhotos(feedPhotosResult.data);
-          updateDownloadedCounts(accountId, { feed: feedPhotosResult.data.length });
         } else {
           setFeedPhotos([]);
-          updateDownloadedCounts(accountId, { feed: 0 });
         }
       } else {
         setPhotos([]);
@@ -208,7 +206,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [filePath, accountId, updateDownloadedCounts]);
+  }, [filePath, accountId]);
 
   // Load available accounts on mount and when filePath changes
   useEffect(() => {
@@ -254,7 +252,14 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     return () => {
       clearInterval(interval);
     };
-  }, [isDownloading, accountId, filePath, loadPhotos, loadRoomData, loadAccountData]);
+  }, [
+    isDownloading,
+    accountId,
+    filePath,
+    loadPhotos,
+    loadRoomData,
+    loadAccountData,
+  ]);
 
   const handlePhotoClick = useCallback((photo: Photo) => {
     setSelectedPhoto(photo);
@@ -274,21 +279,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   };
 
   const getAccountDisplayName = (account: AvailableAccount): string => {
-    // Get username from accountMap if available, otherwise use accountId
-    const accountUsername = accountMap.get(account.accountId) || account.accountId;
-    
-    const counts =
-      downloadedCounts.get(account.accountId) ||
-      (account.accountId === accountId
-        ? { photos: photos.length, feed: feedPhotos.length }
-        : { photos: 0, feed: 0 });
+    const accountUsername =
+      accountMap.get(account.accountId) || account.accountId;
 
-    const photoLabel = `${counts.photos}/${account.photoCount} photos`;
-    const feedLabel = account.hasFeed
-      ? `${counts.feed}/${account.feedCount} feed`
-      : null;
-    
-    return `${accountUsername} (${[photoLabel, feedLabel].filter(Boolean).join(', ')})`;
+    return accountUsername;
   };
 
   return (
@@ -313,8 +307,11 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                     <SelectValue placeholder="Select an account" />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableAccounts.map((account) => (
-                      <SelectItem key={account.accountId} value={account.accountId}>
+                    {availableAccounts.map(account => (
+                      <SelectItem
+                        key={account.accountId}
+                        value={account.accountId}
+                      >
                         {getAccountDisplayName(account)}
                       </SelectItem>
                     ))}
@@ -350,38 +347,52 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
 
         {(showFullControls || headerMode === 'compact') && (
           <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search photos..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          <Select value={groupBy} onValueChange={(value: 'none' | 'room' | 'user' | 'date') => setGroupBy(value)}>
-            <SelectTrigger className="w-full sm:w-[180px]">
-              <Filter className="mr-2 h-4 w-4" />
-              <SelectValue placeholder="Group by" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">No Grouping</SelectItem>
-              <SelectItem value="room">Group by Room</SelectItem>
-              <SelectItem value="user">Group by User</SelectItem>
-              <SelectItem value="date">Group by Date</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={sortBy} onValueChange={(value: 'oldest-to-newest' | 'newest-to-oldest' | 'most-popular') => setSortBy(value)}>
-            <SelectTrigger className="w-full sm:w-[200px]">
-              <ArrowUpDown className="mr-2 h-4 w-4" />
-              <SelectValue placeholder="Sort by" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="oldest-to-newest">Oldest to Newest</SelectItem>
-              <SelectItem value="newest-to-oldest">Newest to Oldest</SelectItem>
-              <SelectItem value="most-popular">Most Popular</SelectItem>
-            </SelectContent>
-          </Select>
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search photos..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Select
+              value={groupBy}
+              onValueChange={(value: 'none' | 'room' | 'user' | 'date') =>
+                setGroupBy(value)
+              }
+            >
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <Filter className="mr-2 h-4 w-4" />
+                <SelectValue placeholder="Group by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No Grouping</SelectItem>
+                <SelectItem value="room">Group by Room</SelectItem>
+                <SelectItem value="user">Group by User</SelectItem>
+                <SelectItem value="date">Group by Date</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={sortBy}
+              onValueChange={(
+                value: 'oldest-to-newest' | 'newest-to-oldest' | 'most-popular'
+              ) => setSortBy(value)}
+            >
+              <SelectTrigger className="w-full sm:w-[200px]">
+                <ArrowUpDown className="mr-2 h-4 w-4" />
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="oldest-to-newest">
+                  Oldest to Newest
+                </SelectItem>
+                <SelectItem value="newest-to-oldest">
+                  Newest to Oldest
+                </SelectItem>
+                <SelectItem value="most-popular">Most Popular</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         )}
       </div>
@@ -393,7 +404,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           </div>
         ) : !accountId && availableAccounts.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>No accounts with metadata found. Download photos to get started.</p>
+            <p>
+              No accounts with metadata found. Download photos to get started.
+            </p>
           </div>
         ) : loading ? (
           <div className="text-center py-12 text-muted-foreground">

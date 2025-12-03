@@ -1,6 +1,6 @@
 {
   "name": "recnet-photo-downloader",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "RecNet Photo Downloader - Download photos from Rec Room players",
   "main": "dist/main/main/main.js",
   "homepage": "./",
@@ -94,16 +94,24 @@
     ],
     "icon": "public/favicon.ico",
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "public/favicon.ico"
     },
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "public/favicon.ico",
       "category": "public.app-category.utilities"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "public/favicon.ico",
       "category": "Utility"
     }

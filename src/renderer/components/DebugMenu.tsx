@@ -52,9 +52,9 @@ export const DebugMenu: React.FC<DebugMenuProps> = ({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
+            <DialogTitle>
               <span>Debug Menu</span>
-              <span className="text-sm font-normal text-muted-foreground">
+              <span className="text-sm font-normal text-muted-foreground pl-2">
                 v{packageJson.version}
               </span>
             </DialogTitle>
@@ -75,4 +75,3 @@ export const DebugMenu: React.FC<DebugMenuProps> = ({
     </>
   );
 };
-
