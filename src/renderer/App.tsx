@@ -1,13 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, BarChart3, ArrowUp } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { DownloadPanel } from './components/DownloadPanel';
 import { PhotoViewer } from './components/PhotoViewer';
 import { ProgressDisplay } from './components/ProgressDisplay';
-import { DebugMenu } from './components/DebugMenu';
 import { StatsDialog } from './components/StatsDialog';
-import { ThemeToggle } from './components/ThemeToggle';
-import { UpdateNotification } from './components/UpdateNotification';
+import { CustomTitleBar } from './components/CustomTitleBar';
 import {
   RecNetSettings,
   Progress,
@@ -379,42 +377,20 @@ function App() {
   return (
     <FavoritesProvider>
       <div className="min-h-screen bg-background">
-        <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden">
-          {/* Header */}
-          <header
-            className={`sticky top-0 z-20 bg-background/95 backdrop-blur transition-[max-height,transform,opacity] duration-300 overflow-hidden ${
-              headerMode === 'hidden'
-                ? '-translate-y-full opacity-0 pointer-events-none max-h-0'
-                : 'translate-y-0 opacity-100 max-h-[800px]'
-            }`}
-          >
-            {headerMode === 'full' && (
-              <div className="space-y-3 px-3 sm:px-4 lg:px-6 py-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <h1 className="text-4xl font-bold leading-tight">
-                      Photo Viewer
-                    </h1>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <ThemeToggle />
-                    <Button
-                      variant="outline"
-                      onClick={() => setStatsDialogOpen(true)}
-                      disabled={!currentAccountId}
-                    >
-                      <BarChart3 className="mr-2 h-4 w-4" />
-                      Stats
-                    </Button>
-                    <Button onClick={() => setDownloadPanelOpen(true)}>
-                      <Download className="mr-2 h-4 w-4" />
-                      Download
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </header>
+        {/* Custom Title Bar */}
+        <CustomTitleBar
+          onDownloadClick={() => setDownloadPanelOpen(true)}
+          onStatsClick={() => setStatsDialogOpen(true)}
+          settings={settings}
+          onUpdateSettings={updateSettings}
+          logs={logs}
+          results={results}
+          onClearLogs={clearLogs}
+          currentAccountId={currentAccountId}
+        />
+
+        <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden pt-14">
+          {/* Header space removed - using custom title bar instead */}
 
           {/* Download Panel Modal */}
           <DownloadPanel
@@ -475,18 +451,6 @@ function App() {
               <ArrowUp className="h-4 w-4" />
             </Button>
           )}
-
-          {/* Debug Menu */}
-          <DebugMenu
-            settings={settings}
-            onUpdateSettings={updateSettings}
-            logs={logs}
-            results={results}
-            onClearLogs={clearLogs}
-          />
-
-          {/* Update Notification */}
-          <UpdateNotification />
         </div>
       </div>
     </FavoritesProvider>

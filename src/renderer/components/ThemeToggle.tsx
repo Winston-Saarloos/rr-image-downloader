@@ -8,8 +8,9 @@ export const ThemeToggle: React.FC = () => {
 
   return (
     <Button
-      variant="outline"
+      variant="ghost"
       size="icon"
+      className="h-8 w-8"
       onClick={toggleTheme}
       aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
     >

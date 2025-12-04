@@ -58,6 +58,7 @@ function createWindow(): void {
     height: 700,
     minWidth: 800,
     minHeight: 600,
+    frame: false, // Remove default title bar for custom header
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -758,4 +759,31 @@ ipcMain.handle('install-update', async (): Promise<void> => {
 
 ipcMain.handle('get-app-version', async (): Promise<string> => {
   return app.getVersion();
+});
+
+// Window controls
+ipcMain.handle('window-minimize', () => {
+  if (mainWindow) {
+    mainWindow.minimize();
+  }
+});
+
+ipcMain.handle('window-maximize', () => {
+  if (mainWindow) {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  }
+});
+
+ipcMain.handle('window-close', () => {
+  if (mainWindow) {
+    mainWindow.close();
+  }
+});
+
+ipcMain.handle('window-is-maximized', () => {
+  return mainWindow ? mainWindow.isMaximized() : false;
 });
