@@ -68,4 +68,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Open external URL in system browser
   openExternal: url => ipcRenderer.invoke('open-external', url),
+
+  // Auto-updater
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('download-update'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
+  // Update event listeners
+  onUpdateAvailable: callback => {
+    ipcRenderer.on('update-available', (event, data) => callback(data));
+  },
+  onUpdateNotAvailable: callback => {
+    ipcRenderer.on('update-not-available', () => callback());
+  },
+  onUpdateDownloadProgress: callback => {
+    ipcRenderer.on('update-download-progress', (event, data) => callback(data));
+  },
+  onUpdateDownloaded: callback => {
+    ipcRenderer.on('update-downloaded', (event, data) => callback(data));
+  },
+  onUpdateError: callback => {
+    ipcRenderer.on('update-error', (event, data) => callback(data));
+  },
+
+  // Remove update listeners
+  removeUpdateListeners: () => {
+    ipcRenderer.removeAllListeners('update-available');
+    ipcRenderer.removeAllListeners('update-not-available');
+    ipcRenderer.removeAllListeners('update-download-progress');
+    ipcRenderer.removeAllListeners('update-downloaded');
+    ipcRenderer.removeAllListeners('update-error');
+  },
 });

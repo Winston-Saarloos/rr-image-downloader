@@ -207,6 +207,30 @@ export interface ElectronAPI {
 
   // Open external URL in system browser
   openExternal: (url: string) => Promise<void>;
+
+  // Auto-updater
+  checkForUpdates: () => Promise<void>;
+  downloadUpdate: () => Promise<void>;
+  installUpdate: () => Promise<void>;
+  getAppVersion: () => Promise<string>;
+  onUpdateAvailable: (
+    callback: (info: {
+      version: string;
+      releaseDate?: string;
+      releaseNotes?: string;
+    }) => void
+  ) => void;
+  onUpdateNotAvailable: (callback: () => void) => void;
+  onUpdateDownloadProgress: (
+    callback: (progress: {
+      percent: number;
+      transferred: number;
+      total: number;
+    }) => void
+  ) => void;
+  onUpdateDownloaded: (callback: (info: { version: string }) => void) => void;
+  onUpdateError: (callback: (error: { message: string }) => void) => void;
+  removeUpdateListeners: () => void;
 }
 
 declare global {

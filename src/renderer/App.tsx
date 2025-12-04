@@ -7,6 +7,7 @@ import { ProgressDisplay } from './components/ProgressDisplay';
 import { DebugMenu } from './components/DebugMenu';
 import { StatsDialog } from './components/StatsDialog';
 import { ThemeToggle } from './components/ThemeToggle';
+import { UpdateNotification } from './components/UpdateNotification';
 import {
   RecNetSettings,
   Progress,
@@ -483,6 +484,9 @@ function App() {
             results={results}
             onClearLogs={clearLogs}
           />
+
+          {/* Update Notification */}
+          <UpdateNotification />
         </div>
       </div>
     </FavoritesProvider>

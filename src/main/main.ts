@@ -9,6 +9,7 @@ import {
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
+import { autoUpdater } from 'electron-updater';
 import { RecNetService } from './services/recnet-service';
 import {
   CollectionResult,
@@ -23,6 +24,7 @@ import { Event } from './models/Event';
 // Keep a global reference of the window object
 let mainWindow: BrowserWindow | null = null;
 let recNetService: RecNetService;
+const isDev = process.argv.includes('--dev');
 
 interface CollectPhotosParams {
   accountId: string;
@@ -66,7 +68,6 @@ function createWindow(): void {
   });
 
   // Load the app
-  const isDev = process.argv.includes('--dev');
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000');
   } else {
@@ -106,7 +107,7 @@ function createWindow(): void {
   }
 
   // Open DevTools in development
-  if (process.argv.includes('--dev')) {
+  if (isDev) {
     mainWindow.webContents.openDevTools();
   }
 
@@ -144,6 +145,76 @@ function registerLocalFileProtocol() {
   });
 }
 
+// Setup auto-updater event handlers
+function setupAutoUpdater() {
+  if (isDev) {
+    console.log('Auto-updater disabled in development mode');
+    return;
+  }
+
+  // Configure auto-updater
+  autoUpdater.autoDownload = true; // Auto-download updates when available
+  autoUpdater.autoInstallOnAppQuit = true; // Install on app quit
+
+  // Update available
+  autoUpdater.on('update-available', info => {
+    console.log('Update available:', info.version);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-available', {
+        version: info.version,
+        releaseDate: info.releaseDate,
+        releaseNotes: info.releaseNotes,
+      });
+    }
+  });
+
+  // Update not available
+  autoUpdater.on('update-not-available', info => {
+    console.log('Update not available');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-not-available');
+    }
+  });
+
+  // Update download progress
+  autoUpdater.on('download-progress', progressObj => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-download-progress', {
+        percent: progressObj.percent,
+        transferred: progressObj.transferred,
+        total: progressObj.total,
+      });
+    }
+  });
+
+  // Update downloaded and ready to install
+  autoUpdater.on('update-downloaded', info => {
+    console.log('Update downloaded:', info.version);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-downloaded', {
+        version: info.version,
+      });
+    }
+  });
+
+  // Error handling
+  autoUpdater.on('error', error => {
+    console.error('Auto-updater error:', error);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-error', {
+        message: error.message,
+      });
+    }
+  });
+
+  // Check for updates on startup (after a short delay to let app initialize)
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(error => {
+      console.error('Error checking for updates:', error);
+    });
+  }, 5000); // Wait 5 seconds after app start
+}
+
 // App event handlers
 app.whenReady().then(() => {
   // Register custom protocol before creating window
@@ -156,6 +227,9 @@ app.whenReady().then(() => {
 
   // Forward progress events from service to renderer
   setupProgressForwarding();
+
+  // Setup auto-updater
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -652,3 +726,36 @@ ipcMain.handle(
     await shell.openExternal(url);
   }
 );
+
+// Auto-updater IPC handlers
+ipcMain.handle('check-for-updates', async (): Promise<void> => {
+  if (!isDev) {
+    try {
+      await autoUpdater.checkForUpdates();
+    } catch (error) {
+      console.error('Error checking for updates:', error);
+      throw error;
+    }
+  }
+});
+
+ipcMain.handle('download-update', async (): Promise<void> => {
+  if (!isDev) {
+    try {
+      await autoUpdater.downloadUpdate();
+    } catch (error) {
+      console.error('Error downloading update:', error);
+      throw error;
+    }
+  }
+});
+
+ipcMain.handle('install-update', async (): Promise<void> => {
+  if (!isDev) {
+    autoUpdater.quitAndInstall(false, true);
+  }
+});
+
+ipcMain.handle('get-app-version', async (): Promise<string> => {
+  return app.getVersion();
+});
