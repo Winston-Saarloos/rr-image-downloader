@@ -1,3 +1,5 @@
+export type { Event } from '../../main/models/Event';
+
 export interface RecNetSettings {
   outputRoot: string;
   cdnBase: string;
@@ -194,7 +196,9 @@ export interface ElectronAPI {
   listAvailableAccounts: () => Promise<ApiResponse<AvailableAccount[]>>;
   loadAccountsData: (accountId: string) => Promise<ApiResponse<any[]>>;
   loadRoomsData: (accountId: string) => Promise<ApiResponse<any[]>>;
-  loadEventsData: (accountId: string) => Promise<ApiResponse<Event[]>>;
+  loadEventsData: (
+    accountId: string
+  ) => Promise<ApiResponse<import('../../main/models/Event').Event[]>>;
 
   // Favorites management
   getFavorites: () => Promise<ApiResponse<string[]>>;

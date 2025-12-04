@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from '../../components/ui/select';
 import { Photo, AvailableAccount } from '../../shared/types';
+import type { Event as RecNetEvent } from '../../main/models/Event';
 import { PhotoGrid } from './PhotoGrid';
 import { PhotoDetailModal } from './PhotoDetailModal';
 import { useFavorites } from '../hooks/useFavorites';
@@ -190,7 +191,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         const result = await window.electronAPI.loadEventsData(accountId);
         if (result.success && result.data) {
           const eventMapping = new Map<string, string>();
-          for (const event of result.data) {
+          const events = result.data as RecNetEvent[];
+          for (const event of events) {
             const eventId = event.PlayerEventId
               ? String(event.PlayerEventId)
               : undefined;
@@ -496,6 +498,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
             eventMap={eventMap}
             onScrollPositionChange={onScrollPositionChange}
             scrollContainerRef={activeScrollRef}
+            accountId={accountId}
           />
         )}
       </div>

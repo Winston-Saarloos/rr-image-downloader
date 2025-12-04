@@ -26,6 +26,7 @@ interface PhotoGridProps {
   scrollContainerRef?: React.RefObject<HTMLDivElement>;
   onScrollPositionChange?: (scrollTop: number) => void;
   className?: string;
+  accountId?: string;
 }
 
 const PhotoGridComponent: React.FC<PhotoGridProps> = ({
@@ -40,6 +41,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   scrollContainerRef: scrollContainerRefProp,
   onScrollPositionChange,
   className = '',
+  accountId,
 }) => {
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl, getPhotoEvent } =
@@ -136,12 +138,65 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
         }
       }
 
+      if (groupBy === 'room') {
+        const room = getPhotoRoom(photo);
+        if (room === 'No Room Data' || room === 'null') {
+          return; // Skip photos without room data
+        }
+      }
+
+      if (groupBy === 'user' && accountId) {
+        const extended = photo as ExtendedPhoto;
+        const userIds =
+          extended.TaggedPlayerIds ||
+          extended.Users ||
+          extended.TaggedUsers ||
+          [];
+
+        if (!Array.isArray(userIds)) {
+          return; // Skip if no valid user IDs
+        }
+
+        // Convert accountId to string for comparison
+        const accountIdStr = String(accountId);
+
+        // Filter out the owner from the list of tagged users
+        const otherUsers = userIds.filter(
+          userId => String(userId) !== accountIdStr
+        );
+
+        // Skip if only owner is tagged
+        if (otherUsers.length === 0) {
+          return;
+        }
+      }
+
       const key =
         groupBy === 'room'
           ? getPhotoRoom(photo)
           : groupBy === 'user'
             ? (() => {
                 const users = getPhotoUsers(photo);
+                // Filter out owner from display if accountId is provided
+                if (accountId) {
+                  const extended = photo as ExtendedPhoto;
+                  const userIds =
+                    extended.TaggedPlayerIds ||
+                    extended.Users ||
+                    extended.TaggedUsers ||
+                    [];
+                  const accountIdStr = String(accountId);
+                  const otherUserIds = userIds.filter(
+                    userId => String(userId) !== accountIdStr
+                  );
+                  const otherUsers = otherUserIds.map(userId => {
+                    const userName = accountMap.get(String(userId));
+                    return userName || String(userId);
+                  });
+                  return otherUsers.length > 0
+                    ? otherUsers.join(', ')
+                    : 'Untagged';
+                }
                 return users.length > 0 ? users.join(', ') : 'Untagged';
               })()
             : groupBy === 'date'
@@ -171,7 +226,15 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
     });
 
     return groups;
-  }, [filteredPhotos, groupBy, getPhotoRoom, getPhotoUsers, getPhotoEvent]);
+  }, [
+    filteredPhotos,
+    groupBy,
+    getPhotoRoom,
+    getPhotoUsers,
+    getPhotoEvent,
+    accountId,
+    accountMap,
+  ]);
 
   // Track container size for responsive virtualization
   useEffect(() => {
