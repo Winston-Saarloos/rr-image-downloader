@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapPin, Users, Calendar, Heart } from 'lucide-react';
+import { MapPin, Users, Calendar, Heart, Ticket } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,7 @@ interface PhotoDetailModalProps {
   onClose: () => void;
   roomMap?: Map<string, string>;
   accountMap?: Map<string, string>;
+  eventMap?: Map<string, string>;
 }
 
 const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
@@ -28,11 +29,10 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   onClose,
   roomMap = new Map(),
   accountMap = new Map(),
+  eventMap = new Map(),
 }) => {
-  const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl } = usePhotoMetadata(
-    roomMap,
-    accountMap
-  );
+  const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl, getPhotoEvent } =
+    usePhotoMetadata(roomMap, accountMap, eventMap);
   const { isFavorite, toggleFavorite } = useFavorites();
 
   if (!photo) return null;
@@ -45,6 +45,7 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   const createdAt = photo.CreatedAt ? new Date(photo.CreatedAt) : null;
   const photoId = photo.Id.toString();
   const favorited = isFavorite(photoId);
+  const eventInfo = getPhotoEvent(photo);
 
   const handleFavoriteClick = () => {
     toggleFavorite(photoId);
@@ -104,6 +105,15 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
               <MapPin className="h-4 w-4 text-muted-foreground" />
               <span className="font-medium">Room:</span>
               <span>{room}</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Ticket className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">Event:</span>
+              <span>
+                {eventInfo.name ||
+                  (eventInfo.id ? `Event ${eventInfo.id}` : 'No event data')}
+              </span>
             </div>
 
             {users.length > 0 && (

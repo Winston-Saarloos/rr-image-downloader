@@ -18,6 +18,7 @@ import {
   AccountInfo,
   Photo,
 } from '../shared/types';
+import { Event } from './models/Event';
 
 // Keep a global reference of the window object
 let mainWindow: BrowserWindow | null = null;
@@ -534,6 +535,30 @@ ipcMain.handle(
       if (await fs.pathExists(roomsJsonPath)) {
         const roomsData: any[] = await fs.readJson(roomsJsonPath);
         return { success: true, data: roomsData };
+      } else {
+        return { success: true, data: [] };
+      }
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+// Load event data from JSON file
+ipcMain.handle(
+  'load-events-data',
+  async (
+    event: IpcMainInvokeEvent,
+    accountId: string
+  ): Promise<ApiResponse<Event[]>> => {
+    try {
+      const settings = recNetService.getSettings();
+      const accountDir = path.join(settings.outputRoot, accountId);
+      const eventsJsonPath = path.join(accountDir, `${accountId}_events.json`);
+
+      if (await fs.pathExists(eventsJsonPath)) {
+        const eventsData: Event[] = await fs.readJson(eventsJsonPath);
+        return { success: true, data: eventsData };
       } else {
         return { success: true, data: [] };
       }

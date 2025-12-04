@@ -41,4 +41,3 @@ const Chip = React.forwardRef<HTMLDivElement, ChipProps>(
 Chip.displayName = 'Chip';
 
 export { Chip, chipVariants };
-

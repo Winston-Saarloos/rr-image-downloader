@@ -44,9 +44,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
 }) => {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [groupBy, setGroupBy] = useState<'none' | 'room' | 'user' | 'date'>(
-    'none'
-  );
+  const [groupBy, setGroupBy] = useState<
+    'none' | 'room' | 'user' | 'date' | 'event'
+  >('none');
   const [sortBy, setSortBy] = useState<
     'oldest-to-newest' | 'newest-to-oldest' | 'most-popular'
   >('newest-to-oldest');
@@ -62,6 +62,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [roomMap, setRoomMap] = useState<Map<string, string>>(new Map());
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
+  const [eventMap, setEventMap] = useState<Map<string, string>>(new Map());
   const [feedPhotos, setFeedPhotos] = useState<Photo[]>([]);
   const [photoSource, setPhotoSource] = useState<PhotoSource>('photos');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
@@ -178,6 +179,37 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
   }, [accountId]);
 
+  const loadEventData = useCallback(async () => {
+    if (!accountId) {
+      setEventMap(new Map());
+      return;
+    }
+
+    try {
+      if (window.electronAPI) {
+        const result = await window.electronAPI.loadEventsData(accountId);
+        if (result.success && result.data) {
+          const eventMapping = new Map<string, string>();
+          for (const event of result.data) {
+            const eventId = event.PlayerEventId
+              ? String(event.PlayerEventId)
+              : undefined;
+            const eventName = event.Name;
+            if (eventId) {
+              eventMapping.set(eventId, eventName || eventId);
+            }
+          }
+          setEventMap(eventMapping);
+        } else {
+          setEventMap(new Map());
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load event data:', error);
+      setEventMap(new Map());
+    }
+  }, [accountId]);
+
   const loadPhotos = useCallback(async () => {
     if (!filePath || !accountId) {
       setPhotos([]);
@@ -237,13 +269,22 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       loadPhotos();
       loadRoomData();
       loadAccountData();
+      loadEventData();
     } else {
       setPhotos([]);
       setFeedPhotos([]);
       setRoomMap(new Map());
       setAccountMap(new Map());
+      setEventMap(new Map());
     }
-  }, [filePath, accountId, loadPhotos, loadRoomData, loadAccountData]);
+  }, [
+    filePath,
+    accountId,
+    loadPhotos,
+    loadRoomData,
+    loadAccountData,
+    loadEventData,
+  ]);
 
   // Reload photos, room data, and account data periodically during download
   useEffect(() => {
@@ -256,6 +297,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       loadPhotos();
       loadRoomData();
       loadAccountData();
+      loadEventData();
     }, 2000);
 
     return () => {
@@ -268,6 +310,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     loadPhotos,
     loadRoomData,
     loadAccountData,
+    loadEventData,
   ]);
 
   const handlePhotoClick = useCallback((photo: Photo) => {
@@ -382,9 +425,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
             </div>
             <Select
               value={groupBy}
-              onValueChange={(value: 'none' | 'room' | 'user' | 'date') =>
-                setGroupBy(value)
-              }
+              onValueChange={(
+                value: 'none' | 'room' | 'user' | 'date' | 'event'
+              ) => setGroupBy(value)}
             >
               <SelectTrigger className="w-full sm:w-[180px]">
                 <Filter className="mr-2 h-4 w-4" />
@@ -395,6 +438,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                 <SelectItem value="room">Group by Room</SelectItem>
                 <SelectItem value="user">Group by User</SelectItem>
                 <SelectItem value="date">Group by Date</SelectItem>
+                <SelectItem value="event">Group by Event</SelectItem>
               </SelectContent>
             </Select>
             <Select
@@ -449,6 +493,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
             sortBy={sortBy}
             roomMap={roomMap}
             accountMap={accountMap}
+            eventMap={eventMap}
             onScrollPositionChange={onScrollPositionChange}
             scrollContainerRef={activeScrollRef}
           />
@@ -461,6 +506,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         onClose={handleCloseModal}
         roomMap={roomMap}
         accountMap={accountMap}
+        eventMap={eventMap}
       />
     </div>
   );

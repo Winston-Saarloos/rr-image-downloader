@@ -10,15 +10,42 @@ export interface ExtendedPhoto extends Photo {
   TaggedUsers?: string[];
   TaggedPlayerIds?: string[];
   Description?: string;
+  EventId?: string | number | null;
+  eventId?: string | number | null;
+  PlayerEventId?: string | number | null;
+  playerEventId?: string | number | null;
+  EventInstanceId?: string | number | null;
+  eventInstanceId?: string | number | null;
+  EventName?: string;
+  eventName?: string;
+  PlayerEventName?: string;
+  Event?: {
+    Id?: string | number | null;
+    id?: string | number | null;
+    eventId?: string | number | null;
+    EventId?: string | number | null;
+    Name?: string;
+    name?: string;
+    Title?: string;
+    title?: string;
+    [key: string]: any;
+  };
+}
+
+export interface PhotoEventInfo {
+  id?: string;
+  name?: string;
 }
 
 export const usePhotoMetadata = (
   roomMap?: Map<string, string>,
-  accountMap?: Map<string, string>
+  accountMap?: Map<string, string>,
+  eventMap?: Map<string, string>
 ) => {
   const fallbackMap = useMemo(() => new Map<string, string>(), []);
   const safeRoomMap = roomMap ?? fallbackMap;
   const safeAccountMap = accountMap ?? fallbackMap;
+  const safeEventMap = eventMap ?? fallbackMap;
 
   const getPhotoRoom = useCallback(
     (photo: Photo): string => {
@@ -92,9 +119,66 @@ export const usePhotoMetadata = (
     return '';
   }, []);
 
+  const getPhotoEvent = useCallback(
+    (photo: Photo): PhotoEventInfo => {
+      const extended = photo as ExtendedPhoto & { event?: any };
+      const eventObject = (extended as any).Event || (extended as any).event;
+      const playerEventObject =
+        (extended as any).PlayerEvent || (extended as any).playerEvent;
+      const rawEventId =
+        extended.EventId ??
+        extended.eventId ??
+        extended.PlayerEventId ??
+        extended.playerEventId ??
+        extended.EventInstanceId ??
+        extended.eventInstanceId ??
+        (eventObject
+          ? (eventObject.Id ??
+            eventObject.id ??
+            eventObject.eventId ??
+            eventObject.EventId)
+          : undefined) ??
+        (playerEventObject
+          ? (playerEventObject.Id ??
+            playerEventObject.id ??
+            playerEventObject.eventId ??
+            playerEventObject.EventId)
+          : undefined);
+
+      const eventId =
+        rawEventId !== undefined && rawEventId !== null && rawEventId !== ''
+          ? String(rawEventId)
+          : undefined;
+
+      const mappedName = eventId ? safeEventMap.get(eventId) : undefined;
+      const embeddedName = eventObject
+        ? (eventObject.Name ??
+          eventObject.name ??
+          eventObject.Title ??
+          eventObject.title)
+        : playerEventObject
+          ? (playerEventObject.Name ??
+            playerEventObject.name ??
+            playerEventObject.Title ??
+            playerEventObject.title)
+          : undefined;
+      const nameFromFields =
+        extended.EventName ??
+        extended.eventName ??
+        (extended as any).PlayerEventName;
+
+      return {
+        id: eventId,
+        name: mappedName || embeddedName || nameFromFields,
+      };
+    },
+    [safeEventMap]
+  );
+
   return {
     getPhotoRoom,
     getPhotoUsers,
     getPhotoImageUrl,
+    getPhotoEvent,
   };
 };

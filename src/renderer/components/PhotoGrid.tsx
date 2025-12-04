@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { MapPin, Users, Calendar, Heart } from 'lucide-react';
+import { MapPin, Users, Calendar, Heart, Ticket } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Photo } from '../../shared/types';
@@ -17,11 +17,12 @@ import { useFavorites } from '../hooks/useFavorites';
 interface PhotoGridProps {
   photos: Photo[];
   onPhotoClick: (photo: Photo) => void;
-  groupBy?: 'none' | 'room' | 'user' | 'date';
+  groupBy?: 'none' | 'room' | 'user' | 'date' | 'event';
   searchQuery?: string;
   sortBy?: 'oldest-to-newest' | 'newest-to-oldest' | 'most-popular';
   roomMap?: Map<string, string>;
   accountMap?: Map<string, string>;
+  eventMap?: Map<string, string>;
   scrollContainerRef?: React.RefObject<HTMLDivElement>;
   onScrollPositionChange?: (scrollTop: number) => void;
   className?: string;
@@ -35,15 +36,14 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   sortBy = 'newest-to-oldest',
   roomMap = new Map(),
   accountMap = new Map(),
+  eventMap = new Map(),
   scrollContainerRef: scrollContainerRefProp,
   onScrollPositionChange,
   className = '',
 }) => {
   const deferredSearchQuery = useDeferredValue(searchQuery);
-  const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl } = usePhotoMetadata(
-    roomMap,
-    accountMap
-  );
+  const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl, getPhotoEvent } =
+    usePhotoMetadata(roomMap, accountMap, eventMap);
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = scrollContainerRefProp ?? internalScrollRef;
   const [containerSize, setContainerSize] = useState({ width: 0, height: 700 });
@@ -102,13 +102,24 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
       const room = getPhotoRoom(photo).toLowerCase();
       const users = getPhotoUsers(photo).join(' ').toLowerCase();
       const description = (extended.Description || '').toLowerCase();
+      const eventInfo = getPhotoEvent(photo);
+      const eventLabel = (
+        eventInfo.name || (eventInfo.id ? `event ${eventInfo.id}` : '')
+      ).toLowerCase();
       return (
         room.includes(query) ||
         users.includes(query) ||
-        description.includes(query)
+        description.includes(query) ||
+        eventLabel.includes(query)
       );
     });
-  }, [sortedPhotos, deferredSearchQuery, getPhotoRoom, getPhotoUsers]);
+  }, [
+    sortedPhotos,
+    deferredSearchQuery,
+    getPhotoRoom,
+    getPhotoUsers,
+    getPhotoEvent,
+  ]);
 
   const groupedPhotos = useMemo(() => {
     if (groupBy === 'none') {
@@ -118,6 +129,13 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
     const groups: Record<string, Photo[]> = {};
 
     filteredPhotos.forEach(photo => {
+      if (groupBy === 'event') {
+        const eventInfo = getPhotoEvent(photo);
+        if (!eventInfo.id) {
+          return; // Skip photos without event ID
+        }
+      }
+
       const key =
         groupBy === 'room'
           ? getPhotoRoom(photo)
@@ -133,7 +151,18 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
                   }
                   return 'Unknown Date';
                 })()
-              : 'All Photos';
+              : groupBy === 'event'
+                ? (() => {
+                    const eventInfo = getPhotoEvent(photo);
+                    if (eventInfo.name) {
+                      return eventInfo.name;
+                    }
+                    if (eventInfo.id) {
+                      return `Event ${eventInfo.id}`;
+                    }
+                    return 'No Event';
+                  })()
+                : 'All Photos';
 
       if (!groups[key]) {
         groups[key] = [];
@@ -142,7 +171,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
     });
 
     return groups;
-  }, [filteredPhotos, groupBy, getPhotoRoom, getPhotoUsers]);
+  }, [filteredPhotos, groupBy, getPhotoRoom, getPhotoUsers, getPhotoEvent]);
 
   // Track container size for responsive virtualization
   useEffect(() => {
@@ -239,6 +268,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
             const room = getPhotoRoom(photo);
             const users = getPhotoUsers(photo);
             const imageUrl = getPhotoImageUrl(photo);
+            const eventInfo = getPhotoEvent(photo);
             const formattedDate = photo.CreatedAt
               ? format(new Date(photo.CreatedAt), 'MMM d, yyyy')
               : undefined;
@@ -252,6 +282,8 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
                 users={users}
                 imageUrl={imageUrl}
                 formattedDate={formattedDate}
+                eventName={eventInfo.name}
+                eventId={eventInfo.id}
               />
             );
           })}
@@ -265,55 +297,127 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
     </div>
   );
 
-  const renderGroup = (groupName: string, groupPhotos: Photo[]) => (
-    <div key={groupName}>
-      {groupBy !== 'none' && (
-        <h2 className="text-xl font-semibold mb-4">{groupName}</h2>
-      )}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {groupPhotos.map(photo => {
-          const room = getPhotoRoom(photo);
-          const users = getPhotoUsers(photo);
-          const imageUrl = getPhotoImageUrl(photo);
-          const formattedDate = photo.CreatedAt
-            ? format(new Date(photo.CreatedAt), 'MMM d, yyyy')
-            : undefined;
+  // Virtualized grouped view
+  const GROUP_HEADER_HEIGHT = 60; // h2 + mb-4 spacing
+  const GROUP_SPACING = 32; // space-y-8 = 2rem = 32px
 
-          return (
-            <PhotoCard
-              key={photo.Id}
-              photo={photo}
-              onClick={onPhotoClick}
-              room={room}
-              users={users}
-              imageUrl={imageUrl}
-              formattedDate={formattedDate}
-            />
-          );
-        })}
+  type GroupPosition = {
+    groupName: string;
+    photos: Photo[];
+    top: number;
+    height: number;
+  };
+
+  const groupPositions = useMemo(() => {
+    if (!groupedPhotos) return [];
+
+    const positions: GroupPosition[] = [];
+    let currentTop = 0;
+
+    Object.entries(groupedPhotos).forEach(([groupName, groupPhotos]) => {
+      const photoRows = Math.ceil(groupPhotos.length / columns);
+      const groupHeight =
+        GROUP_HEADER_HEIGHT + GROUP_SPACING + photoRows * ROW_HEIGHT;
+
+      positions.push({
+        groupName,
+        photos: groupPhotos,
+        top: currentTop,
+        height: groupHeight,
+      });
+
+      currentTop += groupHeight + GROUP_SPACING;
+    });
+
+    return positions;
+  }, [groupedPhotos, columns]);
+
+  const visibleGroups = useMemo(() => {
+    const OVERSCAN_HEIGHT = 500; // Render extra groups above and below viewport
+    const viewportTop = scrollTop - OVERSCAN_HEIGHT;
+    const viewportBottom = scrollTop + containerSize.height + OVERSCAN_HEIGHT;
+
+    return groupPositions.filter(
+      ({ top, height }) => top + height >= viewportTop && top <= viewportBottom
+    );
+  }, [scrollTop, containerSize.height, groupPositions]);
+
+  const renderVirtualizedGroupedGrid = () => {
+    if (!groupedPhotos || Object.keys(groupedPhotos).length === 0) {
+      return (
+        <div className="text-center py-12 text-muted-foreground">
+          <p>No photos found</p>
+        </div>
+      );
+    }
+
+    const totalHeight =
+      groupPositions.length > 0
+        ? groupPositions[groupPositions.length - 1].top +
+          groupPositions[groupPositions.length - 1].height +
+          GROUP_SPACING
+        : 0;
+
+    const paddingTop = visibleGroups.length > 0 ? visibleGroups[0].top : 0;
+    const paddingBottom =
+      totalHeight -
+      (visibleGroups.length > 0
+        ? visibleGroups[visibleGroups.length - 1].top +
+          visibleGroups[visibleGroups.length - 1].height
+        : 0);
+
+    return (
+      <div className={`flex h-full flex-col ${className}`}>
+        <div ref={scrollRef} className="h-full overflow-auto">
+          <div style={{ paddingTop, paddingBottom }}>
+            {visibleGroups.map(({ groupName, photos }) => (
+              <div key={groupName} style={{ marginBottom: GROUP_SPACING }}>
+                <h2 className="text-xl font-semibold mb-4">{groupName}</h2>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                    gap: '1rem',
+                  }}
+                >
+                  {photos.map(photo => {
+                    const room = getPhotoRoom(photo);
+                    const users = getPhotoUsers(photo);
+                    const imageUrl = getPhotoImageUrl(photo);
+                    const eventInfo = getPhotoEvent(photo);
+                    const formattedDate = photo.CreatedAt
+                      ? format(new Date(photo.CreatedAt), 'MMM d, yyyy')
+                      : undefined;
+
+                    return (
+                      <PhotoCard
+                        key={photo.Id}
+                        photo={photo}
+                        onClick={onPhotoClick}
+                        room={room}
+                        users={users}
+                        imageUrl={imageUrl}
+                        formattedDate={formattedDate}
+                        eventName={eventInfo.name}
+                        eventId={eventInfo.id}
+                        hideRoom={groupBy === 'event'}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   if (groupBy === 'none') {
     return renderVirtualizedGrid();
   }
 
-  return (
-    <div className={`flex h-full flex-col ${className}`}>
-      <div ref={scrollRef} className="h-full overflow-auto space-y-8">
-        {groupedPhotos &&
-          Object.entries(groupedPhotos).map(([groupName, groupPhotos]) =>
-            renderGroup(groupName, groupPhotos)
-          )}
-        {filteredPhotos.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground">
-            <p>No photos found</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return renderVirtualizedGroupedGrid();
 };
 
 interface PhotoCardProps {
@@ -323,10 +427,23 @@ interface PhotoCardProps {
   users: string[];
   imageUrl: string;
   formattedDate?: string;
+  eventName?: string;
+  eventId?: string;
+  hideRoom?: boolean;
 }
 
 const PhotoCard: React.FC<PhotoCardProps> = React.memo(
-  ({ photo, onClick, room, users, imageUrl, formattedDate }) => {
+  ({
+    photo,
+    onClick,
+    room,
+    users,
+    imageUrl,
+    formattedDate,
+    eventName,
+    eventId,
+    hideRoom = false,
+  }) => {
     const handleClick = React.useCallback(
       () => onClick(photo),
       [onClick, photo]
@@ -378,10 +495,20 @@ const PhotoCard: React.FC<PhotoCardProps> = React.memo(
           </Button>
         </div>
         <CardContent className="p-4 space-y-2">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <MapPin className="h-4 w-4" />
-            <span className="truncate">{room}</span>
-          </div>
+          {!hideRoom && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <MapPin className="h-4 w-4" />
+              <span className="truncate">{room}</span>
+            </div>
+          )}
+          {(eventName || eventId) && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Ticket className="h-4 w-4" />
+              <span className="truncate">
+                {eventName || `Event ${eventId}`}
+              </span>
+            </div>
+          )}
           {users.length > 0 && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
               <Users className="h-4 w-4 flex-shrink-0" />

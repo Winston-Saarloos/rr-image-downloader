@@ -9,6 +9,7 @@ export interface RecNetSettings {
 export interface BulkDataRefreshOptions {
   forceAccountsRefresh?: boolean;
   forceRoomsRefresh?: boolean;
+  forceEventsRefresh?: boolean;
 }
 
 export interface Progress {
@@ -25,7 +26,25 @@ export interface Photo {
   sort?: string;
   CreatedAt?: string;
   Description?: string;
+  EventId?: string | number | null;
+  eventId?: string | number | null;
+  PlayerEventId?: string | number | null;
+  playerEventId?: string | number | null;
+  EventInstanceId?: string | number | null;
+  eventInstanceId?: string | number | null;
   localFilePath?: string; // Path to local file on disk (added when loading photos)
+  [key: string]: any;
+}
+
+// Legacy PlayerEvent interface - kept for backward compatibility
+export interface PlayerEvent {
+  Id: string | number;
+  Name?: string;
+  Description?: string;
+  StartTime?: string;
+  EndTime?: string;
+  RoomId?: string | number | null;
+  RoomName?: string | null;
   [key: string]: any;
 }
 
@@ -175,6 +194,7 @@ export interface ElectronAPI {
   listAvailableAccounts: () => Promise<ApiResponse<AvailableAccount[]>>;
   loadAccountsData: (accountId: string) => Promise<ApiResponse<any[]>>;
   loadRoomsData: (accountId: string) => Promise<ApiResponse<any[]>>;
+  loadEventsData: (accountId: string) => Promise<ApiResponse<Event[]>>;
 
   // Favorites management
   getFavorites: () => Promise<ApiResponse<string[]>>;

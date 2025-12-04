@@ -17,6 +17,7 @@ import {
 } from '../../shared/types';
 import { GenericResponse } from '../models/GenericResponse';
 import { axiosRequest } from '../utils/axiosRequest';
+import { Event } from '../models/Event';
 
 interface CurrentOperation {
   cancelled: boolean;
@@ -140,8 +141,11 @@ export class RecNetService extends EventEmitter {
     options?: BulkDataRefreshOptions
   ): Promise<CollectionResult> {
     this.currentOperation = { cancelled: false };
-    const { forceAccountsRefresh = false, forceRoomsRefresh = false } =
-      options || {};
+    const {
+      forceAccountsRefresh = false,
+      forceRoomsRefresh = false,
+      forceEventsRefresh = false,
+    } = options || {};
 
     try {
       this.updateProgress('Downloading user photo data...', 0, 0, 0);
@@ -357,7 +361,12 @@ export class RecNetService extends EventEmitter {
 
       // Fetch and save bulk account and room data (from photos + any existing feed)
       try {
-        this.updateProgress('Fetching account and room data...', 0, 0, 0);
+        this.updateProgress(
+          'Fetching account, room, and event data...',
+          0,
+          0,
+          0
+        );
 
         let combinedForMetadata: Photo[] = [...all];
         const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
@@ -376,10 +385,10 @@ export class RecNetService extends EventEmitter {
           accountId,
           combinedForMetadata,
           token,
-          { forceAccountsRefresh, forceRoomsRefresh }
+          { forceAccountsRefresh, forceRoomsRefresh, forceEventsRefresh }
         );
         console.log(
-          `Fetched ${bulkData.accountsFetched} accounts and ${bulkData.roomsFetched} rooms`
+          `Fetched ${bulkData.accountsFetched} accounts, ${bulkData.roomsFetched} rooms, and ${bulkData.eventsFetched} events`
         );
       } catch (error) {
         console.log(
@@ -417,8 +426,11 @@ export class RecNetService extends EventEmitter {
     options?: BulkDataRefreshOptions
   ): Promise<CollectionResult> {
     this.currentOperation = { cancelled: false };
-    const { forceAccountsRefresh = false, forceRoomsRefresh = false } =
-      options || {};
+    const {
+      forceAccountsRefresh = false,
+      forceRoomsRefresh = false,
+      forceEventsRefresh = false,
+    } = options || {};
 
     try {
       this.updateProgress('Downloading user feed data...', 0, 0, 0);
@@ -608,7 +620,12 @@ export class RecNetService extends EventEmitter {
 
       // Fetch and save bulk account and room data (feed + any existing photos)
       try {
-        this.updateProgress('Fetching feed account and room data...', 0, 0, 0);
+        this.updateProgress(
+          'Fetching feed account, room, and event data...',
+          0,
+          0,
+          0
+        );
 
         let combinedForMetadata: Photo[] = [...all];
         const photosJsonPath = path.join(
@@ -630,10 +647,10 @@ export class RecNetService extends EventEmitter {
           accountId,
           combinedForMetadata,
           token,
-          { forceAccountsRefresh, forceRoomsRefresh }
+          { forceAccountsRefresh, forceRoomsRefresh, forceEventsRefresh }
         );
         console.log(
-          `Fetched (feed) ${bulkData.accountsFetched} accounts and ${bulkData.roomsFetched} rooms`
+          `Fetched (feed) ${bulkData.accountsFetched} accounts, ${bulkData.roomsFetched} rooms, and ${bulkData.eventsFetched} events`
         );
       } catch (error) {
         console.log(
@@ -1242,9 +1259,11 @@ export class RecNetService extends EventEmitter {
   private extractUniqueIds(photos: Photo[]): {
     accountIds: Set<string>;
     roomIds: Set<string>;
+    eventIds: Set<string>;
   } {
     const accountIds = new Set<string>();
     const roomIds = new Set<string>();
+    const eventIds = new Set<string>();
 
     for (const photo of photos) {
       // Extract room ID - handle multiple possible field shapes
@@ -1298,9 +1317,61 @@ export class RecNetService extends EventEmitter {
       if (extended.OwnerId) {
         accountIds.add(String(extended.OwnerId));
       }
+
+      // Extract event IDs so we can hydrate event metadata
+      const eventIdCandidates = [
+        extended.EventId,
+        extended.eventId,
+        extended.PlayerEventId,
+        extended.playerEventId,
+        extended.EventInstanceId,
+        extended.eventInstanceId,
+      ];
+      for (const candidate of eventIdCandidates) {
+        if (candidate !== undefined && candidate !== null && candidate !== '') {
+          eventIds.add(String(candidate));
+        }
+      }
+
+      // Some payloads may embed an Event object
+      if (extended.Event && typeof extended.Event === 'object') {
+        const embeddedId =
+          extended.Event.Id ??
+          extended.Event.id ??
+          extended.Event.eventId ??
+          extended.Event.EventId;
+        if (
+          embeddedId !== undefined &&
+          embeddedId !== null &&
+          embeddedId !== ''
+        ) {
+          eventIds.add(String(embeddedId));
+        }
+      }
+
+      const playerEventObject =
+        extended.PlayerEvent && typeof extended.PlayerEvent === 'object'
+          ? extended.PlayerEvent
+          : extended.playerEvent && typeof extended.playerEvent === 'object'
+            ? extended.playerEvent
+            : undefined;
+      if (playerEventObject) {
+        const playerEventId =
+          playerEventObject.Id ??
+          playerEventObject.id ??
+          playerEventObject.EventId ??
+          playerEventObject.eventId;
+        if (
+          playerEventId !== undefined &&
+          playerEventId !== null &&
+          playerEventId !== ''
+        ) {
+          eventIds.add(String(playerEventId));
+        }
+      }
     }
 
-    return { accountIds, roomIds };
+    return { accountIds, roomIds, eventIds };
   }
 
   async fetchBulkAccounts(
@@ -1410,26 +1481,87 @@ export class RecNetService extends EventEmitter {
     return results;
   }
 
+  async fetchBulkEvents(eventIds: string[], token?: string): Promise<Event[]> {
+    if (eventIds.length === 0) {
+      return [];
+    }
+
+    const results: Event[] = [];
+    const batchSize = 100;
+
+    for (let i = 0; i < eventIds.length; i += batchSize) {
+      const batch = eventIds.slice(i, i + batchSize);
+
+      try {
+        const response = await this.sendRequest<Event[]>(
+          {
+            url: 'https://apim.rec.net/apis/api/playerevents/v1/bulk',
+            method: 'POST',
+            data: { ids: batch },
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+          token
+        );
+
+        if (response.success && Array.isArray(response.value)) {
+          // Convert IDs to strings to ensure consistency
+          const transformedEvents = response.value.map((event: Event) => ({
+            ...event,
+            PlayerEventId: event.PlayerEventId.toString(),
+            CreatorPlayerId: event.CreatorPlayerId.toString(),
+            RoomId: event.RoomId.toString(),
+          }));
+          results.push(...transformedEvents);
+        } else {
+          console.log(
+            `Failed to fetch batch of events: status ${response.status} - ${response.message || response.error}`
+          );
+        }
+      } catch (error) {
+        console.log(
+          `Failed to fetch batch of events: ${(error as Error).message}`
+        );
+      }
+
+      if (i + batchSize < eventIds.length) {
+        await this.delay(100);
+      }
+    }
+
+    return results;
+  }
+
   async fetchAndSaveBulkData(
     accountId: string,
     photos: Photo[],
     token?: string,
     options: BulkDataRefreshOptions = {}
-  ): Promise<{ accountsFetched: number; roomsFetched: number }> {
+  ): Promise<{
+    accountsFetched: number;
+    roomsFetched: number;
+    eventsFetched: number;
+  }> {
     try {
-      const { forceAccountsRefresh = false, forceRoomsRefresh = false } =
-        options;
+      const {
+        forceAccountsRefresh = false,
+        forceRoomsRefresh = false,
+        forceEventsRefresh = false,
+      } = options;
       this.updateProgress('Extracting IDs from photos...', 0, 0, 0);
 
       // Extract unique IDs
-      const { accountIds, roomIds } = this.extractUniqueIds(photos);
+      const { accountIds, roomIds, eventIds } = this.extractUniqueIds(photos);
       const accountIdsArray = Array.from(accountIds);
       const roomIdsArray = Array.from(roomIds);
+      const eventIdsArray = Array.from(eventIds);
       this.updateProgress('Grabbing unique accounts', 0, 0, 0);
       this.updateProgress('Grabbing unique rooms', 0, 0, 0);
+      this.updateProgress('Grabbing unique events', 0, 0, 0);
 
       console.log(
-        `Found ${accountIdsArray.length} unique account IDs and ${roomIdsArray.length} unique room IDs`
+        `Found ${accountIdsArray.length} unique account IDs, ${roomIdsArray.length} unique room IDs, and ${eventIdsArray.length} unique event IDs`
       );
 
       const accountDir = path.join(this.settings.outputRoot, accountId);
@@ -1437,13 +1569,16 @@ export class RecNetService extends EventEmitter {
 
       let accountsFetched = 0;
       let roomsFetched = 0;
+      let eventsFetched = 0;
       const accountsJsonPath = path.join(
         accountDir,
         `${accountId}_accounts.json`
       );
       const roomsJsonPath = path.join(accountDir, `${accountId}_rooms.json`);
+      const eventsJsonPath = path.join(accountDir, `${accountId}_events.json`);
       const accountsFileExists = await fs.pathExists(accountsJsonPath);
       const roomsFileExists = await fs.pathExists(roomsJsonPath);
+      const eventsFileExists = await fs.pathExists(eventsJsonPath);
 
       // Fetch and save account data
       if (accountIdsArray.length > 0) {
@@ -1511,7 +1646,40 @@ export class RecNetService extends EventEmitter {
         }
       }
 
-      return { accountsFetched, roomsFetched };
+      // Fetch and save event data
+      if (eventIdsArray.length > 0) {
+        this.updateProgress(
+          'Checking events cache',
+          0,
+          eventIdsArray.length,
+          0
+        );
+        if (eventsFileExists && !forceEventsRefresh) {
+          console.log(
+            `Event data already exists at ${eventsJsonPath}, skipping fetch (force refresh disabled)`
+          );
+          this.updateProgress(
+            'Using cached event data',
+            eventIdsArray.length,
+            eventIdsArray.length,
+            100
+          );
+        } else {
+          this.updateProgress(
+            `Downloading new events data and updating cache (${eventIdsArray.length} events)...`,
+            0,
+            0,
+            0
+          );
+          const eventsData = await this.fetchBulkEvents(eventIdsArray, token);
+          eventsFetched = eventsData.length;
+
+          await fs.writeJson(eventsJsonPath, eventsData, { spaces: 2 });
+          console.log(`Saved ${eventsData.length} events to ${eventsJsonPath}`);
+        }
+      }
+
+      return { accountsFetched, roomsFetched, eventsFetched };
     } catch (error) {
       console.log(
         `Failed to fetch and save bulk data: ${(error as Error).message}`
