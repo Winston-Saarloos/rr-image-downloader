@@ -1,15 +1,15 @@
 import React from 'react';
-import { Progress } from '../../components/ui/progress';
+import { Progress } from '../components/ui/progress';
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '../../components/ui/card';
+} from '../components/ui/card';
 import { Progress as ProgressType } from '../../shared/types';
 import { Loader2, CheckCircle2, X } from 'lucide-react';
-import { Button } from '../../components/ui/button';
+import { Button } from '../components/ui/button';
 
 interface ProgressDisplayProps {
   progress: ProgressType;

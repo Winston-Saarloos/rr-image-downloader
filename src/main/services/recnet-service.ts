@@ -244,7 +244,8 @@ export class RecNetService extends EventEmitter {
         console.log(`Full collection mode: fetching all photos from beginning`);
       }
 
-      while (true) {
+      let hasMorePhotos = true;
+      while (hasMorePhotos) {
         if (this.currentOperation.cancelled) {
           throw new Error('Operation cancelled');
         }
@@ -333,19 +334,21 @@ export class RecNetService extends EventEmitter {
           console.log(
             `No new photos found in incremental check, stopping early`
           );
-          break;
+          hasMorePhotos = false;
         }
 
         if (photos.length < 150) {
           // No more photos available
-          break;
+          hasMorePhotos = false;
         }
 
-        skip += 150;
-        iteration++;
+        if (hasMorePhotos) {
+          skip += 150;
+          iteration++;
 
-        if (this.settings.interPageDelayMs > 0) {
-          await this.delay(this.settings.interPageDelayMs);
+          if (this.settings.interPageDelayMs > 0) {
+            await this.delay(this.settings.interPageDelayMs);
+          }
         }
       }
 
@@ -525,7 +528,8 @@ export class RecNetService extends EventEmitter {
 
       // Collect feed photos
       let iteration = 0;
-      while (true) {
+      let hasMoreFeedPhotos = true;
+      while (hasMoreFeedPhotos) {
         if (this.currentOperation.cancelled) {
           throw new Error('Operation cancelled');
         }
@@ -600,14 +604,16 @@ export class RecNetService extends EventEmitter {
 
         if (photos.length < 150) {
           // No more photos available
-          break;
+          hasMoreFeedPhotos = false;
         }
 
-        skip += 150;
-        iteration++;
+        if (hasMoreFeedPhotos) {
+          skip += 150;
+          iteration++;
 
-        if (this.settings.interPageDelayMs > 0) {
-          await this.delay(this.settings.interPageDelayMs);
+          if (this.settings.interPageDelayMs > 0) {
+            await this.delay(this.settings.interPageDelayMs);
+          }
         }
       }
 

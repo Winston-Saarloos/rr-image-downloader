@@ -6,14 +6,14 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from '../../components/ui/dialog';
+} from '../components/ui/dialog';
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
+} from '../components/ui/card';
+import { Button } from '../components/ui/button';
 import { Photo } from '../../shared/types';
 import { usePhotoMetadata, ExtendedPhoto } from '../hooks/usePhotoMetadata';
 import { format } from 'date-fns';

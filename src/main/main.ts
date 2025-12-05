@@ -170,7 +170,7 @@ function setupAutoUpdater() {
   });
 
   // Update not available
-  autoUpdater.on('update-not-available', info => {
+  autoUpdater.on('update-not-available', () => {
     console.log('Update not available');
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('update-not-available');

@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { Settings } from 'lucide-react';
-import { Button } from '../../components/ui/button';
+import { Button } from '../components/ui/button';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from '../../components/ui/dialog';
+} from '../components/ui/dialog';
 import { SettingsPanel } from './SettingsPanel';
 import { LogPanel } from './LogPanel';
 import { ResultsPanel } from './ResultsPanel';

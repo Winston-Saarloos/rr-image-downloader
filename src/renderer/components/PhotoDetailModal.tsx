@@ -6,9 +6,9 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '../../components/ui/dialog';
-import { Button } from '../../components/ui/button';
-import { Chip } from '../../components/ui/chip';
+} from '../components/ui/dialog';
+import { Button } from '../components/ui/button';
+import { Chip } from '../components/ui/chip';
 import { Photo } from '../../shared/types';
 import { format } from 'date-fns';
 import { ExtendedPhoto, usePhotoMetadata } from '../hooks/usePhotoMetadata';

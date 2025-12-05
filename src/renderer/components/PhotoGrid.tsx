@@ -7,8 +7,8 @@ import React, {
   useState,
 } from 'react';
 import { MapPin, Users, Calendar, Heart, Ticket } from 'lucide-react';
-import { Card, CardContent } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
+import { Card, CardContent } from '../components/ui/card';
+import { Button } from '../components/ui/button';
 import { Photo } from '../../shared/types';
 import { format } from 'date-fns';
 import { ExtendedPhoto, usePhotoMetadata } from '../hooks/usePhotoMetadata';

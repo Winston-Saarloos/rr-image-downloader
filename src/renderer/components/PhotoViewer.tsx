@@ -6,15 +6,15 @@ import React, {
   useMemo,
 } from 'react';
 import { Search, Filter, ArrowUpDown, Heart } from 'lucide-react';
-import { Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/input';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '../../components/ui/select';
+} from '../components/ui/select';
 import { Photo, AvailableAccount } from '../../shared/types';
 import type { Event as RecNetEvent } from '../../main/models/Event';
 import { PhotoGrid } from './PhotoGrid';

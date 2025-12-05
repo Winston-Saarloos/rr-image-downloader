@@ -1,17 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import {
-  RefreshCw,
-  CheckCircle2,
-  AlertCircle,
-  Download,
-} from 'lucide-react';
+import { RefreshCw, CheckCircle2, AlertCircle, Download } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
-} from '../../components/ui/dropdown-menu';
-import { Button } from '../../components/ui/button';
-import { Progress } from '../../components/ui/progress';
+} from '../components/ui/dropdown-menu';
+import { Button } from '../components/ui/button';
+import { Progress } from '../components/ui/progress';
 
 interface UpdateInfo {
   version: string;
@@ -250,4 +245,3 @@ function formatBytes(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
-

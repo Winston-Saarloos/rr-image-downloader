@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Minus, Square, X, Download, BarChart3, Settings } from 'lucide-react';
-import { Button } from '../../components/ui/button';
+import { Button } from '../components/ui/button';
 import { ThemeToggle } from './ThemeToggle';
 import { UpdateIndicator } from './UpdateIndicator';
 import {
@@ -8,12 +8,13 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from '../../components/ui/dialog';
+} from '../components/ui/dialog';
 import { SettingsPanel } from './SettingsPanel';
 import { LogPanel } from './LogPanel';
 import { ResultsPanel } from './ResultsPanel';
 import { RecNetSettings } from '../../shared/types';
 import packageJson from '../../../package.json';
+import iconImage from '../assets/icon.png';
 
 interface CustomTitleBarProps {
   onDownloadClick: () => void;
@@ -91,11 +92,12 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
         {/* Center - Icon and App Name */}
         <div className="flex items-center gap-2 absolute left-1/2 transform -translate-x-1/2 pointer-events-none">
           <img
-            src="/assets/icon.png"
+            src={iconImage}
             alt="App Icon"
             className="w-5 h-5"
             onError={e => {
               // Hide icon if it fails to load
+              console.error('Failed to load icon', e);
               (e.target as HTMLImageElement).style.display = 'none';
             }}
           />

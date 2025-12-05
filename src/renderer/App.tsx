@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp } from 'lucide-react';
-import { Button } from '../components/ui/button';
+import { Button } from './components/ui/button';
 import { DownloadPanel } from './components/DownloadPanel';
 import { PhotoViewer } from './components/PhotoViewer';
 import { ProgressDisplay } from './components/ProgressDisplay';
