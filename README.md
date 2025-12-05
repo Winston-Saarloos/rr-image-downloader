@@ -1,10 +1,14 @@
+<div align="center">
+  <img src="assets/icon.png" alt="App Icon" width="75">
+</div>
+
 # RR Image Downloader / Offline Viewer
 
 This is an Electron + React desktop app for saving your Rec Room / RecNet images locally, browsing them offline, and exploring stats about your library.
 
 In the event Rec Room doesn't exist. This application will allow you to download full resolution images of your image library and feed images from Rec Room's CDN. It will also capture important metadata about your images so you will still be able to view tagged users and the room the image was taken in. All while being offline and not connected to Rec Room's services.
 
-\***\*Use this application at your own risk. While Rec Room likely won't come after you it is in violation of their Terms of Service (ToS) to use. This application is deliberatly designed to be data efficient and relies on heavy caching and deduplication to make sure only neccessary data is downloaded. The requests made to Rec Room's services are throttled (configurable defaults to 0.5 seconds) so it shouldn not raise any red flags or result in an IP ban for your account.\*\***
+**\*\*Use this application at your own risk. While Rec Room likely won't come after you it is in violation of their Terms of Service (ToS) to use. This application is deliberatly designed to be data efficient and relies on heavy caching and deduplication to make sure only neccessary data is downloaded. The requests made to Rec Room's services are throttled (configurable defaults to 0.5 seconds) so it shouldn not raise any red flags or result in an IP ban for your account.**\*\*
 
 ## Features
 
@@ -14,10 +18,22 @@ In the event Rec Room doesn't exist. This application will allow you to download
 - Search images for images taken in a certain room or with a certain person
 - Sort images by oldest to newest, newest to oldest, Most Popular (cheer count)
 - Group images by Room, User, or Date
+- Favorite images so they appear in an easy to find album
+
+#### Favorite Photo Album
+
+<div align="center">
+   <img src="images/favorite_view.png" alt="Favorite images album view">
+</div>
+
+#### View a variety of stats about a user's photos
+
+<div align="center">
+<img src="images/stats_preview.png" alt="User photo stats">
+</div>
 
 ## Future Feature Ideas
 
-- Favorite images
 - Fix images with missing room data (early 2017-2019 images miss this)
 - If a image is taken in a subroom grab the main room name (otherwise we see the room ID and not the actual room name)
 
