@@ -1,7 +1,7 @@
 {
-  "name": "recnet-photo-downloader",
+  "name": "rr-image-downloader",
   "version": "3.5.4",
-  "description": "RecNet Photo Downloader - Download photos from Rec Room players",
+  "description": "RR Image Downloader - Download Rec Room user images.",
   "main": "dist/main/main/main.js",
   "homepage": "./",
   "scripts": {
@@ -45,6 +45,7 @@
     "@typescript-eslint/parser": "^5.62.0",
     "autoprefixer": "^10.4.0",
     "concurrently": "^8.0.0",
+    "cross-env": "^10.1.0",
     "electron": "^28.0.0",
     "electron-builder": "^24.0.0",
     "electron-packager": "^17.1.2",
@@ -81,8 +82,8 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "build": {
-    "appId": "com.recnet.photo-downloader",
-    "productName": "Photo Downloader",
+    "appId": "com.rr-image-downloader",
+    "productName": "RR Image Downloader",
     "extraMetadata": {
       "main": "main/main/main.js"
     },
@@ -119,7 +120,7 @@
     "publish": {
       "provider": "github",
       "owner": "Winston-Saarloos",
-      "repo": "SaveTheMemories",
+      "repo": "rr-image-downloader",
       "releaseType": "release"
     },
     "nsis": {
