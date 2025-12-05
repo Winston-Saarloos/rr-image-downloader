@@ -1,6 +1,6 @@
 {
   "name": "recnet-photo-downloader",
-  "version": "3.5.3",
+  "version": "3.5.4",
   "description": "RecNet Photo Downloader - Download photos from Rec Room players",
   "main": "dist/main/main/main.js",
   "homepage": "./",

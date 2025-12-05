@@ -14,7 +14,6 @@ import { LogPanel } from './LogPanel';
 import { ResultsPanel } from './ResultsPanel';
 import { RecNetSettings } from '../../shared/types';
 import packageJson from '../../../package.json';
-import iconImage from '../assets/icon.png';
 
 interface CustomTitleBarProps {
   onDownloadClick: () => void;
@@ -92,7 +91,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
         {/* Center - Icon and App Name */}
         <div className="flex items-center gap-2 absolute left-1/2 transform -translate-x-1/2 pointer-events-none">
           <img
-            src={iconImage}
+            src="/icon.png"
             alt="App Icon"
             className="w-5 h-5"
             onError={e => {
