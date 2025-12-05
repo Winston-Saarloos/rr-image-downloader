@@ -29,7 +29,7 @@ import {
   LabelList,
 } from 'recharts';
 import { useTheme } from '../hooks/useTheme';
-import { cn } from '../../lib/utils';
+import { cn } from './lib/utils';
 
 interface StatsDialogProps {
   open: boolean;

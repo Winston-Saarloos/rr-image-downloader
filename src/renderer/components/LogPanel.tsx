@@ -97,13 +97,6 @@ export const LogPanel: React.FC<LogPanelProps> = ({ logs, onClearLogs }) => {
     scrollContainerRef.current?.focus();
   };
 
-  // const scrollToBottom = () => {
-  //   if (scrollContainerRef.current) {
-  //     scrollContainerRef.current.scrollTop =
-  //       scrollContainerRef.current.scrollHeight;
-  //   }
-  // };
-
   const getLogColor = (type: 'info' | 'success' | 'error' | 'warning') => {
     switch (type) {
       case 'success':
