@@ -1,4 +1,3 @@
-import { AxiosRequestConfig } from 'axios';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { EventEmitter } from 'events';
@@ -15,9 +14,11 @@ import {
   AccountInfo,
   BulkDataRefreshOptions,
 } from '../../shared/types';
-import { GenericResponse } from '../models/GenericResponse';
-import { axiosRequest } from '../utils/axiosRequest';
-import { Event } from '../models/Event';
+import { AccountsController } from './recnet/accounts-controller';
+import { EventsController } from './recnet/events-controller';
+import { RecNetHttpClient } from './recnet/http-client';
+import { PhotosController } from './recnet/photos-controller';
+import { RoomsController } from './recnet/rooms-controller';
 
 interface CurrentOperation {
   cancelled: boolean;
@@ -28,6 +29,11 @@ export class RecNetService extends EventEmitter {
   private settings: RecNetSettings;
   private currentOperation: CurrentOperation | null = null;
   private progress: Progress;
+  private httpClient: RecNetHttpClient;
+  private photosController: PhotosController;
+  private accountsController: AccountsController;
+  private roomsController: RoomsController;
+  private eventsController: EventsController;
 
   constructor() {
     super();
@@ -49,6 +55,12 @@ export class RecNetService extends EventEmitter {
       total: 0,
       current: 0,
     };
+
+    this.httpClient = new RecNetHttpClient();
+    this.photosController = new PhotosController(this.httpClient);
+    this.accountsController = new AccountsController(this.httpClient);
+    this.roomsController = new RoomsController(this.httpClient);
+    this.eventsController = new EventsController(this.httpClient);
 
     // Load settings from disk
     this.loadSettings();
@@ -265,8 +277,9 @@ export class RecNetService extends EventEmitter {
           url += `&after=${encodeURIComponent(lastSortValue)}`;
         }
 
-        const photos = await this.requestOrThrow<Photo[]>(
-          { url, method: 'GET' },
+        const photos = await this.photosController.fetchPlayerPhotos(
+          accountId,
+          { skip, take: 150, sort: 2, after: lastSortValue },
           token
         );
         if (!Array.isArray(photos)) {
@@ -545,8 +558,9 @@ export class RecNetService extends EventEmitter {
           accountId
         )}?skip=${skip}&take=${150}&since=${encodeURIComponent(sinceParam)}`;
 
-        const photos = await this.requestOrThrow<Photo[]>(
-          { url, method: 'GET' },
+        const photos = await this.photosController.fetchFeedPhotos(
+          accountId,
+          { skip, take: 150, since: sinceParam },
           token
         );
         if (!Array.isArray(photos)) {
@@ -790,7 +804,7 @@ export class RecNetService extends EventEmitter {
 
         const photoId = this.normalizeId(photo.Id);
         const imageName = photo.ImageName;
-        const photoUrl = `https://img.rec.net/${imageName}`;
+        const photoUrl = `${this.settings.cdnBase}${imageName}`;
 
         if (!photoId || !imageName) {
           downloadResults.push({
@@ -850,11 +864,10 @@ export class RecNetService extends EventEmitter {
 
         // Check if we've reached the download limit (only for new downloads)
         try {
-          const response = await this.sendRequest<ArrayBuffer>({
-            url: photoUrl,
-            method: 'GET',
-            responseType: 'arraybuffer',
-          });
+          const response = await this.photosController.downloadPhoto(
+            imageName,
+            this.settings.cdnBase
+          );
           if (response.success && response.value) {
             const data = Buffer.from(response.value);
             await fs.writeFile(photoPath, data);
@@ -1026,7 +1039,7 @@ export class RecNetService extends EventEmitter {
 
         const photoId = this.normalizeId(photo.Id);
         const imageName = photo.ImageName;
-        const photoUrl = `https://img.rec.net/${imageName}`;
+        const photoUrl = `${this.settings.cdnBase}${imageName}`;
 
         if (!photoId || !imageName) {
           downloadResults.push({
@@ -1084,11 +1097,10 @@ export class RecNetService extends EventEmitter {
         }
 
         try {
-          const response = await this.sendRequest<ArrayBuffer>({
-            url: photoUrl,
-            method: 'GET',
-            responseType: 'arraybuffer',
-          });
+          const response = await this.photosController.downloadPhoto(
+            imageName,
+            this.settings.cdnBase
+          );
           if (response.success && response.value) {
             const data = Buffer.from(response.value);
             await fs.writeFile(photoPath, data);
@@ -1156,53 +1168,6 @@ export class RecNetService extends EventEmitter {
       this.setOperationComplete();
       throw error;
     }
-  }
-
-  private buildRequestConfig(
-    config: AxiosRequestConfig,
-    token?: string
-  ): AxiosRequestConfig {
-    const headers: Record<string, string> = {
-      'User-Agent': 'RecNetPhotoDownloader/1.0',
-      ...((config.headers as Record<string, string>) || {}),
-    };
-
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    return {
-      timeout: 30000,
-      ...config,
-      headers,
-    };
-  }
-
-  private async sendRequest<T>(
-    config: AxiosRequestConfig,
-    token?: string
-  ): Promise<GenericResponse<T>> {
-    return axiosRequest<T>(this.buildRequestConfig(config, token));
-  }
-
-  private async requestOrThrow<T>(
-    config: AxiosRequestConfig,
-    token?: string
-  ): Promise<T> {
-    const response = await this.sendRequest<T>(config, token);
-    if (
-      !response.success ||
-      response.value === null ||
-      response.value === undefined
-    ) {
-      const statusText = response.status
-        ? `HTTP ${response.status}`
-        : 'Request failed';
-      const message = response.message || response.error || 'Request failed';
-      throw new Error(`${statusText}: ${message}`);
-    }
-
-    return response.value;
   }
 
   private normalizeId(value: unknown): string {
@@ -1380,165 +1345,6 @@ export class RecNetService extends EventEmitter {
     return { accountIds, roomIds, eventIds };
   }
 
-  async fetchBulkAccounts(
-    accountIds: string[],
-    token?: string
-  ): Promise<any[]> {
-    if (accountIds.length === 0) {
-      return [];
-    }
-
-    const results: any[] = [];
-
-    // Process in batches to avoid URL length limits
-    const batchSize = 100;
-    for (let i = 0; i < accountIds.length; i += batchSize) {
-      const batch = accountIds.slice(i, i + batchSize);
-
-      try {
-        const formData = new URLSearchParams();
-        for (const id of batch) {
-          formData.append('id', id);
-        }
-
-        const response = await this.sendRequest<any[]>(
-          {
-            url: 'https://accounts.rec.net/account/bulk',
-            method: 'POST',
-            data: formData.toString(),
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-          },
-          token
-        );
-
-        if (response.success && Array.isArray(response.value)) {
-          results.push(...response.value);
-        } else {
-          console.log(
-            `Failed to fetch batch of accounts: status ${response.status} - ${response.message || response.error}`
-          );
-        }
-      } catch (error) {
-        console.log(
-          `Failed to fetch batch of accounts: ${(error as Error).message}`
-        );
-      }
-
-      // Small delay between batches
-      if (i + batchSize < accountIds.length) {
-        await this.delay(100);
-      }
-    }
-
-    return results;
-  }
-
-  async fetchBulkRooms(roomIds: string[], token?: string): Promise<any[]> {
-    if (roomIds.length === 0) {
-      return [];
-    }
-
-    const results: any[] = [];
-
-    // Process in batches to avoid URL length limits
-    const batchSize = 100;
-    for (let i = 0; i < roomIds.length; i += batchSize) {
-      const batch = roomIds.slice(i, i + batchSize);
-
-      try {
-        const formData = new URLSearchParams();
-        for (const id of batch) {
-          formData.append('id', id);
-        }
-
-        const response = await this.sendRequest<any[]>(
-          {
-            url: 'https://rooms.rec.net/rooms/bulk',
-            method: 'POST',
-            data: formData.toString(),
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-          },
-          token
-        );
-
-        if (response.success && Array.isArray(response.value)) {
-          results.push(...response.value);
-        } else {
-          console.log(
-            `Failed to fetch batch of rooms: status ${response.status} - ${response.message || response.error}`
-          );
-        }
-      } catch (error) {
-        console.log(
-          `Failed to fetch batch of rooms: ${(error as Error).message}`
-        );
-      }
-
-      // Small delay between batches
-      if (i + batchSize < roomIds.length) {
-        await this.delay(100);
-      }
-    }
-
-    return results;
-  }
-
-  async fetchBulkEvents(eventIds: string[], token?: string): Promise<Event[]> {
-    if (eventIds.length === 0) {
-      return [];
-    }
-
-    const results: Event[] = [];
-    const batchSize = 100;
-
-    for (let i = 0; i < eventIds.length; i += batchSize) {
-      const batch = eventIds.slice(i, i + batchSize);
-
-      try {
-        const response = await this.sendRequest<Event[]>(
-          {
-            url: 'https://apim.rec.net/apis/api/playerevents/v1/bulk',
-            method: 'POST',
-            data: { ids: batch },
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          },
-          token
-        );
-
-        if (response.success && Array.isArray(response.value)) {
-          // Convert IDs to strings to ensure consistency
-          const transformedEvents = response.value.map((event: Event) => ({
-            ...event,
-            PlayerEventId: event.PlayerEventId.toString(),
-            CreatorPlayerId: event.CreatorPlayerId.toString(),
-            RoomId: event.RoomId.toString(),
-          }));
-          results.push(...transformedEvents);
-        } else {
-          console.log(
-            `Failed to fetch batch of events: status ${response.status} - ${response.message || response.error}`
-          );
-        }
-      } catch (error) {
-        console.log(
-          `Failed to fetch batch of events: ${(error as Error).message}`
-        );
-      }
-
-      if (i + batchSize < eventIds.length) {
-        await this.delay(100);
-      }
-    }
-
-    return results;
-  }
-
   async fetchAndSaveBulkData(
     accountId: string,
     photos: Photo[],
@@ -1611,7 +1417,7 @@ export class RecNetService extends EventEmitter {
             0,
             0
           );
-          const accountsData = await this.fetchBulkAccounts(
+          const accountsData = await this.accountsController.fetchBulkAccounts(
             accountIdsArray,
             token
           );
@@ -1644,7 +1450,10 @@ export class RecNetService extends EventEmitter {
             0,
             0
           );
-          const roomsData = await this.fetchBulkRooms(roomIdsArray, token);
+          const roomsData = await this.roomsController.fetchBulkRooms(
+            roomIdsArray,
+            token
+          );
           roomsFetched = roomsData.length;
 
           await fs.writeJson(roomsJsonPath, roomsData, { spaces: 2 });
@@ -1677,7 +1486,10 @@ export class RecNetService extends EventEmitter {
             0,
             0
           );
-          const eventsData = await this.fetchBulkEvents(eventIdsArray, token);
+          const eventsData = await this.eventsController.fetchBulkEvents(
+            eventIdsArray,
+            token
+          );
           eventsFetched = eventsData.length;
 
           await fs.writeJson(eventsJsonPath, eventsData, { spaces: 2 });
@@ -1696,11 +1508,7 @@ export class RecNetService extends EventEmitter {
 
   async lookupAccount(accountId: string): Promise<AccountInfo[]> {
     try {
-      const response = await this.requestOrThrow<AccountInfo[]>({
-        url: `https://accounts.rec.net/account/bulk?id=${encodeURIComponent(accountId)}`,
-        method: 'GET',
-      });
-      return response;
+      return await this.accountsController.lookupAccount(accountId);
     } catch (error) {
       throw new Error(`Failed to lookup account: ${(error as Error).message}`);
     }
@@ -1708,11 +1516,7 @@ export class RecNetService extends EventEmitter {
 
   async searchAccounts(username: string): Promise<AccountInfo[]> {
     try {
-      const response = await this.requestOrThrow<AccountInfo[]>({
-        url: `https://apim.rec.net/accounts/account/search?name=${encodeURIComponent(username)}`,
-        method: 'GET',
-      });
-      return response;
+      return await this.accountsController.searchAccounts(username);
     } catch (error) {
       throw new Error(`Failed to search accounts: ${(error as Error).message}`);
     }
