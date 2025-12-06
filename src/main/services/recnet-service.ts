@@ -1329,6 +1329,56 @@ export class RecNetService extends EventEmitter {
     );
   }
 
+  private getAccountIdFromAccount(account: any): string | null {
+    if (!account || typeof account !== 'object') {
+      return null;
+    }
+
+    const id = (account as any).accountId ?? (account as any).id ?? (account as any).Id;
+    if (id === undefined || id === null || id === '') {
+      return null;
+    }
+
+    return String(id);
+  }
+
+  private getRoomIdFromRoom(room: any): string | null {
+    if (!room || typeof room !== 'object') {
+      return null;
+    }
+
+    const id =
+      (room as any).RoomId ??
+      (room as any).roomId ??
+      (room as any).RoomID ??
+      (room as any).Id ??
+      (room as any).id;
+    if (id === undefined || id === null || id === '') {
+      return null;
+    }
+
+    return String(id);
+  }
+
+  private getEventIdFromEvent(event: any): string | null {
+    if (!event || typeof event !== 'object') {
+      return null;
+    }
+
+    const id =
+      (event as any).PlayerEventId ??
+      (event as any).EventId ??
+      (event as any).eventId ??
+      (event as any).EventID ??
+      (event as any).Id ??
+      (event as any).id;
+    if (id === undefined || id === null || id === '') {
+      return null;
+    }
+
+    return String(id);
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -1508,16 +1558,22 @@ export class RecNetService extends EventEmitter {
           accountIdsArray.length,
           0
         );
-        if (accountsFileExists && !forceAccountsRefresh) {
-          console.log(
-            `Account data already exists at ${accountsJsonPath}, skipping fetch (force refresh disabled)`
-          );
+
+        let cachedAccounts: any[] = [];
+        let cachedAccountIds = new Set<string>();
+
+        if (accountsFileExists) {
           try {
-            const cachedAccounts = await fs.readJson(accountsJsonPath);
-            if (Array.isArray(cachedAccounts)) {
-              const normalizedCachedAccounts =
-                this.ensureIdsAreStringsInArray(cachedAccounts);
-              await fs.writeJson(accountsJsonPath, normalizedCachedAccounts, {
+            const existing = await fs.readJson(accountsJsonPath);
+            if (Array.isArray(existing)) {
+              cachedAccounts = this.ensureIdsAreStringsInArray(existing);
+              cachedAccountIds = new Set(
+                cachedAccounts
+                  .map(account => this.getAccountIdFromAccount(account))
+                  .filter((id): id is string => !!id)
+              );
+              // Normalize and persist cached data to keep IDs consistent
+              await fs.writeJson(accountsJsonPath, cachedAccounts, {
                 spaces: 2,
               });
             }
@@ -1526,6 +1582,14 @@ export class RecNetService extends EventEmitter {
               `Warning: Failed to normalize cached account data: ${(error as Error).message}`
             );
           }
+        }
+
+        const missingAccountIds =
+          accountsFileExists && !forceAccountsRefresh
+            ? accountIdsArray.filter(id => !cachedAccountIds.has(String(id)))
+            : accountIdsArray;
+
+        if (missingAccountIds.length === 0) {
           this.updateProgress(
             'Using cached account data',
             accountIdsArray.length,
@@ -1534,24 +1598,49 @@ export class RecNetService extends EventEmitter {
           );
         } else {
           this.updateProgress(
-            `Downloading new account data and updating cache (${accountIdsArray.length} accounts)...`,
+            `Downloading account data (${missingAccountIds.length} missing of ${accountIdsArray.length})...`,
             0,
-            0,
+            accountIdsArray.length,
             0
           );
+
           const accountsData = await this.accountsController.fetchBulkAccounts(
-            accountIdsArray,
+            missingAccountIds,
             token
           );
           const normalizedAccounts = Array.isArray(accountsData)
             ? this.ensureIdsAreStringsInArray(accountsData)
             : [];
           accountsFetched = normalizedAccounts.length;
-          await fs.writeJson(accountsJsonPath, normalizedAccounts, {
+
+          // Merge new data with cached data (prefer freshly downloaded entries)
+          const mergedAccountsMap = new Map<string, any>();
+          for (const account of cachedAccounts) {
+            const id = this.getAccountIdFromAccount(account);
+            if (id) {
+              mergedAccountsMap.set(id, account);
+            }
+          }
+          for (const account of normalizedAccounts) {
+            const id = this.getAccountIdFromAccount(account);
+            if (id) {
+              mergedAccountsMap.set(id, account);
+            }
+          }
+
+          const mergedAccounts = Array.from(mergedAccountsMap.values());
+          await fs.writeJson(accountsJsonPath, mergedAccounts, {
             spaces: 2,
           });
           console.log(
-            `Saved ${normalizedAccounts.length} accounts to ${accountsJsonPath}`
+            `Saved ${mergedAccounts.length} accounts to ${accountsJsonPath} (downloaded ${normalizedAccounts.length} new entries)`
+          );
+
+          this.updateProgress(
+            'Account data updated',
+            accountIdsArray.length,
+            accountIdsArray.length,
+            100
           );
         }
       }
@@ -1559,24 +1648,35 @@ export class RecNetService extends EventEmitter {
       // Fetch and save room data
       if (roomIdsArray.length > 0) {
         this.updateProgress('Checking rooms cache', 0, roomIdsArray.length, 0);
-        if (roomsFileExists && !forceRoomsRefresh) {
-          console.log(
-            `Room data already exists at ${roomsJsonPath}, skipping fetch (force refresh disabled)`
-          );
+
+        let cachedRooms: any[] = [];
+        let cachedRoomIds = new Set<string>();
+
+        if (roomsFileExists) {
           try {
-            const cachedRooms = await fs.readJson(roomsJsonPath);
-            if (Array.isArray(cachedRooms)) {
-              const normalizedCachedRooms =
-                this.ensureIdsAreStringsInArray(cachedRooms);
-              await fs.writeJson(roomsJsonPath, normalizedCachedRooms, {
-                spaces: 2,
-              });
+            const existing = await fs.readJson(roomsJsonPath);
+            if (Array.isArray(existing)) {
+              cachedRooms = this.ensureIdsAreStringsInArray(existing);
+              cachedRoomIds = new Set(
+                cachedRooms
+                  .map(room => this.getRoomIdFromRoom(room))
+                  .filter((id): id is string => !!id)
+              );
+              await fs.writeJson(roomsJsonPath, cachedRooms, { spaces: 2 });
             }
           } catch (error) {
             console.log(
               `Warning: Failed to normalize cached room data: ${(error as Error).message}`
             );
           }
+        }
+
+        const missingRoomIds =
+          roomsFileExists && !forceRoomsRefresh
+            ? roomIdsArray.filter(id => !cachedRoomIds.has(String(id)))
+            : roomIdsArray;
+
+        if (missingRoomIds.length === 0) {
           this.updateProgress(
             'Using cached room data',
             roomIdsArray.length,
@@ -1585,22 +1685,45 @@ export class RecNetService extends EventEmitter {
           );
         } else {
           this.updateProgress(
-            `Downloading new rooms data and updating cache (${roomIdsArray.length} rooms)...`,
+            `Downloading room data (${missingRoomIds.length} missing of ${roomIdsArray.length})...`,
             0,
-            0,
+            roomIdsArray.length,
             0
           );
           const roomsData = await this.roomsController.fetchBulkRooms(
-            roomIdsArray,
+            missingRoomIds,
             token
           );
           const normalizedRooms = Array.isArray(roomsData)
             ? this.ensureIdsAreStringsInArray(roomsData)
             : [];
           roomsFetched = normalizedRooms.length;
-          await fs.writeJson(roomsJsonPath, normalizedRooms, { spaces: 2 });
+
+          const mergedRoomsMap = new Map<string, any>();
+          for (const room of cachedRooms) {
+            const id = this.getRoomIdFromRoom(room);
+            if (id) {
+              mergedRoomsMap.set(id, room);
+            }
+          }
+          for (const room of normalizedRooms) {
+            const id = this.getRoomIdFromRoom(room);
+            if (id) {
+              mergedRoomsMap.set(id, room);
+            }
+          }
+
+          const mergedRooms = Array.from(mergedRoomsMap.values());
+          await fs.writeJson(roomsJsonPath, mergedRooms, { spaces: 2 });
           console.log(
-            `Saved ${normalizedRooms.length} rooms to ${roomsJsonPath}`
+            `Saved ${mergedRooms.length} rooms to ${roomsJsonPath} (downloaded ${normalizedRooms.length} new entries)`
+          );
+
+          this.updateProgress(
+            'Room data updated',
+            roomIdsArray.length,
+            roomIdsArray.length,
+            100
           );
         }
       }
@@ -1613,24 +1736,35 @@ export class RecNetService extends EventEmitter {
           eventIdsArray.length,
           0
         );
-        if (eventsFileExists && !forceEventsRefresh) {
-          console.log(
-            `Event data already exists at ${eventsJsonPath}, skipping fetch (force refresh disabled)`
-          );
+
+        let cachedEvents: any[] = [];
+        let cachedEventIds = new Set<string>();
+
+        if (eventsFileExists) {
           try {
-            const cachedEvents = await fs.readJson(eventsJsonPath);
-            if (Array.isArray(cachedEvents)) {
-              const normalizedCachedEvents =
-                this.ensureIdsAreStringsInArray(cachedEvents);
-              await fs.writeJson(eventsJsonPath, normalizedCachedEvents, {
-                spaces: 2,
-              });
+            const existing = await fs.readJson(eventsJsonPath);
+            if (Array.isArray(existing)) {
+              cachedEvents = this.ensureIdsAreStringsInArray(existing);
+              cachedEventIds = new Set(
+                cachedEvents
+                  .map(event => this.getEventIdFromEvent(event))
+                  .filter((id): id is string => !!id)
+              );
+              await fs.writeJson(eventsJsonPath, cachedEvents, { spaces: 2 });
             }
           } catch (error) {
             console.log(
               `Warning: Failed to normalize cached event data: ${(error as Error).message}`
             );
           }
+        }
+
+        const missingEventIds =
+          eventsFileExists && !forceEventsRefresh
+            ? eventIdsArray.filter(id => !cachedEventIds.has(String(id)))
+            : eventIdsArray;
+
+        if (missingEventIds.length === 0) {
           this.updateProgress(
             'Using cached event data',
             eventIdsArray.length,
@@ -1639,22 +1773,45 @@ export class RecNetService extends EventEmitter {
           );
         } else {
           this.updateProgress(
-            `Downloading new events data and updating cache (${eventIdsArray.length} events)...`,
+            `Downloading event data (${missingEventIds.length} missing of ${eventIdsArray.length})...`,
             0,
-            0,
+            eventIdsArray.length,
             0
           );
           const eventsData = await this.eventsController.fetchBulkEvents(
-            eventIdsArray,
+            missingEventIds,
             token
           );
           const normalizedEvents = Array.isArray(eventsData)
             ? this.ensureIdsAreStringsInArray(eventsData)
             : [];
           eventsFetched = normalizedEvents.length;
-          await fs.writeJson(eventsJsonPath, normalizedEvents, { spaces: 2 });
+
+          const mergedEventsMap = new Map<string, any>();
+          for (const event of cachedEvents) {
+            const id = this.getEventIdFromEvent(event);
+            if (id) {
+              mergedEventsMap.set(id, event);
+            }
+          }
+          for (const event of normalizedEvents) {
+            const id = this.getEventIdFromEvent(event);
+            if (id) {
+              mergedEventsMap.set(id, event);
+            }
+          }
+
+          const mergedEvents = Array.from(mergedEventsMap.values());
+          await fs.writeJson(eventsJsonPath, mergedEvents, { spaces: 2 });
           console.log(
-            `Saved ${normalizedEvents.length} events to ${eventsJsonPath}`
+            `Saved ${mergedEvents.length} events to ${eventsJsonPath} (downloaded ${normalizedEvents.length} new entries)`
+          );
+
+          this.updateProgress(
+            'Event data updated',
+            eventIdsArray.length,
+            eventIdsArray.length,
+            100
           );
         }
       }

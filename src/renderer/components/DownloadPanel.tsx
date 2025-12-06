@@ -29,6 +29,7 @@ interface DownloadPanelProps {
     refreshOptions: {
       forceAccountsRefresh: boolean;
       forceRoomsRefresh: boolean;
+      forceEventsRefresh: boolean;
     }
   ) => Promise<void>;
   onCancel?: () => void;
@@ -62,6 +63,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const [tokenTimeout, setTokenTimeout] = useState<NodeJS.Timeout | null>(null);
   const [forceAccountsRefresh, setForceAccountsRefresh] = useState(false);
   const [forceRoomsRefresh, setForceRoomsRefresh] = useState(false);
+  const [forceEventsRefresh, setForceEventsRefresh] = useState(false);
 
   useEffect(() => {
     setFilePath(settings.outputRoot || '');
@@ -83,6 +85,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     if (open) {
       setForceAccountsRefresh(false);
       setForceRoomsRefresh(false);
+      setForceEventsRefresh(false);
     }
   }, [open]);
 
@@ -310,6 +313,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     await onDownload(username, cleanedToken, filePath, {
       forceAccountsRefresh,
       forceRoomsRefresh,
+      forceEventsRefresh,
     });
   };
 
@@ -431,8 +435,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
           <div className="space-y-2">
             <Label>Metadata Refresh</Label>
             <p className="text-sm text-muted-foreground">
-              User and room details are reused when available. Toggle below to
-              force a fresh download.
+              User, room, and event details are reused when available. Toggle
+              below to force a fresh download.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <Button
@@ -458,6 +462,18 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                 {forceRoomsRefresh
                   ? 'Force room data refresh'
                   : 'Use cached room data'}
+              </Button>
+              <Button
+                type="button"
+                variant={forceEventsRefresh ? 'destructive' : 'outline'}
+                onClick={() => setForceEventsRefresh(value => !value)}
+                disabled={isDownloading}
+                className="justify-start"
+              >
+                <RefreshCcw className="mr-2 h-4 w-4" />
+                {forceEventsRefresh
+                  ? 'Force event data refresh'
+                  : 'Use cached event data'}
               </Button>
             </div>
           </div>

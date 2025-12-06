@@ -158,8 +158,11 @@ function App() {
     if (!username.trim() || !filePath.trim()) {
       return;
     }
-    const { forceAccountsRefresh = false, forceRoomsRefresh = false } =
-      refreshOptions;
+    const {
+      forceAccountsRefresh = false,
+      forceRoomsRefresh = false,
+      forceEventsRefresh = false,
+    } = refreshOptions;
 
     setIsDownloading(true);
     addLog(`Starting download for username: ${username}`, 'info');
@@ -208,6 +211,12 @@ function App() {
             : 'Using existing room data if present',
           'info'
         );
+        addLog(
+          forceEventsRefresh
+            ? 'Forcing refresh of event data for this download'
+            : 'Using existing event data if present',
+          'info'
+        );
 
         // Step 1: Collect photos & feed metadata
         addLog('Step 1: Collecting photos metadata...', 'info');
@@ -216,6 +225,7 @@ function App() {
           token: token.trim() || undefined,
           forceAccountsRefresh,
           forceRoomsRefresh,
+          forceEventsRefresh,
         });
 
         addLog('Step 1b: Collecting feed photos metadata...', 'info');
@@ -225,6 +235,7 @@ function App() {
           incremental: true,
           forceAccountsRefresh,
           forceRoomsRefresh,
+          forceEventsRefresh,
         });
 
         if (!collectPhotosResult.success) {

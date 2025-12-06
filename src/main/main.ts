@@ -31,6 +31,7 @@ interface CollectPhotosParams {
   token?: string;
   forceAccountsRefresh?: boolean;
   forceRoomsRefresh?: boolean;
+  forceEventsRefresh?: boolean;
 }
 
 interface CollectFeedPhotosParams {
@@ -39,6 +40,7 @@ interface CollectFeedPhotosParams {
   incremental?: boolean;
   forceAccountsRefresh?: boolean;
   forceRoomsRefresh?: boolean;
+  forceEventsRefresh?: boolean;
 }
 
 interface DownloadPhotosParams {
@@ -260,6 +262,7 @@ ipcMain.handle(
         {
           forceAccountsRefresh: params.forceAccountsRefresh,
           forceRoomsRefresh: params.forceRoomsRefresh,
+          forceEventsRefresh: params.forceEventsRefresh,
         }
       );
       return { success: true, data: result };
@@ -283,6 +286,7 @@ ipcMain.handle(
         {
           forceAccountsRefresh: params.forceAccountsRefresh,
           forceRoomsRefresh: params.forceRoomsRefresh,
+          forceEventsRefresh: params.forceEventsRefresh,
         }
       );
       return { success: true, data: result };
