@@ -14,6 +14,10 @@ import {
   AccountInfo,
   BulkDataRefreshOptions,
 } from '../../shared/types';
+import { EventDto } from '../models/EventDto';
+import { ImageDto } from '../models/ImageDto';
+import { PlayerResult } from '../models/PlayerDto';
+import { RoomDto } from '../models/RoomDto';
 import { AccountsController } from './recnet/accounts-controller';
 import { EventsController } from './recnet/events-controller';
 import { RecNetHttpClient } from './recnet/http-client';
@@ -191,7 +195,7 @@ export class RecNetService extends EventEmitter {
           `Found old photos file at: ${oldJsonPath}, migrating to: ${jsonPath}`
         );
         const oldData = await fs.readJson(oldJsonPath);
-        const normalizedOldData = this.ensureIdsAreStringsInArray(oldData);
+        const normalizedOldData = this.normalizePhotos(oldData as ImageDto[]);
         await fs.writeJson(jsonPath, normalizedOldData, {
           spaces: 2,
         });
@@ -211,10 +215,8 @@ export class RecNetService extends EventEmitter {
       if (await fs.pathExists(jsonPath)) {
         console.log(`Found existing photos file at: ${jsonPath}`);
         try {
-          const existingJson: Photo[] = await fs.readJson(jsonPath);
-          const normalizedExisting = this.ensureIdsAreStringsInArray(
-            existingJson
-          );
+          const existingJson: ImageDto[] = await fs.readJson(jsonPath);
+          const normalizedExisting = this.normalizePhotos(existingJson);
           if (normalizedExisting && normalizedExisting.length > 0) {
             existingPhotoCount = normalizedExisting.length;
 
@@ -281,10 +283,12 @@ export class RecNetService extends EventEmitter {
           url += `&after=${encodeURIComponent(lastSortValue)}`;
         }
 
-        const photos = await this.photosController.fetchPlayerPhotos(
-          accountId,
-          { skip, take: 150, sort: 2, after: lastSortValue },
-          token
+        const photos = this.normalizePhotos(
+          await this.photosController.fetchPlayerPhotos(
+            accountId,
+            { skip, take: 150, sort: 2, after: lastSortValue },
+            token
+          )
         );
         if (!Array.isArray(photos)) {
           throw new Error('Unexpected response format: expected array');
@@ -372,7 +376,7 @@ export class RecNetService extends EventEmitter {
       // Save updated collection
       await fs.ensureDir(path.dirname(jsonPath));
       console.log(`Saving photos metadata to: ${jsonPath}`);
-      const normalizedAll = this.ensureIdsAreStringsInArray(all);
+      const normalizedAll = this.normalizePhotos(all);
       await fs.writeJson(jsonPath, normalizedAll, {
         spaces: 2,
       });
@@ -393,8 +397,8 @@ export class RecNetService extends EventEmitter {
         const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
         if (await fs.pathExists(feedJsonPath)) {
           try {
-            const feedPhotos: Photo[] = await fs.readJson(feedJsonPath);
-            const normalizedFeed = this.ensureIdsAreStringsInArray(feedPhotos);
+            const feedPhotos: ImageDto[] = await fs.readJson(feedJsonPath);
+            const normalizedFeed = this.normalizePhotos(feedPhotos);
             combinedForMetadata = combinedForMetadata.concat(normalizedFeed);
           } catch (error) {
             console.log(
@@ -478,7 +482,9 @@ export class RecNetService extends EventEmitter {
           `Found old feed file at: ${oldFeedJsonPath}, migrating to: ${feedJsonPath}`
         );
         const oldFeedData = await fs.readJson(oldFeedJsonPath);
-        const normalizedOldFeed = this.ensureIdsAreStringsInArray(oldFeedData);
+        const normalizedOldFeed = this.normalizePhotos(
+          oldFeedData as ImageDto[]
+        );
         await fs.writeJson(feedJsonPath, normalizedOldFeed, { spaces: 2 });
         console.log(`Feed migration completed`);
 
@@ -499,10 +505,8 @@ export class RecNetService extends EventEmitter {
 
       if (await fs.pathExists(feedJsonPath)) {
         try {
-          const existingPhotos: Photo[] = await fs.readJson(feedJsonPath);
-          const normalizedExisting = this.ensureIdsAreStringsInArray(
-            existingPhotos
-          );
+          const existingPhotos: ImageDto[] = await fs.readJson(feedJsonPath);
+          const normalizedExisting = this.normalizePhotos(existingPhotos);
           if (normalizedExisting && normalizedExisting.length > 0) {
             existingPhotoCount = normalizedExisting.length;
 
@@ -568,10 +572,12 @@ export class RecNetService extends EventEmitter {
           accountId
         )}?skip=${skip}&take=${150}&since=${encodeURIComponent(sinceParam)}`;
 
-        const photos = await this.photosController.fetchFeedPhotos(
-          accountId,
-          { skip, take: 150, since: sinceParam },
-          token
+        const photos = this.normalizePhotos(
+          await this.photosController.fetchFeedPhotos(
+            accountId,
+            { skip, take: 150, since: sinceParam },
+            token
+          )
         );
         if (!Array.isArray(photos)) {
           throw new Error('Unexpected response format: expected array');
@@ -642,7 +648,7 @@ export class RecNetService extends EventEmitter {
       }
 
       // Save updated feed collection
-      const normalizedFeed = this.ensureIdsAreStringsInArray(all);
+      const normalizedFeed = this.normalizePhotos(all);
       await fs.writeJson(feedJsonPath, normalizedFeed, {
         spaces: 2,
       });
@@ -665,9 +671,8 @@ export class RecNetService extends EventEmitter {
         );
         if (await fs.pathExists(photosJsonPath)) {
           try {
-            const photoMetadata: Photo[] = await fs.readJson(photosJsonPath);
-            const normalizedPhotos =
-              this.ensureIdsAreStringsInArray(photoMetadata);
+            const photoMetadata: ImageDto[] = await fs.readJson(photosJsonPath);
+            const normalizedPhotos = this.normalizePhotos(photoMetadata);
             combinedForMetadata = combinedForMetadata.concat(normalizedPhotos);
           } catch (error) {
             console.log(
@@ -734,8 +739,8 @@ export class RecNetService extends EventEmitter {
       await fs.ensureDir(photosDir);
       await fs.ensureDir(feedDir);
 
-      const photos: Photo[] = this.ensureIdsAreStringsInArray(
-        await fs.readJson(jsonPath)
+      const photos: Photo[] = this.normalizePhotos(
+        (await fs.readJson(jsonPath)) as ImageDto[]
       );
       if (!photos || photos.length === 0) {
         throw new Error('No photos found in the JSON file.');
@@ -971,8 +976,8 @@ export class RecNetService extends EventEmitter {
       await fs.ensureDir(feedPhotosDir);
       await fs.ensureDir(photosDir);
 
-      const photos: Photo[] = this.ensureIdsAreStringsInArray(
-        await fs.readJson(feedJsonPath)
+      const photos: Photo[] = this.normalizePhotos(
+        (await fs.readJson(feedJsonPath)) as ImageDto[]
       );
       if (!photos || photos.length === 0) {
         throw new Error('No feed photos found in the JSON file.');
@@ -1240,143 +1245,58 @@ export class RecNetService extends EventEmitter {
     return aStr.localeCompare(bStr);
   }
 
-  private ensureIdsAreStringsInArray<T>(items: T[]): T[] {
-    return items.map(item => this.ensureIdsAreStringsInObject(item));
+  private normalizePhotos(photos: Array<ImageDto | Photo>): Photo[] {
+    return photos.map(photo => this.normalizePhotoItem(photo));
   }
 
-  private ensureIdsAreStringsInObject<T>(item: T): T {
-    if (!item || typeof item !== 'object') {
-      return item;
-    }
-
-    if (Array.isArray(item)) {
-      const mapped = item.map(value =>
-        value !== null && typeof value === 'object'
-          ? this.ensureIdsAreStringsInObject(value)
-          : value
-      );
-      return mapped as unknown as T;
-    }
-
-    const clone: any = Array.isArray(item) ? [] : { ...item };
-
-    for (const [key, value] of Object.entries(clone)) {
-      if (value === null || value === undefined) {
-        continue;
-      }
-
-      if (Array.isArray(value)) {
-        clone[key] = this.normalizeIdArray(key, value);
-        continue;
-      }
-
-      if (typeof value === 'object') {
-        clone[key] = this.ensureIdsAreStringsInObject(value);
-      }
-
-      if (this.isIdLikeKey(key)) {
-        const normalized = this.normalizeId(value);
-        if (normalized !== '') {
-          clone[key] = normalized;
-        }
-      }
-    }
-
-    return clone as T;
-  }
-
-  private normalizeIdArray(key: string, values: any[]): any[] {
-    if (this.isIdLikeArrayKey(key)) {
-      return values.map(value => {
-        if (value !== null && typeof value === 'object') {
-          return this.ensureIdsAreStringsInObject(value);
-        }
-        const normalized = this.normalizeId(value);
-        return normalized !== '' ? normalized : value;
-      });
-    }
-
-    return values.map(value =>
-      value !== null && typeof value === 'object'
-        ? this.ensureIdsAreStringsInObject(value)
-        : value
+  private normalizePhotoItem(photo: ImageDto | Photo): Photo {
+    const normalizedTagged =
+      Array.isArray(photo.TaggedPlayerIds) && photo.TaggedPlayerIds.length > 0
+        ? photo.TaggedPlayerIds.map(id => this.normalizeId(id)).filter(Boolean)
+        : [];
+    const normalizedPlayerEventId = this.normalizeId(
+      (photo as any).PlayerEventId
     );
-  }
-
-  private isIdLikeKey(key: string): boolean {
-    const normalized = key.replace(/[_-]/g, '').toLowerCase();
-    if (normalized === 'id') {
-      return true;
-    }
-
-    return /^(account|room|event|player|creator|owner|photo|image|user|tagged).*id$/.test(
-      normalized
+    const normalizedEventId = this.normalizeId((photo as any).EventId);
+    const normalizedEventInstanceId = this.normalizeId(
+      (photo as any).EventInstanceId
     );
+
+    return {
+      ...photo,
+      Id: this.normalizeId(photo.Id),
+      PlayerId: this.normalizeId((photo as any).PlayerId),
+      RoomId: this.normalizeId((photo as any).RoomId),
+      PlayerEventId: normalizedPlayerEventId || undefined,
+      EventId: normalizedEventId || undefined,
+      EventInstanceId: normalizedEventInstanceId || undefined,
+      TaggedPlayerIds: normalizedTagged,
+    };
   }
 
-  private isIdLikeArrayKey(key: string): boolean {
-    const normalized = key.replace(/[_-]/g, '').toLowerCase();
-    if (normalized === 'ids') {
-      return true;
-    }
-
-    if (['users', 'taggedusers'].includes(normalized)) {
-      return true;
-    }
-
-    return /^(account|room|event|player|creator|owner|photo|image|user|tagged).*ids$/.test(
-      normalized
-    );
+  private normalizeAccounts(accounts: PlayerResult[]): PlayerResult[] {
+    return accounts.map(account => ({
+      ...account,
+      accountId: this.normalizeId(account.accountId),
+    }));
   }
 
-  private getAccountIdFromAccount(account: any): string | null {
-    if (!account || typeof account !== 'object') {
-      return null;
-    }
-
-    const id = (account as any).accountId ?? (account as any).id ?? (account as any).Id;
-    if (id === undefined || id === null || id === '') {
-      return null;
-    }
-
-    return String(id);
+  private normalizeRooms(rooms: RoomDto[]): RoomDto[] {
+    return rooms.map(room => ({
+      ...room,
+      RoomId: this.normalizeId(room.RoomId),
+      CreatorAccountId: this.normalizeId(room.CreatorAccountId),
+      RankedEntityId: this.normalizeId(room.RankedEntityId),
+    }));
   }
 
-  private getRoomIdFromRoom(room: any): string | null {
-    if (!room || typeof room !== 'object') {
-      return null;
-    }
-
-    const id =
-      (room as any).RoomId ??
-      (room as any).roomId ??
-      (room as any).RoomID ??
-      (room as any).Id ??
-      (room as any).id;
-    if (id === undefined || id === null || id === '') {
-      return null;
-    }
-
-    return String(id);
-  }
-
-  private getEventIdFromEvent(event: any): string | null {
-    if (!event || typeof event !== 'object') {
-      return null;
-    }
-
-    const id =
-      (event as any).PlayerEventId ??
-      (event as any).EventId ??
-      (event as any).eventId ??
-      (event as any).EventID ??
-      (event as any).Id ??
-      (event as any).id;
-    if (id === undefined || id === null || id === '') {
-      return null;
-    }
-
-    return String(id);
+  private normalizeEvents(events: EventDto[]): EventDto[] {
+    return events.map(event => ({
+      ...event,
+      PlayerEventId: this.normalizeId(event.PlayerEventId),
+      CreatorPlayerId: this.normalizeId(event.CreatorPlayerId),
+      RoomId: this.normalizeId(event.RoomId),
+    }));
   }
 
   private delay(ms: number): Promise<void> {
@@ -1393,108 +1313,30 @@ export class RecNetService extends EventEmitter {
     const eventIds = new Set<string>();
 
     for (const photo of photos) {
-      // Extract room ID - handle multiple possible field shapes
-      const extended = photo as any;
-      if (extended.Room && typeof extended.Room === 'string') {
-        // Room might be an ID string
-        roomIds.add(extended.Room);
-      } else if (extended.RoomId) {
-        roomIds.add(String(extended.RoomId));
-      } else if (extended.roomId) {
-        roomIds.add(String(extended.roomId));
-      } else if (extended.RoomID) {
-        roomIds.add(String(extended.RoomID));
+      if (photo.RoomId) {
+        roomIds.add(photo.RoomId);
       }
 
-      // Extract user IDs - could be in Users array or TaggedUsers array
-      if (extended.Users && Array.isArray(extended.Users)) {
-        for (const userId of extended.Users) {
-          if (userId) {
-            accountIds.add(String(userId));
+      if (photo.PlayerId) {
+        accountIds.add(photo.PlayerId);
+      }
+
+      if (Array.isArray(photo.TaggedPlayerIds)) {
+        photo.TaggedPlayerIds.forEach(tagged => {
+          if (tagged) {
+            accountIds.add(tagged);
           }
-        }
-      }
-      if (extended.TaggedUsers && Array.isArray(extended.TaggedUsers)) {
-        for (const userId of extended.TaggedUsers) {
-          if (userId) {
-            accountIds.add(String(userId));
-          }
-        }
-      }
-      if (extended.TaggedPlayerIds && Array.isArray(extended.TaggedPlayerIds)) {
-        for (const userId of extended.TaggedPlayerIds) {
-          if (userId) {
-            accountIds.add(String(userId));
-          }
-        }
-      }
-      // Also check for creator/owner/account fields commonly present on feed photos
-      if (extended.CreatorId) {
-        accountIds.add(String(extended.CreatorId));
-      }
-      if (extended.AccountId) {
-        accountIds.add(String(extended.AccountId));
-      }
-      if (extended.CreatorAccountId) {
-        accountIds.add(String(extended.CreatorAccountId));
-      }
-      if (extended.PlayerId || extended.playerId) {
-        accountIds.add(String(extended.PlayerId || extended.playerId));
-      }
-      if (extended.OwnerId) {
-        accountIds.add(String(extended.OwnerId));
+        });
       }
 
-      // Extract event IDs so we can hydrate event metadata
-      const eventIdCandidates = [
-        extended.EventId,
-        extended.eventId,
-        extended.PlayerEventId,
-        extended.playerEventId,
-        extended.EventInstanceId,
-        extended.eventInstanceId,
-      ];
-      for (const candidate of eventIdCandidates) {
-        if (candidate !== undefined && candidate !== null && candidate !== '') {
-          eventIds.add(String(candidate));
-        }
+      if (photo.PlayerEventId) {
+        eventIds.add(photo.PlayerEventId);
       }
-
-      // Some payloads may embed an Event object
-      if (extended.Event && typeof extended.Event === 'object') {
-        const embeddedId =
-          extended.Event.Id ??
-          extended.Event.id ??
-          extended.Event.eventId ??
-          extended.Event.EventId;
-        if (
-          embeddedId !== undefined &&
-          embeddedId !== null &&
-          embeddedId !== ''
-        ) {
-          eventIds.add(String(embeddedId));
-        }
+      if (photo.EventId) {
+        eventIds.add(photo.EventId);
       }
-
-      const playerEventObject =
-        extended.PlayerEvent && typeof extended.PlayerEvent === 'object'
-          ? extended.PlayerEvent
-          : extended.playerEvent && typeof extended.playerEvent === 'object'
-            ? extended.playerEvent
-            : undefined;
-      if (playerEventObject) {
-        const playerEventId =
-          playerEventObject.Id ??
-          playerEventObject.id ??
-          playerEventObject.EventId ??
-          playerEventObject.eventId;
-        if (
-          playerEventId !== undefined &&
-          playerEventId !== null &&
-          playerEventId !== ''
-        ) {
-          eventIds.add(String(playerEventId));
-        }
+      if (photo.EventInstanceId) {
+        eventIds.add(photo.EventInstanceId);
       }
     }
 
@@ -1517,7 +1359,7 @@ export class RecNetService extends EventEmitter {
         forceRoomsRefresh = false,
         forceEventsRefresh = false,
       } = options;
-      const normalizedPhotos = this.ensureIdsAreStringsInArray(photos);
+      const normalizedPhotos = this.normalizePhotos(photos);
       this.updateProgress('Extracting IDs from photos...', 0, 0, 0);
 
       // Extract unique IDs
@@ -1559,17 +1401,19 @@ export class RecNetService extends EventEmitter {
           0
         );
 
-        let cachedAccounts: any[] = [];
+        let cachedAccounts: PlayerResult[] = [];
         let cachedAccountIds = new Set<string>();
 
         if (accountsFileExists) {
           try {
-            const existing = await fs.readJson(accountsJsonPath);
+            const existing = (await fs.readJson(
+              accountsJsonPath
+            )) as PlayerResult[];
             if (Array.isArray(existing)) {
-              cachedAccounts = this.ensureIdsAreStringsInArray(existing);
+              cachedAccounts = this.normalizeAccounts(existing);
               cachedAccountIds = new Set(
                 cachedAccounts
-                  .map(account => this.getAccountIdFromAccount(account))
+                  .map(account => account.accountId)
                   .filter((id): id is string => !!id)
               );
               // Normalize and persist cached data to keep IDs consistent
@@ -1609,23 +1453,17 @@ export class RecNetService extends EventEmitter {
             token
           );
           const normalizedAccounts = Array.isArray(accountsData)
-            ? this.ensureIdsAreStringsInArray(accountsData)
+            ? this.normalizeAccounts(accountsData)
             : [];
           accountsFetched = normalizedAccounts.length;
 
           // Merge new data with cached data (prefer freshly downloaded entries)
-          const mergedAccountsMap = new Map<string, any>();
+          const mergedAccountsMap = new Map<string, PlayerResult>();
           for (const account of cachedAccounts) {
-            const id = this.getAccountIdFromAccount(account);
-            if (id) {
-              mergedAccountsMap.set(id, account);
-            }
+            mergedAccountsMap.set(account.accountId, account);
           }
           for (const account of normalizedAccounts) {
-            const id = this.getAccountIdFromAccount(account);
-            if (id) {
-              mergedAccountsMap.set(id, account);
-            }
+            mergedAccountsMap.set(account.accountId, account);
           }
 
           const mergedAccounts = Array.from(mergedAccountsMap.values());
@@ -1649,19 +1487,15 @@ export class RecNetService extends EventEmitter {
       if (roomIdsArray.length > 0) {
         this.updateProgress('Checking rooms cache', 0, roomIdsArray.length, 0);
 
-        let cachedRooms: any[] = [];
+        let cachedRooms: RoomDto[] = [];
         let cachedRoomIds = new Set<string>();
 
         if (roomsFileExists) {
           try {
-            const existing = await fs.readJson(roomsJsonPath);
+            const existing = (await fs.readJson(roomsJsonPath)) as RoomDto[];
             if (Array.isArray(existing)) {
-              cachedRooms = this.ensureIdsAreStringsInArray(existing);
-              cachedRoomIds = new Set(
-                cachedRooms
-                  .map(room => this.getRoomIdFromRoom(room))
-                  .filter((id): id is string => !!id)
-              );
+              cachedRooms = this.normalizeRooms(existing);
+              cachedRoomIds = new Set(cachedRooms.map(room => room.RoomId));
               await fs.writeJson(roomsJsonPath, cachedRooms, { spaces: 2 });
             }
           } catch (error) {
@@ -1695,22 +1529,16 @@ export class RecNetService extends EventEmitter {
             token
           );
           const normalizedRooms = Array.isArray(roomsData)
-            ? this.ensureIdsAreStringsInArray(roomsData)
+            ? this.normalizeRooms(roomsData)
             : [];
           roomsFetched = normalizedRooms.length;
 
-          const mergedRoomsMap = new Map<string, any>();
+          const mergedRoomsMap = new Map<string, RoomDto>();
           for (const room of cachedRooms) {
-            const id = this.getRoomIdFromRoom(room);
-            if (id) {
-              mergedRoomsMap.set(id, room);
-            }
+            mergedRoomsMap.set(room.RoomId, room);
           }
           for (const room of normalizedRooms) {
-            const id = this.getRoomIdFromRoom(room);
-            if (id) {
-              mergedRoomsMap.set(id, room);
-            }
+            mergedRoomsMap.set(room.RoomId, room);
           }
 
           const mergedRooms = Array.from(mergedRoomsMap.values());
@@ -1737,17 +1565,17 @@ export class RecNetService extends EventEmitter {
           0
         );
 
-        let cachedEvents: any[] = [];
+        let cachedEvents: EventDto[] = [];
         let cachedEventIds = new Set<string>();
 
         if (eventsFileExists) {
           try {
-            const existing = await fs.readJson(eventsJsonPath);
+            const existing = (await fs.readJson(eventsJsonPath)) as EventDto[];
             if (Array.isArray(existing)) {
-              cachedEvents = this.ensureIdsAreStringsInArray(existing);
+              cachedEvents = this.normalizeEvents(existing);
               cachedEventIds = new Set(
                 cachedEvents
-                  .map(event => this.getEventIdFromEvent(event))
+                  .map(event => event.PlayerEventId)
                   .filter((id): id is string => !!id)
               );
               await fs.writeJson(eventsJsonPath, cachedEvents, { spaces: 2 });
@@ -1783,22 +1611,16 @@ export class RecNetService extends EventEmitter {
             token
           );
           const normalizedEvents = Array.isArray(eventsData)
-            ? this.ensureIdsAreStringsInArray(eventsData)
+            ? this.normalizeEvents(eventsData)
             : [];
           eventsFetched = normalizedEvents.length;
 
-          const mergedEventsMap = new Map<string, any>();
+          const mergedEventsMap = new Map<string, EventDto>();
           for (const event of cachedEvents) {
-            const id = this.getEventIdFromEvent(event);
-            if (id) {
-              mergedEventsMap.set(id, event);
-            }
+            mergedEventsMap.set(event.PlayerEventId, event);
           }
           for (const event of normalizedEvents) {
-            const id = this.getEventIdFromEvent(event);
-            if (id) {
-              mergedEventsMap.set(id, event);
-            }
+            mergedEventsMap.set(event.PlayerEventId, event);
           }
 
           const mergedEvents = Array.from(mergedEventsMap.values());

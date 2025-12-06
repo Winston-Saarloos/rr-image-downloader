@@ -11,7 +11,7 @@ import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Photo } from '../../shared/types';
 import { format } from 'date-fns';
-import { ExtendedPhoto, usePhotoMetadata } from '../hooks/usePhotoMetadata';
+import { usePhotoMetadata } from '../hooks/usePhotoMetadata';
 import { useFavorites } from '../hooks/useFavorites';
 
 interface PhotoGridProps {
@@ -54,17 +54,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
 
   // Helper function to get cheers count from a photo
   const getCheersCount = useCallback((photo: Photo): number => {
-    const extended = photo as ExtendedPhoto;
-    // Try common field names for cheers
-    const cheers =
-      extended.Cheers ||
-      extended.cheers ||
-      extended.CheerCount ||
-      extended.cheerCount ||
-      extended.CheersCount ||
-      extended.cheersCount ||
-      0;
-    return typeof cheers === 'number' ? cheers : 0;
+    return typeof photo.CheerCount === 'number' ? photo.CheerCount : 0;
   }, []);
 
   // Sort photos based on sortBy option
@@ -100,10 +90,9 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
 
     const query = deferredSearchQuery.toLowerCase();
     return sortedPhotos.filter(photo => {
-      const extended = photo as ExtendedPhoto;
       const room = getPhotoRoom(photo).toLowerCase();
       const users = getPhotoUsers(photo).join(' ').toLowerCase();
-      const description = (extended.Description || '').toLowerCase();
+      const description = (photo.Description || '').toLowerCase();
       const eventInfo = getPhotoEvent(photo);
       const eventLabel = (
         eventInfo.name || (eventInfo.id ? `event ${eventInfo.id}` : '')
@@ -146,12 +135,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
       }
 
       if (groupBy === 'user' && accountId) {
-        const extended = photo as ExtendedPhoto;
-        const userIds =
-          extended.TaggedPlayerIds ||
-          extended.Users ||
-          extended.TaggedUsers ||
-          [];
+        const userIds = photo.TaggedPlayerIds || [];
 
         if (!Array.isArray(userIds)) {
           return; // Skip if no valid user IDs
@@ -179,19 +163,14 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
                 const users = getPhotoUsers(photo);
                 // Filter out owner from display if accountId is provided
                 if (accountId) {
-                  const extended = photo as ExtendedPhoto;
-                  const userIds =
-                    extended.TaggedPlayerIds ||
-                    extended.Users ||
-                    extended.TaggedUsers ||
-                    [];
+                  const userIds = photo.TaggedPlayerIds || [];
                   const accountIdStr = String(accountId);
                   const otherUserIds = userIds.filter(
-                    userId => String(userId) !== accountIdStr
+                    userId => userId !== accountIdStr
                   );
                   const otherUsers = otherUserIds.map(userId => {
-                    const userName = accountMap.get(String(userId));
-                    return userName || String(userId);
+                    const userName = accountMap.get(userId);
+                    return userName || userId;
                   });
                   return otherUsers.length > 0
                     ? otherUsers.join(', ')

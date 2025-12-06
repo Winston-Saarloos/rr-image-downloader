@@ -1,22 +1,25 @@
-import { Event } from '../../models/Event';
+import { EventDto } from '../../models/EventDto';
 import { RecNetHttpClient } from './http-client';
 
 export class EventsController {
   constructor(private readonly http: RecNetHttpClient) {}
 
-  async fetchBulkEvents(eventIds: string[], token?: string): Promise<Event[]> {
+  async fetchBulkEvents(
+    eventIds: string[],
+    token?: string
+  ): Promise<EventDto[]> {
     if (eventIds.length === 0) {
       return [];
     }
 
-    const results: Event[] = [];
+    const results: EventDto[] = [];
     const batchSize = 100;
 
     for (let i = 0; i < eventIds.length; i += batchSize) {
       const batch = eventIds.slice(i, i + batchSize);
 
       try {
-        const response = await this.http.request<Event[]>(
+        const response = await this.http.request<EventDto[]>(
           {
             url: 'https://apim.rec.net/apis/api/playerevents/v1/bulk',
             method: 'POST',
@@ -29,11 +32,11 @@ export class EventsController {
         );
 
         if (response.success && Array.isArray(response.value)) {
-          const transformedEvents = response.value.map((event: Event) => ({
+          const transformedEvents = response.value.map((event: EventDto) => ({
             ...event,
-            PlayerEventId: event.PlayerEventId.toString(),
-            CreatorPlayerId: event.CreatorPlayerId.toString(),
-            RoomId: event.RoomId.toString(),
+            PlayerEventId: String(event.PlayerEventId),
+            CreatorPlayerId: String(event.CreatorPlayerId),
+            RoomId: String(event.RoomId),
           }));
           results.push(...transformedEvents);
         } else {

@@ -1,4 +1,5 @@
 import { AccountInfo } from '../../../shared/types';
+import { PlayerResult } from '../../models/PlayerDto';
 import { RecNetHttpClient } from './http-client';
 
 export class AccountsController {
@@ -7,12 +8,12 @@ export class AccountsController {
   async fetchBulkAccounts(
     accountIds: string[],
     token?: string
-  ): Promise<any[]> {
+  ): Promise<PlayerResult[]> {
     if (accountIds.length === 0) {
       return [];
     }
 
-    const results: any[] = [];
+    const results: PlayerResult[] = [];
     const batchSize = 100;
 
     for (let i = 0; i < accountIds.length; i += batchSize) {
@@ -24,7 +25,7 @@ export class AccountsController {
           formData.append('id', id);
         }
 
-        const response = await this.http.request<any[]>(
+        const response = await this.http.request<PlayerResult[]>(
           {
             url: 'https://accounts.rec.net/account/bulk',
             method: 'POST',
@@ -37,7 +38,7 @@ export class AccountsController {
         );
 
         if (response.success && Array.isArray(response.value)) {
-          results.push(...response.value);
+          results.push(...this.normalizeAccounts(response.value));
         } else {
           console.log(
             `Failed to fetch batch of accounts: status ${response.status} - ${response.message || response.error}`
@@ -61,29 +62,38 @@ export class AccountsController {
     accountId: string,
     token?: string
   ): Promise<AccountInfo[]> {
-    return this.http.requestOrThrow<AccountInfo[]>(
+    const accounts = await this.http.requestOrThrow<PlayerResult[]>(
       {
         url: `https://accounts.rec.net/account/bulk?id=${encodeURIComponent(accountId)}`,
         method: 'GET',
       },
       token
     );
+    return this.normalizeAccounts(accounts);
   }
 
   async searchAccounts(
     username: string,
     token?: string
   ): Promise<AccountInfo[]> {
-    return this.http.requestOrThrow<AccountInfo[]>(
+    const accounts = await this.http.requestOrThrow<PlayerResult[]>(
       {
         url: `https://apim.rec.net/accounts/account/search?name=${encodeURIComponent(username)}`,
         method: 'GET',
       },
       token
     );
+    return this.normalizeAccounts(accounts);
   }
 
   private delayBetweenBatches(): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  private normalizeAccounts(accounts: PlayerResult[]): PlayerResult[] {
+    return accounts.map(account => ({
+      ...account,
+      accountId: String(account.accountId),
+    }));
   }
 }

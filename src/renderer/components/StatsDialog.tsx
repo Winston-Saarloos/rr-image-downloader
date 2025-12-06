@@ -14,8 +14,8 @@ import {
   CardTitle,
 } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Photo } from '../../shared/types';
-import { usePhotoMetadata, ExtendedPhoto } from '../hooks/usePhotoMetadata';
+import { Photo, PlayerResult, RoomDto } from '../../shared/types';
+import { usePhotoMetadata } from '../hooks/usePhotoMetadata';
 import { format } from 'date-fns';
 import {
   BarChart,
@@ -397,27 +397,12 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
           const result = await window.electronAPI.loadRoomsData(accountId);
           if (result.success && result.data) {
             const roomMapping = new Map<string, string>();
-            for (const room of result.data) {
-              const roomId =
-                room.id ||
-                room.roomId ||
-                room.Id ||
-                room.RoomId ||
-                room.room_id;
-              const roomName =
-                room.name ||
-                room.roomName ||
-                room.Name ||
-                room.RoomName ||
-                room.title ||
-                room.Title;
-              if (roomId && roomName) {
-                roomMapping.set(String(roomId), roomName);
-                if (typeof roomId === 'number') {
-                  roomMapping.set(String(roomId), roomName);
-                }
+            const rooms = result.data as RoomDto[];
+            rooms.forEach(room => {
+              if (room.RoomId) {
+                roomMapping.set(room.RoomId, room.Name || room.RoomId);
               }
-            }
+            });
             setRoomMap(roomMapping);
           }
         }
@@ -432,14 +417,12 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
           const result = await window.electronAPI.loadAccountsData(accountId);
           if (result.success && result.data) {
             const accountMapping = new Map<string, string>();
-            for (const account of result.data) {
-              const accId = account.accountId || account.id || account.Id;
-              const accountName =
-                account.username || account.displayName || account.name;
-              if (accId && accountName) {
-                accountMapping.set(String(accId), accountName);
-              }
-            }
+            const accounts = result.data as PlayerResult[];
+            accounts.forEach(account => {
+              const displayName =
+                account.displayName || account.username || account.accountId;
+              accountMapping.set(account.accountId, displayName);
+            });
             setAccountMap(accountMapping);
           }
         }
@@ -529,16 +512,8 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
     // Calculate total cheers
     let totalCheers = 0;
     allPhotos.forEach(photo => {
-      const extended = photo as ExtendedPhoto;
-      const cheers =
-        extended.Cheers ||
-        extended.cheers ||
-        extended.CheerCount ||
-        extended.cheerCount ||
-        extended.CheersCount ||
-        extended.cheersCount ||
-        0;
-      totalCheers += typeof cheers === 'number' ? cheers : 0;
+      totalCheers +=
+        typeof photo.CheerCount === 'number' ? photo.CheerCount : 0;
     });
 
     // Sort photos by date for time gap calculations

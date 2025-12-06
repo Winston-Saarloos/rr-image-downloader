@@ -15,8 +15,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../components/ui/select';
-import { Photo, AvailableAccount } from '../../shared/types';
-import type { Event as RecNetEvent } from '../../main/models/Event';
+import {
+  Photo,
+  AvailableAccount,
+  EventDto,
+  RoomDto,
+  PlayerResult,
+} from '../../shared/types';
 import { PhotoGrid } from './PhotoGrid';
 import { PhotoDetailModal } from './PhotoDetailModal';
 import { useFavorites } from '../hooks/useFavorites';
@@ -120,28 +125,14 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       if (window.electronAPI) {
         const result = await window.electronAPI.loadRoomsData(accountId);
         if (result.success && result.data) {
+          const rooms = result.data as RoomDto[];
           const roomMapping = new Map<string, string>();
-          // Room data structure may vary, try common field names
-          for (const room of result.data) {
-            // Try multiple possible field names for room ID
-            const roomId =
-              room.id || room.roomId || room.Id || room.RoomId || room.room_id;
-            // Try multiple possible field names for room name
-            const roomName =
-              room.name ||
-              room.roomName ||
-              room.Name ||
-              room.RoomName ||
-              room.title ||
-              room.Title;
-            if (roomId && roomName) {
-              roomMapping.set(String(roomId), roomName);
-              // Also try with different string formats
-              if (typeof roomId === 'number') {
-                roomMapping.set(String(roomId), roomName);
-              }
+          rooms.forEach(room => {
+            if (room.RoomId) {
+              const roomName = room.Name || room.RoomId;
+              roomMapping.set(room.RoomId, roomName);
             }
-          }
+          });
           setRoomMap(roomMapping);
         }
       }
@@ -161,16 +152,13 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       if (window.electronAPI) {
         const result = await window.electronAPI.loadAccountsData(accountId);
         if (result.success && result.data) {
+          const accounts = result.data as PlayerResult[];
           const accountMapping = new Map<string, string>();
-          // Account data structure may vary, try common field names
-          for (const account of result.data) {
-            const accountId = account.accountId || account.id || account.Id;
-            const accountName =
-              account.username || account.displayName || account.name;
-            if (accountId && accountName) {
-              accountMapping.set(String(accountId), accountName);
-            }
-          }
+          accounts.forEach(account => {
+            const displayName =
+              account.displayName || account.username || account.accountId;
+            accountMapping.set(account.accountId, displayName);
+          });
           setAccountMap(accountMapping);
         }
       }
@@ -191,16 +179,14 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         const result = await window.electronAPI.loadEventsData(accountId);
         if (result.success && result.data) {
           const eventMapping = new Map<string, string>();
-          const events = result.data as RecNetEvent[];
-          for (const event of events) {
-            const eventId = event.PlayerEventId
-              ? String(event.PlayerEventId)
-              : undefined;
-            const eventName = event.Name;
-            if (eventId) {
-              eventMapping.set(eventId, eventName || eventId);
+          const events = result.data as EventDto[];
+          events.forEach(event => {
+            if (event.PlayerEventId) {
+              const eventId = String(event.PlayerEventId);
+              const eventName = event.Name || eventId;
+              eventMapping.set(eventId, eventName);
             }
-          }
+          });
           setEventMap(eventMapping);
         } else {
           setEventMap(new Map());

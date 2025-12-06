@@ -1,4 +1,9 @@
-export type { Event } from '../../main/models/Event';
+import { EventDto } from '../../main/models/EventDto';
+import { ImageDto } from '../../main/models/ImageDto';
+import { PlayerResult } from '../../main/models/PlayerDto';
+import { RoomDto } from '../../main/models/RoomDto';
+
+export type { EventDto, ImageDto, PlayerResult, RoomDto };
 
 export interface RecNetSettings {
   outputRoot: string;
@@ -22,48 +27,15 @@ export interface Progress {
   current: number;
 }
 
-export interface Photo {
-  Id: string;
-  ImageName: string;
+export type Photo = Omit<ImageDto, 'PlayerEventId'> & {
+  PlayerEventId?: string;
   sort?: string;
-  CreatedAt?: string;
-  Description?: string;
-  EventId?: string | number | null;
-  eventId?: string | number | null;
-  PlayerEventId?: string | number | null;
-  playerEventId?: string | number | null;
-  EventInstanceId?: string | number | null;
-  eventInstanceId?: string | number | null;
-  localFilePath?: string; // Path to local file on disk (added when loading photos)
-  [key: string]: any;
-}
+  EventId?: string | null;
+  EventInstanceId?: string | null;
+  localFilePath?: string;
+};
 
-// Legacy PlayerEvent interface - kept for backward compatibility
-export interface PlayerEvent {
-  Id: string | number;
-  Name?: string;
-  Description?: string;
-  StartTime?: string;
-  EndTime?: string;
-  RoomId?: string | number | null;
-  RoomName?: string | null;
-  [key: string]: any;
-}
-
-export interface AccountInfo {
-  accountId: string;
-  username: string;
-  displayName: string;
-  displayEmoji: string;
-  profileImage: string;
-  bannerImage: string;
-  isJunior: boolean;
-  platforms: number;
-  personalPronouns: number;
-  identityFlags: number;
-  createdAt: string;
-  isMetaPlatformBlocked: boolean;
-}
+export type AccountInfo = PlayerResult;
 
 export interface IterationDetail {
   iteration?: number;
@@ -194,11 +166,9 @@ export interface ElectronAPI {
   loadPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
   loadFeedPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
   listAvailableAccounts: () => Promise<ApiResponse<AvailableAccount[]>>;
-  loadAccountsData: (accountId: string) => Promise<ApiResponse<any[]>>;
-  loadRoomsData: (accountId: string) => Promise<ApiResponse<any[]>>;
-  loadEventsData: (
-    accountId: string
-  ) => Promise<ApiResponse<import('../../main/models/Event').Event[]>>;
+  loadAccountsData: (accountId: string) => Promise<ApiResponse<PlayerResult[]>>;
+  loadRoomsData: (accountId: string) => Promise<ApiResponse<RoomDto[]>>;
+  loadEventsData: (accountId: string) => Promise<ApiResponse<EventDto[]>>;
 
   // Favorites management
   getFavorites: () => Promise<ApiResponse<string[]>>;

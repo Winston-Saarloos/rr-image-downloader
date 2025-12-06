@@ -1,4 +1,4 @@
-import { Photo } from '../../../shared/types';
+import { ImageDto } from '../../models/ImageDto';
 import { GenericResponse } from '../../models/GenericResponse';
 import { RecNetHttpClient } from './http-client';
 
@@ -9,7 +9,7 @@ export class PhotosController {
     accountId: string,
     params: { skip: number; take: number; sort: number; after?: string },
     token?: string
-  ): Promise<Photo[]> {
+  ): Promise<ImageDto[]> {
     const { skip, take, sort, after } = params;
     let url = `https://apim.rec.net/apis/api/images/v4/player/${encodeURIComponent(accountId)}?skip=${skip}&take=${take}&sort=${sort}`;
 
@@ -17,18 +17,18 @@ export class PhotosController {
       url += `&after=${encodeURIComponent(after)}`;
     }
 
-    return this.http.requestOrThrow<Photo[]>({ url, method: 'GET' }, token);
+    return this.http.requestOrThrow<ImageDto[]>({ url, method: 'GET' }, token);
   }
 
   async fetchFeedPhotos(
     accountId: string,
     params: { skip: number; take: number; since: string },
     token?: string
-  ): Promise<Photo[]> {
+  ): Promise<ImageDto[]> {
     const { skip, take, since } = params;
     const url = `https://apim.rec.net/apis/api/images/v3/feed/player/${encodeURIComponent(accountId)}?skip=${skip}&take=${take}&since=${encodeURIComponent(since)}`;
 
-    return this.http.requestOrThrow<Photo[]>({ url, method: 'GET' }, token);
+    return this.http.requestOrThrow<ImageDto[]>({ url, method: 'GET' }, token);
   }
 
   async downloadPhoto(
@@ -36,9 +36,7 @@ export class PhotosController {
     cdnBase: string,
     token?: string
   ): Promise<GenericResponse<ArrayBuffer>> {
-    const normalizedBase = cdnBase.endsWith('/')
-      ? cdnBase
-      : `${cdnBase}/`;
+    const normalizedBase = cdnBase.endsWith('/') ? cdnBase : `${cdnBase}/`;
     return this.http.request<ArrayBuffer>(
       {
         url: `${normalizedBase}${imageName}`,

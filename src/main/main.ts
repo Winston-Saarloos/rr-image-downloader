@@ -18,8 +18,10 @@ import {
   Progress,
   AccountInfo,
   Photo,
+  PlayerResult,
+  RoomDto,
 } from '../shared/types';
-import { Event } from './models/Event';
+import { EventDto } from './models/EventDto';
 
 // Keep a global reference of the window object
 let mainWindow: BrowserWindow | null = null;
@@ -575,7 +577,7 @@ ipcMain.handle(
   async (
     event: IpcMainInvokeEvent,
     accountId: string
-  ): Promise<ApiResponse<any[]>> => {
+  ): Promise<ApiResponse<PlayerResult[]>> => {
     try {
       const settings = recNetService.getSettings();
       const accountDir = path.join(settings.outputRoot, accountId);
@@ -585,7 +587,8 @@ ipcMain.handle(
       );
 
       if (await fs.pathExists(accountsJsonPath)) {
-        const accountsData: any[] = await fs.readJson(accountsJsonPath);
+        const accountsData: PlayerResult[] =
+          await fs.readJson(accountsJsonPath);
         return {
           success: true,
           data: accountsData,
@@ -605,14 +608,14 @@ ipcMain.handle(
   async (
     event: IpcMainInvokeEvent,
     accountId: string
-  ): Promise<ApiResponse<any[]>> => {
+  ): Promise<ApiResponse<RoomDto[]>> => {
     try {
       const settings = recNetService.getSettings();
       const accountDir = path.join(settings.outputRoot, accountId);
       const roomsJsonPath = path.join(accountDir, `${accountId}_rooms.json`);
 
       if (await fs.pathExists(roomsJsonPath)) {
-        const roomsData: any[] = await fs.readJson(roomsJsonPath);
+        const roomsData: RoomDto[] = await fs.readJson(roomsJsonPath);
         return { success: true, data: roomsData };
       } else {
         return { success: true, data: [] };
@@ -629,14 +632,14 @@ ipcMain.handle(
   async (
     event: IpcMainInvokeEvent,
     accountId: string
-  ): Promise<ApiResponse<Event[]>> => {
+  ): Promise<ApiResponse<EventDto[]>> => {
     try {
       const settings = recNetService.getSettings();
       const accountDir = path.join(settings.outputRoot, accountId);
       const eventsJsonPath = path.join(accountDir, `${accountId}_events.json`);
 
       if (await fs.pathExists(eventsJsonPath)) {
-        const eventsData: Event[] = await fs.readJson(eventsJsonPath);
+        const eventsData: EventDto[] = await fs.readJson(eventsJsonPath);
         return { success: true, data: eventsData };
       } else {
         return { success: true, data: [] };
