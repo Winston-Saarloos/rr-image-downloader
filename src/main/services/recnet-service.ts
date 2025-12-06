@@ -191,7 +191,8 @@ export class RecNetService extends EventEmitter {
           `Found old photos file at: ${oldJsonPath}, migrating to: ${jsonPath}`
         );
         const oldData = await fs.readJson(oldJsonPath);
-        await fs.writeJson(jsonPath, oldData, {
+        const normalizedOldData = this.ensureIdsAreStringsInArray(oldData);
+        await fs.writeJson(jsonPath, normalizedOldData, {
           spaces: 2,
         });
         console.log(`Migration completed`);
@@ -211,11 +212,14 @@ export class RecNetService extends EventEmitter {
         console.log(`Found existing photos file at: ${jsonPath}`);
         try {
           const existingJson: Photo[] = await fs.readJson(jsonPath);
-          if (existingJson && existingJson.length > 0) {
-            existingPhotoCount = existingJson.length;
+          const normalizedExisting = this.ensureIdsAreStringsInArray(
+            existingJson
+          );
+          if (normalizedExisting && normalizedExisting.length > 0) {
+            existingPhotoCount = normalizedExisting.length;
 
             // Find the newest photo's sort value
-            for (const photo of existingJson) {
+            for (const photo of normalizedExisting) {
               if (photo.sort) {
                 const currentSort = photo.sort;
                 if (!lastSortValue || currentSort > lastSortValue) {
@@ -224,7 +228,7 @@ export class RecNetService extends EventEmitter {
               }
             }
 
-            all.push(...existingJson);
+            all.push(...normalizedExisting);
             iterationDetails.push({
               note: 'resumed_from_existing_file',
               existingPhotos: existingPhotoCount,
@@ -368,12 +372,13 @@ export class RecNetService extends EventEmitter {
       // Save updated collection
       await fs.ensureDir(path.dirname(jsonPath));
       console.log(`Saving photos metadata to: ${jsonPath}`);
-      await fs.writeJson(jsonPath, all, {
+      const normalizedAll = this.ensureIdsAreStringsInArray(all);
+      await fs.writeJson(jsonPath, normalizedAll, {
         spaces: 2,
       });
       console.log(`Photos metadata saved successfully`);
 
-      const totalNewPhotosAdded = all.length - existingPhotoCount;
+      const totalNewPhotosAdded = normalizedAll.length - existingPhotoCount;
 
       // Fetch and save bulk account and room data (from photos + any existing feed)
       try {
@@ -384,12 +389,13 @@ export class RecNetService extends EventEmitter {
           0
         );
 
-        let combinedForMetadata: Photo[] = [...all];
+        let combinedForMetadata: Photo[] = [...normalizedAll];
         const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
         if (await fs.pathExists(feedJsonPath)) {
           try {
             const feedPhotos: Photo[] = await fs.readJson(feedJsonPath);
-            combinedForMetadata = combinedForMetadata.concat(feedPhotos);
+            const normalizedFeed = this.ensureIdsAreStringsInArray(feedPhotos);
+            combinedForMetadata = combinedForMetadata.concat(normalizedFeed);
           } catch (error) {
             console.log(
               `Warning: Failed to read feed photos for metadata merge: ${(error as Error).message}`
@@ -420,7 +426,7 @@ export class RecNetService extends EventEmitter {
         saved: jsonPath,
         existingPhotos: existingPhotoCount,
         totalNewPhotosAdded,
-        totalPhotos: all.length,
+        totalPhotos: normalizedAll.length,
         totalFetched,
         pageSize: 150,
         delayMs: this.settings.interPageDelayMs,
@@ -472,7 +478,8 @@ export class RecNetService extends EventEmitter {
           `Found old feed file at: ${oldFeedJsonPath}, migrating to: ${feedJsonPath}`
         );
         const oldFeedData = await fs.readJson(oldFeedJsonPath);
-        await fs.writeJson(feedJsonPath, oldFeedData, { spaces: 2 });
+        const normalizedOldFeed = this.ensureIdsAreStringsInArray(oldFeedData);
+        await fs.writeJson(feedJsonPath, normalizedOldFeed, { spaces: 2 });
         console.log(`Feed migration completed`);
 
         // Remove the old file after successful migration
@@ -493,11 +500,14 @@ export class RecNetService extends EventEmitter {
       if (await fs.pathExists(feedJsonPath)) {
         try {
           const existingPhotos: Photo[] = await fs.readJson(feedJsonPath);
-          if (existingPhotos && existingPhotos.length > 0) {
-            existingPhotoCount = existingPhotos.length;
+          const normalizedExisting = this.ensureIdsAreStringsInArray(
+            existingPhotos
+          );
+          if (normalizedExisting && normalizedExisting.length > 0) {
+            existingPhotoCount = normalizedExisting.length;
 
             // Find the oldest photo's CreatedAt
-            for (const photo of existingPhotos) {
+            for (const photo of normalizedExisting) {
               if (photo.CreatedAt) {
                 const createdAt = new Date(photo.CreatedAt);
                 if (!lastSince || createdAt < lastSince) {
@@ -506,7 +516,7 @@ export class RecNetService extends EventEmitter {
               }
             }
 
-            all.push(...existingPhotos);
+            all.push(...normalizedExisting);
             iterationDetails.push({
               note: 'resumed_from_existing_feed_file',
               existingPhotos: existingPhotoCount,
@@ -632,11 +642,12 @@ export class RecNetService extends EventEmitter {
       }
 
       // Save updated feed collection
-      await fs.writeJson(feedJsonPath, all, {
+      const normalizedFeed = this.ensureIdsAreStringsInArray(all);
+      await fs.writeJson(feedJsonPath, normalizedFeed, {
         spaces: 2,
       });
 
-      const totalNewPhotosAdded = all.length - existingPhotoCount;
+      const totalNewPhotosAdded = normalizedFeed.length - existingPhotoCount;
 
       // Fetch and save bulk account and room data (feed + any existing photos)
       try {
@@ -647,7 +658,7 @@ export class RecNetService extends EventEmitter {
           0
         );
 
-        let combinedForMetadata: Photo[] = [...all];
+        let combinedForMetadata: Photo[] = [...normalizedFeed];
         const photosJsonPath = path.join(
           accountDir,
           `${accountId}_photos.json`
@@ -655,7 +666,9 @@ export class RecNetService extends EventEmitter {
         if (await fs.pathExists(photosJsonPath)) {
           try {
             const photoMetadata: Photo[] = await fs.readJson(photosJsonPath);
-            combinedForMetadata = combinedForMetadata.concat(photoMetadata);
+            const normalizedPhotos =
+              this.ensureIdsAreStringsInArray(photoMetadata);
+            combinedForMetadata = combinedForMetadata.concat(normalizedPhotos);
           } catch (error) {
             console.log(
               `Warning: Failed to read photos metadata for feed merge: ${(error as Error).message}`
@@ -685,7 +698,7 @@ export class RecNetService extends EventEmitter {
         saved: feedJsonPath,
         existingPhotos: existingPhotoCount,
         totalNewPhotosAdded,
-        totalPhotos: all.length,
+        totalPhotos: normalizedFeed.length,
         totalFetched,
         pageSize: 150,
         delayMs: this.settings.interPageDelayMs,
@@ -721,7 +734,9 @@ export class RecNetService extends EventEmitter {
       await fs.ensureDir(photosDir);
       await fs.ensureDir(feedDir);
 
-      const photos: Photo[] = await fs.readJson(jsonPath);
+      const photos: Photo[] = this.ensureIdsAreStringsInArray(
+        await fs.readJson(jsonPath)
+      );
       if (!photos || photos.length === 0) {
         throw new Error('No photos found in the JSON file.');
       }
@@ -956,7 +971,9 @@ export class RecNetService extends EventEmitter {
       await fs.ensureDir(feedPhotosDir);
       await fs.ensureDir(photosDir);
 
-      const photos: Photo[] = await fs.readJson(feedJsonPath);
+      const photos: Photo[] = this.ensureIdsAreStringsInArray(
+        await fs.readJson(feedJsonPath)
+      );
       if (!photos || photos.length === 0) {
         throw new Error('No feed photos found in the JSON file.');
       }
@@ -1223,6 +1240,95 @@ export class RecNetService extends EventEmitter {
     return aStr.localeCompare(bStr);
   }
 
+  private ensureIdsAreStringsInArray<T>(items: T[]): T[] {
+    return items.map(item => this.ensureIdsAreStringsInObject(item));
+  }
+
+  private ensureIdsAreStringsInObject<T>(item: T): T {
+    if (!item || typeof item !== 'object') {
+      return item;
+    }
+
+    if (Array.isArray(item)) {
+      const mapped = item.map(value =>
+        value !== null && typeof value === 'object'
+          ? this.ensureIdsAreStringsInObject(value)
+          : value
+      );
+      return mapped as unknown as T;
+    }
+
+    const clone: any = Array.isArray(item) ? [] : { ...item };
+
+    for (const [key, value] of Object.entries(clone)) {
+      if (value === null || value === undefined) {
+        continue;
+      }
+
+      if (Array.isArray(value)) {
+        clone[key] = this.normalizeIdArray(key, value);
+        continue;
+      }
+
+      if (typeof value === 'object') {
+        clone[key] = this.ensureIdsAreStringsInObject(value);
+      }
+
+      if (this.isIdLikeKey(key)) {
+        const normalized = this.normalizeId(value);
+        if (normalized !== '') {
+          clone[key] = normalized;
+        }
+      }
+    }
+
+    return clone as T;
+  }
+
+  private normalizeIdArray(key: string, values: any[]): any[] {
+    if (this.isIdLikeArrayKey(key)) {
+      return values.map(value => {
+        if (value !== null && typeof value === 'object') {
+          return this.ensureIdsAreStringsInObject(value);
+        }
+        const normalized = this.normalizeId(value);
+        return normalized !== '' ? normalized : value;
+      });
+    }
+
+    return values.map(value =>
+      value !== null && typeof value === 'object'
+        ? this.ensureIdsAreStringsInObject(value)
+        : value
+    );
+  }
+
+  private isIdLikeKey(key: string): boolean {
+    const normalized = key.replace(/[_-]/g, '').toLowerCase();
+    if (normalized === 'id') {
+      return true;
+    }
+
+    return /^(account|room|event|player|creator|owner|photo|image|user|tagged).*id$/.test(
+      normalized
+    );
+  }
+
+  private isIdLikeArrayKey(key: string): boolean {
+    const normalized = key.replace(/[_-]/g, '').toLowerCase();
+    if (normalized === 'ids') {
+      return true;
+    }
+
+    if (['users', 'taggedusers'].includes(normalized)) {
+      return true;
+    }
+
+    return /^(account|room|event|player|creator|owner|photo|image|user|tagged).*ids$/.test(
+      normalized
+    );
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -1361,10 +1467,12 @@ export class RecNetService extends EventEmitter {
         forceRoomsRefresh = false,
         forceEventsRefresh = false,
       } = options;
+      const normalizedPhotos = this.ensureIdsAreStringsInArray(photos);
       this.updateProgress('Extracting IDs from photos...', 0, 0, 0);
 
       // Extract unique IDs
-      const { accountIds, roomIds, eventIds } = this.extractUniqueIds(photos);
+      const { accountIds, roomIds, eventIds } =
+        this.extractUniqueIds(normalizedPhotos);
       const accountIdsArray = Array.from(accountIds);
       const roomIdsArray = Array.from(roomIds);
       const eventIdsArray = Array.from(eventIds);
@@ -1404,6 +1512,20 @@ export class RecNetService extends EventEmitter {
           console.log(
             `Account data already exists at ${accountsJsonPath}, skipping fetch (force refresh disabled)`
           );
+          try {
+            const cachedAccounts = await fs.readJson(accountsJsonPath);
+            if (Array.isArray(cachedAccounts)) {
+              const normalizedCachedAccounts =
+                this.ensureIdsAreStringsInArray(cachedAccounts);
+              await fs.writeJson(accountsJsonPath, normalizedCachedAccounts, {
+                spaces: 2,
+              });
+            }
+          } catch (error) {
+            console.log(
+              `Warning: Failed to normalize cached account data: ${(error as Error).message}`
+            );
+          }
           this.updateProgress(
             'Using cached account data',
             accountIdsArray.length,
@@ -1421,11 +1543,15 @@ export class RecNetService extends EventEmitter {
             accountIdsArray,
             token
           );
-          accountsFetched = accountsData.length;
-
-          await fs.writeJson(accountsJsonPath, accountsData, { spaces: 2 });
+          const normalizedAccounts = Array.isArray(accountsData)
+            ? this.ensureIdsAreStringsInArray(accountsData)
+            : [];
+          accountsFetched = normalizedAccounts.length;
+          await fs.writeJson(accountsJsonPath, normalizedAccounts, {
+            spaces: 2,
+          });
           console.log(
-            `Saved ${accountsData.length} accounts to ${accountsJsonPath}`
+            `Saved ${normalizedAccounts.length} accounts to ${accountsJsonPath}`
           );
         }
       }
@@ -1437,6 +1563,20 @@ export class RecNetService extends EventEmitter {
           console.log(
             `Room data already exists at ${roomsJsonPath}, skipping fetch (force refresh disabled)`
           );
+          try {
+            const cachedRooms = await fs.readJson(roomsJsonPath);
+            if (Array.isArray(cachedRooms)) {
+              const normalizedCachedRooms =
+                this.ensureIdsAreStringsInArray(cachedRooms);
+              await fs.writeJson(roomsJsonPath, normalizedCachedRooms, {
+                spaces: 2,
+              });
+            }
+          } catch (error) {
+            console.log(
+              `Warning: Failed to normalize cached room data: ${(error as Error).message}`
+            );
+          }
           this.updateProgress(
             'Using cached room data',
             roomIdsArray.length,
@@ -1454,10 +1594,14 @@ export class RecNetService extends EventEmitter {
             roomIdsArray,
             token
           );
-          roomsFetched = roomsData.length;
-
-          await fs.writeJson(roomsJsonPath, roomsData, { spaces: 2 });
-          console.log(`Saved ${roomsData.length} rooms to ${roomsJsonPath}`);
+          const normalizedRooms = Array.isArray(roomsData)
+            ? this.ensureIdsAreStringsInArray(roomsData)
+            : [];
+          roomsFetched = normalizedRooms.length;
+          await fs.writeJson(roomsJsonPath, normalizedRooms, { spaces: 2 });
+          console.log(
+            `Saved ${normalizedRooms.length} rooms to ${roomsJsonPath}`
+          );
         }
       }
 
@@ -1473,6 +1617,20 @@ export class RecNetService extends EventEmitter {
           console.log(
             `Event data already exists at ${eventsJsonPath}, skipping fetch (force refresh disabled)`
           );
+          try {
+            const cachedEvents = await fs.readJson(eventsJsonPath);
+            if (Array.isArray(cachedEvents)) {
+              const normalizedCachedEvents =
+                this.ensureIdsAreStringsInArray(cachedEvents);
+              await fs.writeJson(eventsJsonPath, normalizedCachedEvents, {
+                spaces: 2,
+              });
+            }
+          } catch (error) {
+            console.log(
+              `Warning: Failed to normalize cached event data: ${(error as Error).message}`
+            );
+          }
           this.updateProgress(
             'Using cached event data',
             eventIdsArray.length,
@@ -1490,10 +1648,14 @@ export class RecNetService extends EventEmitter {
             eventIdsArray,
             token
           );
-          eventsFetched = eventsData.length;
-
-          await fs.writeJson(eventsJsonPath, eventsData, { spaces: 2 });
-          console.log(`Saved ${eventsData.length} events to ${eventsJsonPath}`);
+          const normalizedEvents = Array.isArray(eventsData)
+            ? this.ensureIdsAreStringsInArray(eventsData)
+            : [];
+          eventsFetched = normalizedEvents.length;
+          await fs.writeJson(eventsJsonPath, normalizedEvents, { spaces: 2 });
+          console.log(
+            `Saved ${normalizedEvents.length} events to ${eventsJsonPath}`
+          );
         }
       }
 
