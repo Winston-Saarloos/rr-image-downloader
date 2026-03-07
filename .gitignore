@@ -199,3 +199,5 @@ Thumbs.db
 # Application specific
 output/
 *.json.bak
+docs/RELEASE.md
+docs/BUILD.md
