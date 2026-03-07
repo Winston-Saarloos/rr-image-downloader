@@ -727,11 +727,26 @@ ipcMain.handle(
   }
 );
 
+// Allowlist of URL prefixes that the renderer may open in the system browser
+const ALLOWED_EXTERNAL_URL_PREFIXES = ['https://rec.net/'];
+
 // Open external URL in system browser
 ipcMain.handle(
   'open-external',
   async (event: IpcMainInvokeEvent, url: string): Promise<void> => {
-    await shell.openExternal(url);
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error(`Invalid URL: ${url}`);
+    }
+    if (parsed.protocol !== 'https:') {
+      throw new Error(`Blocked non-HTTPS URL: ${url}`);
+    }
+    if (!ALLOWED_EXTERNAL_URL_PREFIXES.some(prefix => parsed.href.startsWith(prefix))) {
+      throw new Error(`URL not in allowlist: ${url}`);
+    }
+    await shell.openExternal(parsed.href);
   }
 );
 
