@@ -1254,19 +1254,19 @@ export class RecNetService extends EventEmitter {
       Array.isArray(photo.TaggedPlayerIds) && photo.TaggedPlayerIds.length > 0
         ? photo.TaggedPlayerIds.map(id => this.normalizeId(id)).filter(Boolean)
         : [];
-    const normalizedPlayerEventId = this.normalizeId(
-      (photo as any).PlayerEventId
-    );
-    const normalizedEventId = this.normalizeId((photo as any).EventId);
+    const normalizedPlayerEventId = this.normalizeId(photo.PlayerEventId);
+    // EventId and EventInstanceId only exist on Photo, not ImageDto
+    const photoFields = photo as Photo;
+    const normalizedEventId = this.normalizeId(photoFields.EventId);
     const normalizedEventInstanceId = this.normalizeId(
-      (photo as any).EventInstanceId
+      photoFields.EventInstanceId
     );
 
     return {
       ...photo,
       Id: this.normalizeId(photo.Id),
-      PlayerId: this.normalizeId((photo as any).PlayerId),
-      RoomId: this.normalizeId((photo as any).RoomId),
+      PlayerId: this.normalizeId(photo.PlayerId),
+      RoomId: this.normalizeId(photo.RoomId),
       PlayerEventId: normalizedPlayerEventId || undefined,
       EventId: normalizedEventId || undefined,
       EventInstanceId: normalizedEventInstanceId || undefined,
