@@ -64,6 +64,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const [forceAccountsRefresh, setForceAccountsRefresh] = useState(false);
   const [forceRoomsRefresh, setForceRoomsRefresh] = useState(false);
   const [forceEventsRefresh, setForceEventsRefresh] = useState(false);
+  const [folderError, setFolderError] = useState<string | null>(null);
 
   useEffect(() => {
     setFilePath(settings.outputRoot || '');
@@ -262,6 +263,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   };
 
   const handleSelectFolder = async () => {
+    setFolderError(null);
     try {
       if (window.electronAPI) {
         const selectedPath = await window.electronAPI.selectOutputFolder();
@@ -270,7 +272,9 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
         }
       }
     } catch (error) {
-      // Failed to select folder
+      setFolderError(
+        'Could not open folder picker. Try typing the path manually.'
+      );
     }
   };
 
@@ -419,7 +423,10 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                 id="filepath"
                 placeholder="/photos/2024/image.jpg"
                 value={filePath}
-                onChange={e => setFilePath(e.target.value)}
+                onChange={e => {
+                  setFilePath(e.target.value);
+                  setFolderError(null);
+                }}
               />
               <Button
                 type="button"
@@ -431,6 +438,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               </Button>
             </div>
           </div>
+
+          {folderError && (
+            <p className="text-sm text-red-600 dark:text-red-400">
+              {folderError}
+            </p>
+          )}
 
           <div className="space-y-2">
             <Label>Metadata Refresh</Label>

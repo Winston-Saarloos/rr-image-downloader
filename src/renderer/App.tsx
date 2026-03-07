@@ -6,6 +6,7 @@ import { PhotoViewer } from './components/PhotoViewer';
 import { ProgressDisplay } from './components/ProgressDisplay';
 import { StatsDialog } from './components/StatsDialog';
 import { CustomTitleBar } from './components/CustomTitleBar';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   RecNetSettings,
   Progress,
@@ -81,7 +82,10 @@ function App() {
         setSettings(loadedSettings);
       }
     } catch (error) {
-      // Failed to load settings
+      addLog(
+        `Failed to load settings: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'error'
+      );
     }
   };
 
@@ -96,13 +100,13 @@ function App() {
   const loadPhotosForAccount = async (accountId: string) => {
     try {
       if (window.electronAPI) {
-        const result = await window.electronAPI.loadPhotos(accountId);
-        if (result.success && result.data) {
-          // Photos loaded successfully
-        }
+        await window.electronAPI.loadPhotos(accountId);
       }
     } catch (error) {
-      // Failed to load photos
+      addLog(
+        `Failed to load photos for account ${accountId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'error'
+      );
     }
   };
 
@@ -404,22 +408,26 @@ function App() {
           {/* Header space removed - using custom title bar instead */}
 
           {/* Download Panel Modal */}
-          <DownloadPanel
-            open={downloadPanelOpen}
-            onOpenChange={setDownloadPanelOpen}
-            onDownload={handleDownload}
-            onCancel={handleCancelDownload}
-            isDownloading={isDownloading}
-            settings={settings}
-          />
+          <ErrorBoundary sectionName="Download panel">
+            <DownloadPanel
+              open={downloadPanelOpen}
+              onOpenChange={setDownloadPanelOpen}
+              onDownload={handleDownload}
+              onCancel={handleCancelDownload}
+              isDownloading={isDownloading}
+              settings={settings}
+            />
+          </ErrorBoundary>
 
           {/* Stats Dialog */}
-          <StatsDialog
-            open={statsDialogOpen}
-            onOpenChange={setStatsDialogOpen}
-            accountId={currentAccountId}
-            filePath={settings.outputRoot}
-          />
+          <ErrorBoundary sectionName="Stats">
+            <StatsDialog
+              open={statsDialogOpen}
+              onOpenChange={setStatsDialogOpen}
+              accountId={currentAccountId}
+              filePath={settings.outputRoot}
+            />
+          </ErrorBoundary>
 
           {/* Progress Display */}
           {!isProgressIdle && showProgressPanel && (
@@ -439,15 +447,17 @@ function App() {
                 onMouseEnter={() => setHeaderMode('compact')}
               />
             )}
-            <PhotoViewer
-              filePath={settings.outputRoot}
-              accountId={isDownloading ? currentAccountId : undefined}
-              isDownloading={isDownloading}
-              onAccountChange={handleViewerAccountChange}
-              onScrollPositionChange={handlePhotoScroll}
-              scrollContainerRef={photoScrollRef}
-              headerMode={headerMode}
-            />
+            <ErrorBoundary sectionName="Photo viewer">
+              <PhotoViewer
+                filePath={settings.outputRoot}
+                accountId={isDownloading ? currentAccountId : undefined}
+                isDownloading={isDownloading}
+                onAccountChange={handleViewerAccountChange}
+                onScrollPositionChange={handlePhotoScroll}
+                scrollContainerRef={photoScrollRef}
+                headerMode={headerMode}
+              />
+            </ErrorBoundary>
           </div>
 
           {/* Scroll To Top */}

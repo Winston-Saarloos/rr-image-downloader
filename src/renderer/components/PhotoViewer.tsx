@@ -59,6 +59,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [availableAccounts, setAvailableAccounts] = useState<
     AvailableAccount[]
   >([]);
@@ -206,6 +207,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
 
     setLoading(true);
+    setLoadError(null);
     try {
       if (window.electronAPI) {
         const [photosResult, feedPhotosResult] = await Promise.all([
@@ -229,7 +231,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         setFeedPhotos([]);
       }
     } catch (error) {
-      // Failed to load photos
+      setLoadError(
+        `Failed to load photos: ${error instanceof Error ? error.message : 'Unknown error'}. Check that your output folder is accessible.`
+      );
       setPhotos([]);
       setFeedPhotos([]);
     } finally {
@@ -467,6 +471,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         ) : loading ? (
           <div className="text-center py-12 text-muted-foreground">
             <p>Loading photos...</p>
+          </div>
+        ) : loadError ? (
+          <div className="text-center py-12 text-red-600 dark:text-red-400">
+            <p>{loadError}</p>
           </div>
         ) : activePhotos.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
