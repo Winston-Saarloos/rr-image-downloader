@@ -157,18 +157,22 @@ function setupAutoUpdater() {
     return;
   }
 
-  // Configure auto-updater
-  autoUpdater.autoDownload = true; // Auto-download updates when available
+  // Configure auto-updater — do not auto-download; user must confirm
+  autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true; // Install on app quit
 
-  // Update available
+  // Update available — notify renderer with size when available so user can confirm before download
   autoUpdater.on('update-available', info => {
     console.log('Update available:', info.version);
+    const files = (info as { files?: Array<{ size?: number }> }).files;
+    const sizeBytes =
+      files?.reduce((sum, f) => sum + (f.size ?? 0), 0) ?? undefined;
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('update-available', {
         version: info.version,
         releaseDate: info.releaseDate,
         releaseNotes: info.releaseNotes,
+        sizeBytes,
       });
     }
   });
@@ -502,46 +506,63 @@ ipcMain.handle(
       const accountDir = path.join(settings.outputRoot, accountId);
       const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
-      if (await fs.pathExists(feedJsonPath)) {
-        const feedPhotos = await fs.readJson(feedJsonPath);
-
-        // Filter to only include photos that have corresponding image files
-        const feedDir = path.join(accountDir, 'feed');
-        const photosDir = path.join(accountDir, 'photos');
-
-        const photosWithFiles: Photo[] = [];
-        for (const photo of feedPhotos) {
-          if (!photo.Id) {
-            continue;
-          }
-
-          const photoId = photo.Id.toString();
-          const feedPhotoPath = path.join(feedDir, `${photoId}.jpg`);
-          const photoPath = path.join(photosDir, `${photoId}.jpg`);
-
-          // Check which file exists and add local file path to photo data
-          let localFilePath: string | undefined;
-          if (await fs.pathExists(feedPhotoPath)) {
-            localFilePath = feedPhotoPath;
-          } else if (await fs.pathExists(photoPath)) {
-            localFilePath = photoPath;
-          }
-
-          // Include photo if it exists in either feed or photos folder
-          if (localFilePath) {
-            // Add local file path to photo object for use in renderer
-            const photoWithPath = {
-              ...photo,
-              localFilePath: localFilePath,
-            };
-            photosWithFiles.push(photoWithPath);
-          }
-        }
-
-        return { success: true, data: photosWithFiles };
-      } else {
+      if (!(await fs.pathExists(feedJsonPath))) {
         return { success: true, data: [] };
       }
+
+      const feedPhotos: Photo[] = await fs.readJson(feedJsonPath);
+
+      // Pre-scan directories once to avoid thousands of individual path checks
+      const feedDir = path.join(accountDir, 'feed');
+      const photosDir = path.join(accountDir, 'photos');
+
+      const feedFileIds = new Set<string>();
+      const photoFileIds = new Set<string>();
+
+      if (await fs.pathExists(feedDir)) {
+        const files = await fs.readdir(feedDir);
+        for (const file of files) {
+          const id = path.parse(file).name;
+          if (id) {
+            feedFileIds.add(id);
+          }
+        }
+      }
+
+      if (await fs.pathExists(photosDir)) {
+        const files = await fs.readdir(photosDir);
+        for (const file of files) {
+          const id = path.parse(file).name;
+          if (id) {
+            photoFileIds.add(id);
+          }
+        }
+      }
+
+      const photosWithFiles: Photo[] = [];
+      for (const photo of feedPhotos) {
+        if (!photo.Id) {
+          continue;
+        }
+
+        const photoId = photo.Id.toString();
+
+        let localFilePath: string | undefined;
+        if (feedFileIds.has(photoId)) {
+          localFilePath = path.join(feedDir, `${photoId}.jpg`);
+        } else if (photoFileIds.has(photoId)) {
+          localFilePath = path.join(photosDir, `${photoId}.jpg`);
+        }
+
+        if (localFilePath) {
+          photosWithFiles.push({
+            ...photo,
+            localFilePath,
+          });
+        }
+      }
+
+      return { success: true, data: photosWithFiles };
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
@@ -743,7 +764,11 @@ ipcMain.handle(
     if (parsed.protocol !== 'https:') {
       throw new Error(`Blocked non-HTTPS URL: ${url}`);
     }
-    if (!ALLOWED_EXTERNAL_URL_PREFIXES.some(prefix => parsed.href.startsWith(prefix))) {
+    if (
+      !ALLOWED_EXTERNAL_URL_PREFIXES.some(prefix =>
+        parsed.href.startsWith(prefix)
+      )
+    ) {
       throw new Error(`URL not in allowlist: ${url}`);
     }
     await shell.openExternal(parsed.href);

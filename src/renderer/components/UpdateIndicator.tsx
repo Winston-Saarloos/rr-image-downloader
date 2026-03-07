@@ -12,6 +12,8 @@ interface UpdateInfo {
   version: string;
   releaseDate?: string;
   releaseNotes?: string;
+  /** Size in bytes (for "Update available (X MB) — Download now?" prompt) */
+  sizeBytes?: number;
 }
 
 interface UpdateProgress {
@@ -143,7 +145,9 @@ export const UpdateIndicator: React.FC = () => {
                 ? 'Update Ready'
                 : error
                   ? 'Update Error'
-                  : 'Update Available'}
+                  : updateAvailable?.sizeBytes != null
+                    ? `Update available (${formatBytes(updateAvailable.sizeBytes)}) — Download now?`
+                    : 'Update available — Download now?'}
             </h3>
           </div>
 
@@ -193,6 +197,8 @@ export const UpdateIndicator: React.FC = () => {
               <div>
                 <p className="text-xs font-medium">
                   Version {updateAvailable.version} is available
+                  {updateAvailable.sizeBytes != null &&
+                    ` (${formatBytes(updateAvailable.sizeBytes)})`}
                 </p>
                 {currentVersion && (
                   <p className="text-xs text-muted-foreground mt-1">
