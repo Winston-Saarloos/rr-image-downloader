@@ -277,6 +277,12 @@ function App() {
             `Download complete: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} failed`,
             'success'
           );
+          if (downloadResult.data?.photosDirectory) {
+            addLog(
+              `User photos saved to: ${downloadResult.data.photosDirectory}`,
+              'info'
+            );
+          }
           addResult('Download', downloadResult.data, 'success');
         }
 
@@ -298,13 +304,17 @@ function App() {
             `Feed download complete: ${downloadFeedStats.newDownloads} new, ${downloadFeedStats.alreadyDownloaded} existing, ${downloadFeedStats.failedDownloads} failed`,
             'success'
           );
+          if (downloadFeedResult.data?.feedPhotosDirectory) {
+            addLog(
+              `Feed photos saved to: ${downloadFeedResult.data.feedPhotosDirectory}`,
+              'info'
+            );
+          }
           addResult('Feed Download', downloadFeedResult.data, 'success');
         }
 
         // Reload photos after download completes
-        setTimeout(() => {
-          loadPhotosForAccount(accountId);
-        }, 1000);
+        loadPhotosForAccount(accountId);
       }
     } catch (error) {
       const errorMessage =

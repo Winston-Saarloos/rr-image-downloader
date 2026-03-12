@@ -74,10 +74,12 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [photoSource, setPhotoSource] = useState<PhotoSource>('photos');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
+  const wasDownloadingRef = useRef(false);
   const activeScrollRef = scrollContainerRef ?? internalScrollRef;
   const isHeaderVisible = headerMode !== 'hidden';
   const showFullControls = headerMode === 'full';
   const { favorites } = useFavorites();
+  const electronAPI = (window as unknown as { electronAPI?: any }).electronAPI;
 
   // Use propAccountId if provided, otherwise use selectedAccountId
   const accountId = propAccountId || selectedAccountId;
@@ -94,8 +96,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const loadAvailableAccounts = useCallback(async () => {
     setLoadingAccounts(true);
     try {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.listAvailableAccounts();
+      if (electronAPI) {
+        const result = await electronAPI.listAvailableAccounts();
         if (result.success && result.data) {
           setAvailableAccounts(result.data);
           // If no account is selected and accounts are available, select the first one
@@ -123,15 +125,16 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
 
     try {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadRoomsData(accountId);
+      if (electronAPI) {
+        const result = await electronAPI.loadRoomsData(accountId);
         if (result.success && result.data) {
           const rooms = result.data as RoomDto[];
           const roomMapping = new Map<string, string>();
           rooms.forEach(room => {
             if (room.RoomId) {
-              const roomName = room.Name || room.RoomId;
-              roomMapping.set(room.RoomId, roomName);
+              const roomId = String(room.RoomId);
+              const roomName = room.Name || roomId;
+              roomMapping.set(roomId, roomName);
             }
           });
           setRoomMap(roomMapping);
@@ -150,15 +153,16 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
 
     try {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadAccountsData(accountId);
+      if (electronAPI) {
+        const result = await electronAPI.loadAccountsData(accountId);
         if (result.success && result.data) {
           const accounts = result.data as PlayerResult[];
           const accountMapping = new Map<string, string>();
           accounts.forEach(account => {
+            const accountId = String(account.accountId);
             const displayName =
-              account.displayName || account.username || account.accountId;
-            accountMapping.set(account.accountId, displayName);
+              account.displayName || account.username || accountId;
+            accountMapping.set(accountId, displayName);
           });
           setAccountMap(accountMapping);
         }
@@ -176,8 +180,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
 
     try {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadEventsData(accountId);
+      if (electronAPI) {
+        const result = await electronAPI.loadEventsData(accountId);
         if (result.success && result.data) {
           const eventMapping = new Map<string, string>();
           const events = result.data as EventDto[];
@@ -209,10 +213,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     setLoading(true);
     setLoadError(null);
     try {
-      if (window.electronAPI) {
+      if (electronAPI) {
         const [photosResult, feedPhotosResult] = await Promise.all([
-          window.electronAPI.loadPhotos(accountId),
-          window.electronAPI.loadFeedPhotos(accountId),
+          electronAPI.loadPhotos(accountId),
+          electronAPI.loadFeedPhotos(accountId),
         ]);
 
         if (photosResult.success && photosResult.data) {
@@ -278,23 +282,42 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     loadEventData,
   ]);
 
-  // Reload photos, room data, and account data periodically during download
+  // Reload photos + metadata periodically during download so names resolve
   useEffect(() => {
     if (!isDownloading || !accountId || !filePath) {
       return;
     }
 
-    // Reload data every 2 seconds during download
     const interval = setInterval(() => {
-      loadPhotos();
-      loadRoomData();
-      loadAccountData();
-      loadEventData();
-    }, 2000);
+      void loadPhotos();
+      void loadRoomData();
+      void loadAccountData();
+      void loadEventData();
+    }, 5000);
 
     return () => {
       clearInterval(interval);
     };
+  }, [
+    isDownloading,
+    accountId,
+    filePath,
+    loadPhotos,
+    loadRoomData,
+    loadAccountData,
+    loadEventData,
+  ]);
+
+  useEffect(() => {
+    const wasDownloading = wasDownloadingRef.current;
+    wasDownloadingRef.current = isDownloading;
+
+    if (wasDownloading && !isDownloading && accountId && filePath) {
+      void loadPhotos();
+      void loadRoomData();
+      void loadAccountData();
+      void loadEventData();
+    }
   }, [
     isDownloading,
     accountId,
@@ -464,9 +487,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           </div>
         ) : !accountId && availableAccounts.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>
-              No accounts with metadata found. Download photos to get started.
-            </p>
+            <p>No accounts with metadata found. Download photos to get started.</p>
           </div>
         ) : loading ? (
           <div className="text-center py-12 text-muted-foreground">

@@ -55,6 +55,68 @@ interface ApiResponse<T> {
   error?: string;
 }
 
+const normalizeId = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return '';
+    }
+    return Math.trunc(value).toString();
+  }
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  return '';
+};
+
+const normalizePhotoRecord = (photo: Photo): Photo => {
+  const taggedPlayerIds = Array.isArray(photo.TaggedPlayerIds)
+    ? photo.TaggedPlayerIds.map(id => normalizeId(id)).filter(Boolean)
+    : [];
+  const playerEventId = normalizeId(photo.PlayerEventId);
+  const eventId = normalizeId(photo.EventId);
+  const eventInstanceId = normalizeId(photo.EventInstanceId);
+
+  return {
+    ...photo,
+    Id: normalizeId(photo.Id),
+    PlayerId: normalizeId(photo.PlayerId),
+    RoomId: normalizeId(photo.RoomId),
+    TaggedPlayerIds: taggedPlayerIds,
+    PlayerEventId: playerEventId || undefined,
+    EventId: eventId || undefined,
+    EventInstanceId: eventInstanceId || undefined,
+  };
+};
+
+const normalizePlayerRecord = (player: PlayerResult): PlayerResult => ({
+  ...player,
+  accountId: normalizeId(player.accountId),
+});
+
+const normalizeRoomRecord = (room: RoomDto): RoomDto => ({
+  ...room,
+  RoomId: normalizeId(room.RoomId),
+  CreatorAccountId: normalizeId(room.CreatorAccountId),
+  RankedEntityId: normalizeId(room.RankedEntityId),
+});
+
+const normalizeEventRecord = (event: EventDto): EventDto => ({
+  ...event,
+  PlayerEventId: normalizeId(event.PlayerEventId),
+  CreatorPlayerId: normalizeId(event.CreatorPlayerId),
+  RoomId: normalizeId(event.RoomId),
+});
+
 function createWindow(): void {
   // Create the browser window
   mainWindow = new BrowserWindow({
@@ -216,12 +278,14 @@ function setupAutoUpdater() {
     }
   });
 
-  // Check for updates on startup (after a short delay to let app initialize)
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(error => {
-      console.error('Error checking for updates:', error);
+  // Check for updates when the main window has finished loading
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      autoUpdater.checkForUpdates().catch(error => {
+        console.error('Error checking for updates:', error);
+      });
     });
-  }, 5000); // Wait 5 seconds after app start
+  }
 }
 
 // App event handlers
@@ -347,7 +411,7 @@ ipcMain.handle('select-output-folder', async (): Promise<string | null> => {
 });
 
 ipcMain.handle('get-settings', async (): Promise<RecNetSettings> => {
-  return recNetService.getSettings();
+  return await recNetService.getSettings();
 });
 
 ipcMain.handle(
@@ -426,7 +490,7 @@ ipcMain.handle(
     accountId: string
   ): Promise<ApiResponse<Photo[]>> => {
     try {
-      const settings = recNetService.getSettings();
+      const settings = await recNetService.getSettings();
       const accountDir = path.join(settings.outputRoot, accountId);
       const jsonPath = path.join(accountDir, `${accountId}_photos.json`);
 
@@ -435,7 +499,7 @@ ipcMain.handle(
       }
 
       const rawPhotos: Photo[] = await fs.readJson(jsonPath);
-      const photos = rawPhotos;
+      const photos = rawPhotos.map(normalizePhotoRecord);
 
       // Pre-scan directories once to avoid thousands of individual path checks
       const photosDir = path.join(accountDir, 'photos');
@@ -502,7 +566,7 @@ ipcMain.handle(
     accountId: string
   ): Promise<ApiResponse<Photo[]>> => {
     try {
-      const settings = recNetService.getSettings();
+      const settings = await recNetService.getSettings();
       const accountDir = path.join(settings.outputRoot, accountId);
       const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
@@ -510,7 +574,9 @@ ipcMain.handle(
         return { success: true, data: [] };
       }
 
-      const feedPhotos: Photo[] = await fs.readJson(feedJsonPath);
+      const feedPhotos: Photo[] = (await fs.readJson(feedJsonPath)).map(
+        normalizePhotoRecord
+      );
 
       // Pre-scan directories once to avoid thousands of individual path checks
       const feedDir = path.join(accountDir, 'feed');
@@ -600,7 +666,7 @@ ipcMain.handle(
     accountId: string
   ): Promise<ApiResponse<PlayerResult[]>> => {
     try {
-      const settings = recNetService.getSettings();
+      const settings = await recNetService.getSettings();
       const accountDir = path.join(settings.outputRoot, accountId);
       const accountsJsonPath = path.join(
         accountDir,
@@ -608,8 +674,9 @@ ipcMain.handle(
       );
 
       if (await fs.pathExists(accountsJsonPath)) {
-        const accountsData: PlayerResult[] =
-          await fs.readJson(accountsJsonPath);
+        const accountsData: PlayerResult[] = (
+          await fs.readJson(accountsJsonPath)
+        ).map(normalizePlayerRecord);
         return {
           success: true,
           data: accountsData,
@@ -631,12 +698,14 @@ ipcMain.handle(
     accountId: string
   ): Promise<ApiResponse<RoomDto[]>> => {
     try {
-      const settings = recNetService.getSettings();
+      const settings = await recNetService.getSettings();
       const accountDir = path.join(settings.outputRoot, accountId);
       const roomsJsonPath = path.join(accountDir, `${accountId}_rooms.json`);
 
       if (await fs.pathExists(roomsJsonPath)) {
-        const roomsData: RoomDto[] = await fs.readJson(roomsJsonPath);
+        const roomsData: RoomDto[] = (await fs.readJson(roomsJsonPath)).map(
+          normalizeRoomRecord
+        );
         return { success: true, data: roomsData };
       } else {
         return { success: true, data: [] };
@@ -655,12 +724,14 @@ ipcMain.handle(
     accountId: string
   ): Promise<ApiResponse<EventDto[]>> => {
     try {
-      const settings = recNetService.getSettings();
+      const settings = await recNetService.getSettings();
       const accountDir = path.join(settings.outputRoot, accountId);
       const eventsJsonPath = path.join(accountDir, `${accountId}_events.json`);
 
       if (await fs.pathExists(eventsJsonPath)) {
-        const eventsData: EventDto[] = await fs.readJson(eventsJsonPath);
+        const eventsData: EventDto[] = (await fs.readJson(eventsJsonPath)).map(
+          normalizeEventRecord
+        );
         return { success: true, data: eventsData };
       } else {
         return { success: true, data: [] };

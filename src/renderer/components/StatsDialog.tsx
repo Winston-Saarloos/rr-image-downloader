@@ -123,6 +123,11 @@ const getThemeAwareColorWithOpacity = (
   }
 };
 
+const isPrivateRoom = (room: RoomDto): boolean => {
+  // Public rooms resolve to names; private/unlisted rooms should remain ID-based.
+  return room.Accessibility !== 1 || room.ExcludeFromSearch === true;
+};
+
 interface StatCardProps {
   label: string;
   value: string | number;
@@ -389,7 +394,7 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
 
   // Load room and account data
   useEffect(() => {
-    if (!accountId) return;
+    if (!open || !accountId) return;
 
     const loadRoomData = async () => {
       try {
@@ -400,14 +405,19 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
             const rooms = result.data as RoomDto[];
             rooms.forEach(room => {
               if (room.RoomId) {
-                roomMapping.set(room.RoomId, room.Name || room.RoomId);
+                const roomId = String(room.RoomId);
+                const resolvedRoomName =
+                  !isPrivateRoom(room) && room.Name ? room.Name : roomId;
+                roomMapping.set(roomId, resolvedRoomName);
               }
             });
             setRoomMap(roomMapping);
+          } else {
+            setRoomMap(new Map());
           }
         }
       } catch (error) {
-        // Failed to load room data
+        setRoomMap(new Map());
       }
     };
 
@@ -419,21 +429,24 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
             const accountMapping = new Map<string, string>();
             const accounts = result.data as PlayerResult[];
             accounts.forEach(account => {
+              const accountId = String(account.accountId);
               const displayName =
-                account.displayName || account.username || account.accountId;
-              accountMapping.set(account.accountId, displayName);
+                account.username || account.displayName || accountId;
+              accountMapping.set(accountId, displayName);
             });
             setAccountMap(accountMapping);
+          } else {
+            setAccountMap(new Map());
           }
         }
       } catch (error) {
-        // Failed to load account data
+        setAccountMap(new Map());
       }
     };
 
     loadRoomData();
     loadAccountData();
-  }, [accountId]);
+  }, [open, accountId]);
 
   // Load photos and feed photos
   useEffect(() => {

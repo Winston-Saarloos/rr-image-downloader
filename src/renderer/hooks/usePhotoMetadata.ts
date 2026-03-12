@@ -6,6 +6,63 @@ export interface PhotoEventInfo {
   name?: string;
 }
 
+const normalizeId = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return '';
+    }
+    return Math.trunc(value).toString();
+  }
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  return '';
+};
+
+const getMapValue = (
+  map: Map<string, string>,
+  key: unknown
+): string | undefined => {
+  if (key === null || key === undefined) {
+    return undefined;
+  }
+
+  const typedMap = map as unknown as Map<unknown, string>;
+  const direct = typedMap.get(key);
+  if (direct) {
+    return direct;
+  }
+
+  const normalizedKey = normalizeId(key);
+  if (!normalizedKey) {
+    return undefined;
+  }
+
+  const byString = typedMap.get(normalizedKey);
+  if (byString) {
+    return byString;
+  }
+
+  if (/^-?\d+$/.test(normalizedKey)) {
+    const asNumber = Number(normalizedKey);
+    if (Number.isSafeInteger(asNumber)) {
+      return typedMap.get(asNumber);
+    }
+  }
+
+  return undefined;
+};
+
 export const usePhotoMetadata = (
   roomMap?: Map<string, string>,
   accountMap?: Map<string, string>,
@@ -18,9 +75,10 @@ export const usePhotoMetadata = (
 
   const getPhotoRoom = useCallback(
     (photo: Photo): string => {
-      if (photo.RoomId) {
-        const mappedRoomName = safeRoomMap.get(photo.RoomId);
-        return mappedRoomName || photo.RoomId;
+      const roomId = normalizeId(photo.RoomId);
+      if (roomId) {
+        const mappedRoomName = getMapValue(safeRoomMap, roomId);
+        return mappedRoomName || roomId;
       }
 
       return 'No Room Data';
@@ -39,8 +97,9 @@ export const usePhotoMetadata = (
       }
 
       return userIds.map(userId => {
-        const userName = safeAccountMap.get(String(userId));
-        return userName || userId;
+        const normalizedUserId = normalizeId(userId);
+        const userName = getMapValue(safeAccountMap, normalizedUserId);
+        return userName || normalizedUserId || String(userId);
       });
     },
     [safeAccountMap]
@@ -61,8 +120,9 @@ export const usePhotoMetadata = (
 
   const getPhotoEvent = useCallback(
     (photo: Photo): PhotoEventInfo => {
-      const eventId =
+      const rawEventId =
         photo.PlayerEventId || photo.EventId || photo.EventInstanceId;
+      const eventId = normalizeId(rawEventId);
 
       if (!eventId) {
         return {};
@@ -70,7 +130,7 @@ export const usePhotoMetadata = (
 
       return {
         id: eventId,
-        name: safeEventMap.get(eventId),
+        name: getMapValue(safeEventMap, eventId),
       };
     },
     [safeEventMap]
