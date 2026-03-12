@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/icon.png" alt="App Icon" width="75">
+  <img src="assets/icon_face.png" alt="App Icon" width="75">
 </div>
 
 # RR Image Downloader / Offline Viewer
