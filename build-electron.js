@@ -31,6 +31,12 @@ async function copyElectronFiles() {
     await fs.writeJson('build/package.json', buildPackageJson, { spaces: 2 });
     console.log('Created package.json in build directory');
 
+    // Copy package-lock.json so electron-builder's production install uses locked versions
+    if (await fs.pathExists('package-lock.json')) {
+      await fs.copy('package-lock.json', 'build/package-lock.json');
+      console.log('Copied package-lock.json to build directory');
+    }
+
     console.log('Electron files copied successfully!');
   } catch (error) {
     console.error('Error copying Electron files:', error);

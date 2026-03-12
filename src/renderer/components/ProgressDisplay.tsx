@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Progress } from '../components/ui/progress';
 import {
   Card,
@@ -26,6 +26,37 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   );
   const hasTotals = progress.total > 0;
   const isComplete = !progress.isRunning && percent >= 100;
+  const [indeterminateValue, setIndeterminateValue] = useState(15);
+  const directionRef = useRef<1 | -1>(1);
+
+  useEffect(() => {
+    if (!progress.isRunning || hasTotals) {
+      setIndeterminateValue(15);
+      directionRef.current = 1;
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setIndeterminateValue(prev => {
+        const next = prev + directionRef.current * 6;
+
+        if (next >= 85) {
+          directionRef.current = -1;
+          return 85;
+        }
+
+        if (next <= 15) {
+          directionRef.current = 1;
+          return 15;
+        }
+
+        return next;
+      });
+    }, 120);
+
+    return () => clearInterval(interval);
+  }, [progress.isRunning, hasTotals]);
+
   const isIdle =
     !progress.isRunning &&
     percent === 0 &&
@@ -33,7 +64,7 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   const barValue = hasTotals
     ? percent
     : progress.isRunning
-      ? Math.max(percent, 15)
+      ? indeterminateValue
       : percent;
 
   if (isIdle) {

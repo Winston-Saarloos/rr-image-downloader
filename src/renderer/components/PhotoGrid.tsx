@@ -85,32 +85,32 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
     }
   }, [photos, sortBy, getCheersCount]);
 
+  // Pre-compute searchable string per photo so filtering only re-runs when query changes
+  const searchIndex = useMemo(
+    () =>
+      sortedPhotos.map(photo => {
+        const room = getPhotoRoom(photo).toLowerCase();
+        const users = getPhotoUsers(photo).join(' ').toLowerCase();
+        const description = (photo.Description || '').toLowerCase();
+        const eventInfo = getPhotoEvent(photo);
+        const eventLabel = (
+          eventInfo.name || (eventInfo.id ? `event ${eventInfo.id}` : '')
+        ).toLowerCase();
+        return {
+          photo,
+          key: `${room} ${users} ${description} ${eventLabel}`,
+        };
+      }),
+    [sortedPhotos, getPhotoRoom, getPhotoUsers, getPhotoEvent]
+  );
+
   const filteredPhotos = useMemo(() => {
     if (!deferredSearchQuery.trim()) return sortedPhotos;
-
     const query = deferredSearchQuery.toLowerCase();
-    return sortedPhotos.filter(photo => {
-      const room = getPhotoRoom(photo).toLowerCase();
-      const users = getPhotoUsers(photo).join(' ').toLowerCase();
-      const description = (photo.Description || '').toLowerCase();
-      const eventInfo = getPhotoEvent(photo);
-      const eventLabel = (
-        eventInfo.name || (eventInfo.id ? `event ${eventInfo.id}` : '')
-      ).toLowerCase();
-      return (
-        room.includes(query) ||
-        users.includes(query) ||
-        description.includes(query) ||
-        eventLabel.includes(query)
-      );
-    });
-  }, [
-    sortedPhotos,
-    deferredSearchQuery,
-    getPhotoRoom,
-    getPhotoUsers,
-    getPhotoEvent,
-  ]);
+    return searchIndex
+      .filter(({ key }) => key.includes(query))
+      .map(({ photo }) => photo);
+  }, [searchIndex, sortedPhotos, deferredSearchQuery]);
 
   const groupedPhotos = useMemo(() => {
     if (groupBy === 'none') {
@@ -166,11 +166,12 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
                   const userIds = photo.TaggedPlayerIds || [];
                   const accountIdStr = String(accountId);
                   const otherUserIds = userIds.filter(
-                    userId => userId !== accountIdStr
+                    userId => String(userId) !== accountIdStr
                   );
                   const otherUsers = otherUserIds.map(userId => {
-                    const userName = accountMap.get(userId);
-                    return userName || userId;
+                    const normalizedUserId = String(userId);
+                    const userName = accountMap.get(normalizedUserId);
+                    return userName || normalizedUserId;
                   });
                   return otherUsers.length > 0
                     ? otherUsers.join(', ')

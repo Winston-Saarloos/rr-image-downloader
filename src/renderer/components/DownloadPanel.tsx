@@ -45,6 +45,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   isDownloading = false,
   settings,
 }) => {
+  const electronAPI = (window as unknown as { electronAPI?: any }).electronAPI;
   const [username, setUsername] = useState('');
   const [token, setToken] = useState('');
   const [filePath, setFilePath] = useState(settings.outputRoot || '');
@@ -116,8 +117,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
 
     setUsernameStatus('checking');
     try {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.searchAccounts(value);
+      if (electronAPI) {
+        const result = await electronAPI.searchAccounts(value);
         if (result.success && result.data && result.data.length > 0) {
           setUsernameStatus('found');
           const account = result.data[0];
@@ -265,8 +266,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const handleSelectFolder = async () => {
     setFolderError(null);
     try {
-      if (window.electronAPI) {
-        const selectedPath = await window.electronAPI.selectOutputFolder();
+      if (electronAPI) {
+        const selectedPath = await electronAPI.selectOutputFolder();
         if (selectedPath) {
           setFilePath(selectedPath);
         }
@@ -336,6 +337,31 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          <div className="rounded-md border bg-muted/40 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Download Flow
+            </p>
+            <ol className="mt-2 grid gap-2 text-sm sm:grid-cols-3">
+              <li className="flex items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-semibold">
+                  1
+                </span>
+                <span>Search @username</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-semibold">
+                  2
+                </span>
+                <span>Pick save folder</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-semibold">
+                  3
+                </span>
+                <span>Download photos</span>
+              </li>
+            </ol>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="username">Username</Label>
             <Input
@@ -437,6 +463,11 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                 <FolderOpen className="h-4 w-4" />
               </Button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Downloads are organized as{' '}
+              <code className="font-mono">[folder]/[accountId]/photos</code> and{' '}
+              <code className="font-mono">[folder]/[accountId]/feed</code>.
+            </p>
           </div>
 
           {folderError && (
