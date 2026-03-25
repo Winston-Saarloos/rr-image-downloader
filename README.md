@@ -8,7 +8,7 @@ This is an Electron + React desktop app for saving your Rec Room / RecNet images
 
 In the event Rec Room doesn't exist. This application will allow you to download full resolution images of your image library and feed images from Rec Room's CDN. It will also capture important metadata about your images so you will still be able to view tagged users and the room the image was taken in. All while being offline and not connected to Rec Room's services.
 
-**\*\*Use this application at your own risk. While Rec Room likely won't come after you it is in violation of their Terms of Service (ToS) to use. This application is deliberatly designed to be data efficient and relies on heavy caching and deduplication to make sure only neccessary data is downloaded. The requests made to Rec Room's services are throttled (configurable defaults to 0.5 seconds) so it shouldn not raise any red flags or result in an IP ban for your account.**\*\*
+**\*\*Use this application at your own risk. While Rec Room likely won't come after you it is in violation of their Terms of Service (ToS) to use. This application is deliberatly designed to be data efficient and relies on heavy caching and deduplication to make sure only neccessary data is downloaded. The requests made to Rec Room's services are throttled (configurable defaults to 0.5 seconds) so it should not raise any red flags or result in an IP ban for your account.**\*\*
 
 ## Features
 
@@ -104,6 +104,12 @@ In the event Rec Room doesn't exist. This application will allow you to download
 - Missing images: confirm the output path matches what the app is using and that the account is selected in the viewer.
 - Rate limits or slow responses: increase the request delay in Debug > Settings.
 - Stuck progress: cancel, reopen the Download dialog, and retry (cached metadata will speed things up unless you force refresh).
+
+## Problems & Solutions:
+
+Error: Error invoking remote method 'update-settings': Error: EPERM: operation not permitted, mkdir 'output'
+
+Solution: Right click and run the program as an administrator. The program is unable to save the downloaded data and photos to your hard drive.
 
 ## License
 
