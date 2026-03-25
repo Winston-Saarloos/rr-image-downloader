@@ -55,17 +55,31 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         return fallback;
       }
       const name = this.props.sectionName ?? 'This section';
+      const err = this.state.error;
       return (
         <div
           className="flex flex-col items-center justify-center gap-4 rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center"
           role="alert"
         >
-          <p className="text-sm text-muted-foreground">
-            {name} failed to load.
+          <p className="text-sm font-medium text-foreground">
+            {name} had a problem and was stopped so the rest of the app keeps working.
           </p>
-          <Button variant="outline" size="sm" onClick={this.handleRetry}>
-            Reload
-          </Button>
+          <p className="text-xs text-muted-foreground max-w-sm">
+            You can reload this section. If it happens again, try restarting the app.
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button variant="default" size="sm" onClick={this.handleRetry}>
+              Reload this section
+            </Button>
+          </div>
+          <details className="w-full max-w-md text-left text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none text-foreground/80">
+              Technical details
+            </summary>
+            <pre className="mt-2 whitespace-pre-wrap break-all rounded-md bg-muted/50 p-2 font-mono">
+              {err.message}
+            </pre>
+          </details>
         </div>
       );
     }

@@ -275,7 +275,7 @@ describe('RecNetService - Download Functionality', () => {
           value: new ArrayBuffer(1024),
           status: 200,
         } as GenericResponse<ArrayBuffer>)
-        .mockResolvedValueOnce({
+        .mockResolvedValue({
           success: false,
           value: null,
           status: 404,
@@ -286,8 +286,95 @@ describe('RecNetService - Download Functionality', () => {
 
       expect(result.downloadStats.newDownloads).toBe(1);
       expect(result.downloadStats.failedDownloads).toBe(1);
+      expect(result.downloadStats.retryAttempts).toBe(3);
       expect(result.downloadResults[1].status).toBe('failed');
+      expect(result.downloadResults[1].attempts).toBe(4);
       expect(mockedFs.writeFile).toHaveBeenCalledTimes(1);
+    });
+
+    it('should retry failed downloads and recover within the retry limit', async () => {
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 'image1.jpg')];
+
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === photosJsonPath) return true;
+        return false;
+      });
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      mockPhotosController.downloadPhoto
+        .mockResolvedValueOnce({
+          success: false,
+          value: null,
+          status: 503,
+          error: 'Temporary outage',
+        } as GenericResponse<ArrayBuffer>)
+        .mockResolvedValueOnce({
+          success: false,
+          value: null,
+          status: 503,
+          error: 'Temporary outage',
+        } as GenericResponse<ArrayBuffer>)
+        .mockResolvedValueOnce({
+          success: true,
+          value: new ArrayBuffer(1024),
+          status: 200,
+        } as GenericResponse<ArrayBuffer>);
+
+      const result = await service.downloadPhotos(testAccountId);
+
+      expect(result.downloadStats.newDownloads).toBe(1);
+      expect(result.downloadStats.failedDownloads).toBe(0);
+      expect(result.downloadStats.retryAttempts).toBe(2);
+      expect(result.downloadStats.recoveredAfterRetry).toBe(1);
+      expect(result.downloadResults[0].status).toBe('downloaded');
+      expect(result.downloadResults[0].attempts).toBe(3);
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(3);
+    });
+
+    it('should stop retrying after three retries', async () => {
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 'image1.jpg')];
+
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === photosJsonPath) return true;
+        return false;
+      });
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: false,
+        value: null,
+        status: 503,
+        error: 'Still failing',
+      } as GenericResponse<ArrayBuffer>);
+
+      const result = await service.downloadPhotos(testAccountId);
+
+      expect(result.downloadStats.newDownloads).toBe(0);
+      expect(result.downloadStats.failedDownloads).toBe(1);
+      expect(result.downloadStats.retryAttempts).toBe(3);
+      expect(result.downloadResults[0].status).toBe('failed');
+      expect(result.downloadResults[0].attempts).toBe(4);
+      expect(result.guidance).toEqual([
+        'Some user photos could not be downloaded after 3 retries, but the download completed.',
+        'You can retry the same download after it finishes to grab any missed images. Existing files are checked first, so the app will continue from what is already saved.',
+        'You do not need to delete the output folder to resume.',
+      ]);
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(4);
     });
 
     /**
@@ -497,6 +584,37 @@ describe('RecNetService - Download Functionality', () => {
       expect(result.accountId).toBe(testAccountId);
       expect(result.downloadStats.newDownloads).toBe(2);
       expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(2);
+    });
+
+    it('should retry feed photo downloads before failing', async () => {
+      const feedPhotos: ImageDto[] = [createMockFeedPhoto('feed-1', 'feed1.jpg')];
+
+      const feedJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_feed.json`
+      );
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === feedJsonPath) return true;
+        return false;
+      });
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(feedPhotos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: false,
+        value: null,
+        status: 500,
+        error: 'CDN failure',
+      } as GenericResponse<ArrayBuffer>);
+
+      const result = await service.downloadFeedPhotos(testAccountId);
+
+      expect(result.downloadStats.failedDownloads).toBe(1);
+      expect(result.downloadStats.retryAttempts).toBe(3);
+      expect(result.downloadResults[0].attempts).toBe(4);
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(4);
     });
 
     /**

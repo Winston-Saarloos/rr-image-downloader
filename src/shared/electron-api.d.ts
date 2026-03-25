@@ -58,6 +58,9 @@ export interface ElectronAPI {
   isFavorite: (photoId: string) => Promise<ApiResponse<boolean>>;
 
   openExternal: (url: string) => Promise<void>;
+  openPathInExplorer: (
+    targetPath: string
+  ) => Promise<{ success: boolean; error?: string }>;
 
   checkForUpdates: () => Promise<void>;
   downloadUpdate: () => Promise<void>;

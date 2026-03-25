@@ -28,12 +28,28 @@ interface CurrentOperation {
   cancelled: boolean;
 }
 
+interface PhotoDownloadAttempt {
+  response?: {
+    success: boolean;
+    value: ArrayBuffer | null;
+    error?: string | null;
+    message?: string | null;
+    status?: number;
+  };
+  error?: Error;
+  attempts: number;
+}
+
 const DEFAULT_SETTINGS: RecNetSettings = {
   outputRoot: 'output',
   cdnBase: 'https://img.rec.net/',
   globalMaxConcurrentDownloads: 1,
   interPageDelayMs: 500,
 };
+
+const PHOTO_DOWNLOAD_RETRY_COUNT = 3;
+const PHOTO_DOWNLOAD_MAX_ATTEMPTS = PHOTO_DOWNLOAD_RETRY_COUNT + 1;
+const PHOTO_DOWNLOAD_RETRY_DELAY_MS = 750;
 
 export class RecNetService extends EventEmitter {
   private settingsPath: string;
@@ -55,13 +71,13 @@ export class RecNetService extends EventEmitter {
       'settings.json'
     );
     this.settings = { ...DEFAULT_SETTINGS };
-    this.progress = {
+    this.progress = this.createProgressState({
       isRunning: false,
       currentStep: '',
       progress: 0,
       total: 0,
       current: 0,
-    };
+    });
 
     this.httpClient = new RecNetHttpClient();
     this.photosController = new PhotosController(this.httpClient);
@@ -130,31 +146,57 @@ export class RecNetService extends EventEmitter {
     total: number,
     progress?: number
   ): void {
-    this.progress = {
+    this.progress = this.createProgressState({
+      ...this.progress,
       isRunning: true,
       currentStep: step,
       current,
       total,
       progress: progress || (total > 0 ? (current / total) * 100 : 0),
-    };
+    });
     this.emit('progress-update', this.progress);
   }
 
   private setOperationComplete(): void {
-    this.progress = {
+    this.progress = this.createProgressState({
+      ...this.progress,
       isRunning: false,
       currentStep: 'Complete',
       current: 0,
       total: 0,
       progress: 100,
-    };
+    });
+    this.emit('progress-update', this.progress);
+  }
+
+  private setOperationFailed(message: string): void {
+    this.progress = this.createProgressState({
+      ...this.progress,
+      isRunning: false,
+      currentStep: 'Failed',
+      current: 0,
+      total: 0,
+      progress: 100,
+      statusLevel: 'error',
+      issueCount: Math.max(this.progress.issueCount, 1),
+      failedItems: Math.max(this.progress.failedItems, 1),
+      lastIssue: message,
+    });
     this.emit('progress-update', this.progress);
   }
 
   cancelCurrentOperation(): boolean {
     if (this.currentOperation) {
       this.currentOperation.cancelled = true;
-      this.setOperationComplete();
+      this.progress = this.createProgressState({
+        ...this.progress,
+        isRunning: false,
+        currentStep: 'Cancelled',
+        current: 0,
+        total: 0,
+        progress: 100,
+      });
+      this.emit('progress-update', this.progress);
       return true;
     }
     return false;
@@ -174,6 +216,7 @@ export class RecNetService extends EventEmitter {
     } = options || {};
 
     try {
+      this.resetProgressIssueState();
       this.updateProgress('Downloading user photo data...', 0, 0, 0);
 
       const all: Photo[] = [];
@@ -450,7 +493,9 @@ export class RecNetService extends EventEmitter {
         iterationDetails,
       };
     } catch (error) {
-      this.setOperationComplete();
+      if ((error as Error).message !== 'Operation cancelled') {
+        this.setOperationFailed((error as Error).message);
+      }
       throw error;
     }
   }
@@ -470,6 +515,7 @@ export class RecNetService extends EventEmitter {
     } = options || {};
 
     try {
+      this.resetProgressIssueState();
       this.updateProgress('Downloading user feed data...', 0, 0, 0);
 
       const accountDir = path.join(this.settings.outputRoot, accountId);
@@ -725,7 +771,9 @@ export class RecNetService extends EventEmitter {
         iterationDetails,
       };
     } catch (error) {
-      this.setOperationComplete();
+      if ((error as Error).message !== 'Operation cancelled') {
+        this.setOperationFailed((error as Error).message);
+      }
       throw error;
     }
   }
@@ -735,6 +783,7 @@ export class RecNetService extends EventEmitter {
     this.currentOperation = { cancelled: false };
 
     try {
+      this.resetProgressIssueState();
       this.updateProgress('Downloading user photos...', 0, 0, 0);
       const accountDir = path.join(this.settings.outputRoot, accountId);
       const jsonPath = path.join(accountDir, `${accountId}_photos.json`);
@@ -806,6 +855,8 @@ export class RecNetService extends EventEmitter {
             newDownloads: 0,
             failedDownloads: 0,
             skipped: totalPhotos,
+            retryAttempts: 0,
+            recoveredAfterRetry: 0,
           },
           downloadResults: [],
           totalResults: 0,
@@ -823,6 +874,8 @@ export class RecNetService extends EventEmitter {
       let newDownloads = 0;
       let failedDownloads = 0;
       let skipped = 0;
+      let retryAttempts = 0;
+      let recoveredAfterRetry = 0;
       const downloadResults: DownloadResultItem[] = [];
       const rateLimitMs = 1000;
       let processedCount = 0;
@@ -895,12 +948,21 @@ export class RecNetService extends EventEmitter {
         }
 
         // Check if we've reached the download limit (only for new downloads)
+        let attemptsUsed = 1;
         try {
-          const response = await this.photosController.downloadPhoto(
-            imageName,
-            this.settings.cdnBase
-          );
-          if (response.success && response.value) {
+          const attempt = await this.downloadPhotoWithRetry(imageName);
+          attemptsUsed = attempt.attempts;
+          retryAttempts += Math.max(0, attempt.attempts - 1);
+          if (
+            attempt.attempts > 1 &&
+            attempt.response?.success &&
+            attempt.response.value
+          ) {
+            recoveredAfterRetry++;
+          }
+
+          const response = attempt.response;
+          if (response?.success && response.value) {
             const data = Buffer.from(response.value);
             await fs.writeFile(photoPath, data);
             newDownloads++;
@@ -911,8 +973,10 @@ export class RecNetService extends EventEmitter {
               size: data.length,
               path: photoPath,
               url: photoUrl,
+              attempts: attempt.attempts,
+              retries: Math.max(0, attempt.attempts - 1),
             });
-          } else {
+          } else if (response) {
             failedDownloads++;
             downloadResults.push({
               photoId,
@@ -920,15 +984,25 @@ export class RecNetService extends EventEmitter {
               statusCode: response.status,
               reason: (response.message || response.error) ?? undefined,
               url: photoUrl,
+              attempts: attempt.attempts,
+              retries: Math.max(0, attempt.attempts - 1),
             });
+          } else {
+            throw attempt.error ?? new Error('Download failed after retries');
           }
         } catch (error) {
+          if (error instanceof Error && error.message === 'Operation cancelled') {
+            throw error;
+          }
+
           failedDownloads++;
           downloadResults.push({
             photoId,
             status: 'error',
             error: (error as Error).message,
             url: photoUrl,
+            attempts: attemptsUsed,
+            retries: Math.max(0, attemptsUsed - 1),
           });
         }
 
@@ -953,6 +1027,8 @@ export class RecNetService extends EventEmitter {
         newDownloads,
         failedDownloads,
         skipped,
+        retryAttempts,
+        recoveredAfterRetry,
       };
 
       return {
@@ -962,9 +1038,12 @@ export class RecNetService extends EventEmitter {
         downloadStats,
         downloadResults,
         totalResults: downloadResults.length,
+        guidance: this.buildDownloadGuidance('user photos', downloadStats),
       };
     } catch (error) {
-      this.setOperationComplete();
+      if ((error as Error).message !== 'Operation cancelled') {
+        this.setOperationFailed((error as Error).message);
+      }
       throw error;
     }
   }
@@ -974,6 +1053,7 @@ export class RecNetService extends EventEmitter {
     this.currentOperation = { cancelled: false };
 
     try {
+      this.resetProgressIssueState();
       this.updateProgress('Downloading feed photos...', 0, 0, 0);
       const accountDir = path.join(this.settings.outputRoot, accountId);
       const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
@@ -1044,6 +1124,8 @@ export class RecNetService extends EventEmitter {
             newDownloads: 0,
             failedDownloads: 0,
             skipped: totalPhotos,
+            retryAttempts: 0,
+            recoveredAfterRetry: 0,
           },
           downloadResults: [],
           totalResults: 0,
@@ -1061,6 +1143,8 @@ export class RecNetService extends EventEmitter {
       let newDownloads = 0;
       let failedDownloads = 0;
       let skipped = 0;
+      let retryAttempts = 0;
+      let recoveredAfterRetry = 0;
       const downloadResults: DownloadResultItem[] = [];
       const rateLimitMs = 1000;
       let processedCount = 0;
@@ -1131,12 +1215,21 @@ export class RecNetService extends EventEmitter {
           continue;
         }
 
+        let attemptsUsed = 1;
         try {
-          const response = await this.photosController.downloadPhoto(
-            imageName,
-            this.settings.cdnBase
-          );
-          if (response.success && response.value) {
+          const attempt = await this.downloadPhotoWithRetry(imageName);
+          attemptsUsed = attempt.attempts;
+          retryAttempts += Math.max(0, attempt.attempts - 1);
+          if (
+            attempt.attempts > 1 &&
+            attempt.response?.success &&
+            attempt.response.value
+          ) {
+            recoveredAfterRetry++;
+          }
+
+          const response = attempt.response;
+          if (response?.success && response.value) {
             const data = Buffer.from(response.value);
             await fs.writeFile(photoPath, data);
             newDownloads++;
@@ -1147,8 +1240,10 @@ export class RecNetService extends EventEmitter {
               size: data.length,
               path: photoPath,
               url: photoUrl,
+              attempts: attempt.attempts,
+              retries: Math.max(0, attempt.attempts - 1),
             });
-          } else {
+          } else if (response) {
             failedDownloads++;
             downloadResults.push({
               photoId,
@@ -1156,15 +1251,25 @@ export class RecNetService extends EventEmitter {
               statusCode: response.status,
               reason: (response.message || response.error) ?? undefined,
               url: photoUrl,
+              attempts: attempt.attempts,
+              retries: Math.max(0, attempt.attempts - 1),
             });
+          } else {
+            throw attempt.error ?? new Error('Download failed after retries');
           }
         } catch (error) {
+          if (error instanceof Error && error.message === 'Operation cancelled') {
+            throw error;
+          }
+
           failedDownloads++;
           downloadResults.push({
             photoId,
             status: 'error',
             error: (error as Error).message,
             url: photoUrl,
+            attempts: attemptsUsed,
+            retries: Math.max(0, attemptsUsed - 1),
           });
         }
 
@@ -1189,6 +1294,8 @@ export class RecNetService extends EventEmitter {
         newDownloads,
         failedDownloads,
         skipped,
+        retryAttempts,
+        recoveredAfterRetry,
       };
 
       return {
@@ -1198,9 +1305,12 @@ export class RecNetService extends EventEmitter {
         downloadStats,
         downloadResults,
         totalResults: downloadResults.length,
+        guidance: this.buildDownloadGuidance('feed photos', downloadStats),
       };
     } catch (error) {
-      this.setOperationComplete();
+      if ((error as Error).message !== 'Operation cancelled') {
+        this.setOperationFailed((error as Error).message);
+      }
       throw error;
     }
   }
@@ -1314,6 +1424,182 @@ export class RecNetService extends EventEmitter {
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private createProgressState(overrides: Partial<Progress>): Progress {
+    return {
+      isRunning: false,
+      currentStep: 'Ready',
+      progress: 0,
+      total: 0,
+      current: 0,
+      statusLevel: 'info',
+      issueCount: 0,
+      retryAttempts: 0,
+      failedItems: 0,
+      recoveredAfterRetry: 0,
+      lastIssue: undefined,
+      ...overrides,
+    };
+  }
+
+  private resetProgressIssueState(): void {
+    this.progress = this.createProgressState({
+      ...this.progress,
+      statusLevel: 'info',
+      issueCount: 0,
+      retryAttempts: 0,
+      failedItems: 0,
+      recoveredAfterRetry: 0,
+      lastIssue: undefined,
+    });
+  }
+
+  private markProgressIssue(
+    level: 'warning' | 'error',
+    message: string,
+    options?: { retryIncrement?: number; failedItemIncrement?: number }
+  ): void {
+    const retryIncrement = options?.retryIncrement ?? 0;
+    const failedItemIncrement = options?.failedItemIncrement ?? 0;
+    const failedItems = this.progress.failedItems + failedItemIncrement;
+
+    this.progress = this.createProgressState({
+      ...this.progress,
+      statusLevel: level === 'error' || failedItems > 0 ? 'error' : 'warning',
+      issueCount: this.progress.issueCount + 1,
+      retryAttempts: this.progress.retryAttempts + retryIncrement,
+      failedItems,
+      lastIssue: message,
+    });
+    this.emit('progress-update', this.progress);
+  }
+
+  private markProgressRecovery(message: string): void {
+    this.progress = this.createProgressState({
+      ...this.progress,
+      statusLevel: this.progress.failedItems > 0 ? 'error' : 'warning',
+      recoveredAfterRetry: this.progress.recoveredAfterRetry + 1,
+      lastIssue: message,
+    });
+    this.emit('progress-update', this.progress);
+  }
+
+  private async downloadPhotoWithRetry(
+    imageName: string
+  ): Promise<PhotoDownloadAttempt> {
+    let attempts = 0;
+    let lastResponse: PhotoDownloadAttempt['response'];
+    let lastError: Error | undefined;
+
+    while (attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS) {
+      if (this.currentOperation?.cancelled) {
+        throw new Error('Operation cancelled');
+      }
+
+      attempts++;
+
+      try {
+        const response = await this.photosController.downloadPhoto(
+          imageName,
+          this.settings.cdnBase
+        );
+        if (response?.success && response.value) {
+          if (attempts > 1) {
+            this.markProgressRecovery(
+              `Recovered ${imageName} after ${attempts - 1} retr${
+                attempts - 1 === 1 ? 'y' : 'ies'
+              }. Download is continuing.`
+            );
+          }
+          return { response, attempts };
+        }
+
+        lastResponse = response ?? {
+          success: false,
+          value: null,
+          error: 'No response returned from photo download',
+        };
+        const failureReason =
+          lastResponse.message ||
+          lastResponse.error ||
+          (lastResponse.status ? `HTTP ${lastResponse.status}` : 'unknown_error');
+        const issueMessage =
+          attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS
+            ? `Issue downloading ${imageName}: ${failureReason}. Retry ${attempts}/${PHOTO_DOWNLOAD_RETRY_COUNT} will start now.`
+            : `Download failed for ${imageName}: ${failureReason}.`;
+        this.markProgressIssue(
+          attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS ? 'warning' : 'error',
+          issueMessage,
+          {
+            retryIncrement: attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS ? 1 : 0,
+            failedItemIncrement: attempts >= PHOTO_DOWNLOAD_MAX_ATTEMPTS ? 1 : 0,
+          }
+        );
+        console.warn(
+          `Photo download attempt ${attempts}/${PHOTO_DOWNLOAD_MAX_ATTEMPTS} failed for ${imageName}: ${
+            lastResponse.message ||
+            lastResponse.error ||
+            lastResponse.status ||
+            'unknown_error'
+          }`
+        );
+      } catch (error) {
+        lastError = error as Error;
+        const failureReason = lastError.message || 'unknown_error';
+        const issueMessage =
+          attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS
+            ? `Issue downloading ${imageName}: ${failureReason}. Retry ${attempts}/${PHOTO_DOWNLOAD_RETRY_COUNT} will start now.`
+            : `Download failed for ${imageName}: ${failureReason}.`;
+        this.markProgressIssue(
+          attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS ? 'warning' : 'error',
+          issueMessage,
+          {
+            retryIncrement: attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS ? 1 : 0,
+            failedItemIncrement: attempts >= PHOTO_DOWNLOAD_MAX_ATTEMPTS ? 1 : 0,
+          }
+        );
+        console.warn(
+          `Photo download attempt ${attempts}/${PHOTO_DOWNLOAD_MAX_ATTEMPTS} failed for ${imageName}: ${lastError.message}`
+        );
+      }
+
+      if (attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS) {
+        await this.delay(PHOTO_DOWNLOAD_RETRY_DELAY_MS);
+      }
+    }
+
+    if (lastResponse) {
+      return {
+        response: lastResponse,
+        error: lastError,
+        attempts,
+      };
+    }
+
+    if (lastError) {
+      return { error: lastError, attempts };
+    }
+
+    return {
+      error: new Error('Download failed after retries'),
+      attempts,
+    };
+  }
+
+  private buildDownloadGuidance(
+    label: string,
+    stats: DownloadStats
+  ): string[] | undefined {
+    if (stats.failedDownloads === 0) {
+      return undefined;
+    }
+
+    return [
+      `Some ${label} could not be downloaded after ${PHOTO_DOWNLOAD_RETRY_COUNT} retries, but the download completed.`,
+      'You can retry the same download after it finishes to grab any missed images. Existing files are checked first, so the app will continue from what is already saved.',
+      'You do not need to delete the output folder to resume.',
+    ];
   }
 
   private extractUniqueIds(photos: Photo[]): {
@@ -1731,13 +2017,13 @@ export class RecNetService extends EventEmitter {
 
       this.settings = { ...DEFAULT_SETTINGS };
       this.currentOperation = null;
-      this.progress = {
+      this.progress = this.createProgressState({
         isRunning: false,
         currentStep: 'Ready',
         progress: 0,
         total: 0,
         current: 0,
-      };
+      });
       this.ensureOutputDirectory();
       await this.saveSettings();
       this.emit('progress-update', this.progress);

@@ -389,6 +389,8 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
   const [expandedRooms, setExpandedRooms] = useState(false);
   const [expandedUsers, setExpandedUsers] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [statsReloadToken, setStatsReloadToken] = useState(0);
 
   const { getPhotoRoom, getPhotoUsers } = usePhotoMetadata(roomMap, accountMap);
 
@@ -453,11 +455,13 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
     if (!open || !accountId || !filePath) {
       setPhotos([]);
       setFeedPhotos([]);
+      setLoadError(null);
       return;
     }
 
     const loadData = async () => {
       setLoading(true);
+      setLoadError(null);
       try {
         if (window.electronAPI) {
           const [photosResult, feedPhotosResult] = await Promise.all([
@@ -465,22 +469,31 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
             window.electronAPI.loadFeedPhotos(accountId),
           ]);
 
-          if (photosResult.success && photosResult.data) {
-            setPhotos(photosResult.data);
-          }
-          if (feedPhotosResult.success && feedPhotosResult.data) {
-            setFeedPhotos(feedPhotosResult.data);
+          const photosOk = photosResult.success && photosResult.data;
+          const feedOk = feedPhotosResult.success && feedPhotosResult.data;
+
+          setPhotos(photosOk ? photosResult.data! : []);
+          setFeedPhotos(feedOk ? feedPhotosResult.data! : []);
+
+          if (!photosOk && !feedOk) {
+            const hint =
+              (!photosResult.success && photosResult.error) ||
+              (!feedPhotosResult.success && feedPhotosResult.error) ||
+              'Could not load photos for this account.';
+            setLoadError(hint);
           }
         }
       } catch (error) {
-        // Failed to load photos
+        setLoadError(
+          error instanceof Error ? error.message : 'Could not load photos.'
+        );
       } finally {
         setLoading(false);
       }
     };
 
     loadData();
-  }, [open, accountId, filePath]);
+  }, [open, accountId, filePath, statsReloadToken]);
 
   // Calculate statistics
   const stats = useMemo((): PhotoStats => {
@@ -716,6 +729,20 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
         {loading ? (
           <div className="py-8 text-center text-muted-foreground">
             Loading statistics...
+          </div>
+        ) : loadError ? (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center space-y-3">
+            <p className="text-sm font-medium text-destructive">
+              Could not load statistics
+            </p>
+            <p className="text-sm text-muted-foreground break-words">{loadError}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setStatsReloadToken(t => t + 1)}
+            >
+              Try again
+            </Button>
           </div>
         ) : photos.length === 0 && feedPhotos.length === 0 ? (
           <div className="py-8 text-center text-muted-foreground">

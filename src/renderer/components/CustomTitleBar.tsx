@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Minus, Square, X, Download, BarChart3, Settings } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { ThemeToggle } from './ThemeToggle';
@@ -33,6 +33,15 @@ interface CustomTitleBarProps {
   }>;
   onClearLogs: () => void;
   currentAccountId?: string;
+  debugMenuOpen: boolean;
+  onDebugMenuOpenChange: (open: boolean) => void;
+  resultsScrollRequestId: number;
+  onRetryDownload?: () => void | Promise<void>;
+  canRetryDownload?: boolean;
+  isRetryingDownload?: boolean;
+  onOpenDownloadPanel?: () => void;
+  onOpenOutputFolder?: (folderPath: string) => void | Promise<void>;
+  outputRoot: string;
 }
 
 export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
@@ -44,9 +53,18 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
   results,
   onClearLogs,
   currentAccountId,
+  debugMenuOpen,
+  onDebugMenuOpenChange,
+  resultsScrollRequestId,
+  onRetryDownload,
+  canRetryDownload,
+  isRetryingDownload,
+  onOpenDownloadPanel,
+  onOpenOutputFolder,
+  outputRoot,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const [debugMenuOpen, setDebugMenuOpen] = useState(false);
+  const resultsSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const checkMaximized = async () => {
@@ -61,6 +79,21 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
     const interval = setInterval(checkMaximized, 500);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!debugMenuOpen || resultsScrollRequestId === 0) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      resultsSectionRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 75);
+
+    return () => window.clearTimeout(timeout);
+  }, [debugMenuOpen, resultsScrollRequestId]);
 
   const handleMinimize = () => {
     if (window.electronAPI) {
@@ -136,7 +169,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
               variant="ghost"
               size="icon"
               className="h-8 w-8"
-              onClick={() => setDebugMenuOpen(true)}
+              onClick={() => onDebugMenuOpenChange(true)}
               aria-label="Settings"
             >
               <Settings className="h-4 w-4" />
@@ -167,7 +200,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
       </div>
 
       {/* Debug Menu Dialog */}
-      <Dialog open={debugMenuOpen} onOpenChange={setDebugMenuOpen}>
+      <Dialog open={debugMenuOpen} onOpenChange={onDebugMenuOpenChange}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
@@ -186,7 +219,17 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
               }}
             />
             <LogPanel logs={logs} onClearLogs={onClearLogs} />
-            <ResultsPanel results={results} />
+            <div ref={resultsSectionRef}>
+              <ResultsPanel
+                results={results}
+                onRetryDownload={onRetryDownload}
+                canRetryDownload={canRetryDownload}
+                isRetryingDownload={isRetryingDownload}
+                onOpenDownloadPanel={onOpenDownloadPanel}
+                onOpenOutputFolder={onOpenOutputFolder}
+                outputRoot={outputRoot}
+              />
+            </div>
           </div>
         </DialogContent>
       </Dialog>

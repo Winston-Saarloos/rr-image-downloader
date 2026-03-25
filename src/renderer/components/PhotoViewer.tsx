@@ -34,7 +34,10 @@ interface PhotoViewerProps {
   onScrollPositionChange?: (scrollTop: number) => void;
   scrollContainerRef?: React.RefObject<HTMLDivElement>;
   headerMode?: 'full' | 'compact' | 'hidden';
-  onHeaderInteraction?: () => void;
+  onOpenActivityMenu?: () => void;
+  onRevealOutputFolder?: () => void;
+  onPhotosLoadError?: (message: string) => void;
+  onPhotosLoadSuccess?: () => void;
 }
 
 type PhotoSource = 'photos' | 'feed';
@@ -47,6 +50,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   onScrollPositionChange,
   scrollContainerRef,
   headerMode = 'full',
+  onOpenActivityMenu,
+  onRevealOutputFolder,
+  onPhotosLoadError,
+  onPhotosLoadSuccess,
 }) => {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -75,11 +82,21 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
   const wasDownloadingRef = useRef(false);
+  const onPhotosLoadErrorRef = useRef(onPhotosLoadError);
+  const onPhotosLoadSuccessRef = useRef(onPhotosLoadSuccess);
   const activeScrollRef = scrollContainerRef ?? internalScrollRef;
-  const isHeaderVisible = headerMode !== 'hidden';
-  const showFullControls = headerMode === 'full';
   const { favorites } = useFavorites();
   const electronAPI = (window as unknown as { electronAPI?: any }).electronAPI;
+  const isHeaderVisible = headerMode !== 'hidden';
+  const showFullControls = headerMode === 'full';
+
+  useEffect(() => {
+    onPhotosLoadErrorRef.current = onPhotosLoadError;
+  }, [onPhotosLoadError]);
+
+  useEffect(() => {
+    onPhotosLoadSuccessRef.current = onPhotosLoadSuccess;
+  }, [onPhotosLoadSuccess]);
 
   // Use propAccountId if provided, otherwise use selectedAccountId
   const accountId = propAccountId || selectedAccountId;
@@ -116,7 +133,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     } finally {
       setLoadingAccounts(false);
     }
-  }, [selectedAccountId, propAccountId, onAccountChange]);
+  }, [electronAPI, selectedAccountId, propAccountId, onAccountChange]);
 
   const loadRoomData = useCallback(async () => {
     if (!accountId) {
@@ -144,7 +161,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       console.error('Failed to load room data:', error);
       setRoomMap(new Map());
     }
-  }, [accountId]);
+  }, [accountId, electronAPI]);
 
   const loadAccountData = useCallback(async () => {
     if (!accountId) {
@@ -171,7 +188,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       console.error('Failed to load account data:', error);
       setAccountMap(new Map());
     }
-  }, [accountId]);
+  }, [accountId, electronAPI]);
 
   const loadEventData = useCallback(async () => {
     if (!accountId) {
@@ -201,7 +218,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       console.error('Failed to load event data:', error);
       setEventMap(new Map());
     }
-  }, [accountId]);
+  }, [accountId, electronAPI]);
 
   const loadPhotos = useCallback(async () => {
     if (!filePath || !accountId) {
@@ -230,20 +247,21 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         } else {
           setFeedPhotos([]);
         }
+        onPhotosLoadSuccessRef.current?.();
       } else {
         setPhotos([]);
         setFeedPhotos([]);
       }
     } catch (error) {
-      setLoadError(
-        `Failed to load photos: ${error instanceof Error ? error.message : 'Unknown error'}. Check that your output folder is accessible.`
-      );
+      const msg = `Failed to load photos: ${error instanceof Error ? error.message : 'Unknown error'}. Check that your output folder is accessible.`;
+      setLoadError(msg);
+      onPhotosLoadErrorRef.current?.(msg);
       setPhotos([]);
       setFeedPhotos([]);
     } finally {
       setLoading(false);
     }
-  }, [filePath, accountId]);
+  }, [filePath, accountId, electronAPI]);
 
   // Load available accounts on mount and when filePath changes
   useEffect(() => {
@@ -355,16 +373,16 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden">
       <div
-        className={`transition-[transform,opacity,max-height] duration-300 bg-background/95 backdrop-blur sticky top-0 z-10 ${
+        className={`sticky top-0 z-10 space-y-3 bg-background/95 px-3 py-3 backdrop-blur transition-[transform,opacity,max-height] duration-300 sm:px-4 lg:px-6 ${
           isHeaderVisible
-            ? 'translate-y-0 opacity-100 max-h-[600px]'
-            : '-translate-y-full opacity-0 pointer-events-none max-h-0'
-        } px-3 sm:px-4 lg:px-6 py-3 space-y-3`}
+            ? 'max-h-[600px] translate-y-0 opacity-100'
+            : 'pointer-events-none max-h-0 -translate-y-full opacity-0'
+        }`}
       >
         {showFullControls && (
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             {availableAccounts.length > 0 && (
-              <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
                 <Select
                   value={accountId || ''}
                   onValueChange={handleAccountChange}
@@ -413,9 +431,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                 variant={showFavoritesOnly ? 'default' : 'outline'}
                 onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
                 className={
-                  showFavoritesOnly
-                    ? 'bg-red-500 hover:bg-red-600 text-white'
-                    : ''
+                  showFavoritesOnly ? 'bg-red-500 text-white hover:bg-red-600' : ''
                 }
               >
                 <Heart
@@ -428,9 +444,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         )}
 
         {(showFullControls || headerMode === 'compact') && (
-          <div className="flex flex-col sm:flex-row gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transform text-muted-foreground" />
               <Input
                 placeholder="Search photos..."
                 value={searchQuery}
@@ -467,12 +483,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="oldest-to-newest">
-                  Oldest to Newest
-                </SelectItem>
-                <SelectItem value="newest-to-oldest">
-                  Newest to Oldest
-                </SelectItem>
+                <SelectItem value="oldest-to-newest">Oldest to Newest</SelectItem>
+                <SelectItem value="newest-to-oldest">Newest to Oldest</SelectItem>
                 <SelectItem value="most-popular">Most Popular</SelectItem>
               </SelectContent>
             </Select>
@@ -494,8 +506,34 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
             <p>Loading photos...</p>
           </div>
         ) : loadError ? (
-          <div className="text-center py-12 text-red-600 dark:text-red-400">
-            <p>{loadError}</p>
+          <div className="mx-auto max-w-md rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center">
+            <p className="text-sm font-medium text-destructive">Could not load photos</p>
+            <p className="mt-2 text-sm text-muted-foreground break-words">
+              {loadError}
+            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-center">
+              <Button size="sm" onClick={() => void loadPhotos()}>
+                Try again
+              </Button>
+              {onRevealOutputFolder && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onRevealOutputFolder}
+                >
+                  Open output folder
+                </Button>
+              )}
+              {onOpenActivityMenu && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onOpenActivityMenu}
+                >
+                  Open activity and settings
+                </Button>
+              )}
+            </div>
           </div>
         ) : activePhotos.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">

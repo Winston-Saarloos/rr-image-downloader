@@ -11,8 +11,22 @@ import {
   RecNetSettings,
   Progress,
   BulkDataRefreshOptions,
+  UserFacingIncident,
 } from '../shared/types';
 import { FavoritesProvider } from './contexts/FavoritesContext';
+import {
+  createUserIncident,
+  classifyError,
+  toOperationErrorData,
+} from './utils/errorPresentation';
+import { ErrorRecoveryBanner } from './components/ErrorRecoveryBanner';
+
+interface DownloadRequestState {
+  username: string;
+  token: string;
+  filePath: string;
+  refreshOptions: BulkDataRefreshOptions;
+}
 
 function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
@@ -28,17 +42,24 @@ function App() {
     progress: 0,
     total: 0,
     current: 0,
+    statusLevel: 'info',
+    issueCount: 0,
+    retryAttempts: 0,
+    failedItems: 0,
+    recoveredAfterRetry: 0,
   });
 
   const [currentAccountId, setCurrentAccountId] = useState<string>('');
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
+  const [debugMenuOpen, setDebugMenuOpen] = useState(false);
+  const [resultsScrollRequestId, setResultsScrollRequestId] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [headerMode, setHeaderMode] = useState<'full' | 'compact' | 'hidden'>(
     'full'
   );
-  const [hasScrolledDown, setHasScrolledDown] = useState(false);
   const [showProgressPanel, setShowProgressPanel] = useState(true);
+  const [hasScrolledDown, setHasScrolledDown] = useState(false);
   const [hasScrolledPhotos, setHasScrolledPhotos] = useState(false);
   const scrollPositionRef = useRef(0);
   const photoScrollRef = useRef<HTMLDivElement | null>(null);
@@ -57,6 +78,14 @@ function App() {
       timestamp: string;
     }>
   >([]);
+  const [downloadDraft, setDownloadDraft] = useState<DownloadRequestState | null>(
+    null
+  );
+  const [lastDownloadRequest, setLastDownloadRequest] =
+    useState<DownloadRequestState | null>(null);
+  const [activeIncident, setActiveIncident] = useState<UserFacingIncident | null>(
+    null
+  );
 
   useEffect(() => {
     loadSettings();
@@ -82,10 +111,10 @@ function App() {
         setSettings(loadedSettings);
       }
     } catch (error) {
-      addLog(
-        `Failed to load settings: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        'error'
-      );
+      const msg =
+        error instanceof Error ? error.message : 'Unknown error';
+      addLog(`Failed to load settings: ${msg}`, 'error');
+      setActiveIncident(createUserIncident('settings', msg));
     }
   };
 
@@ -93,6 +122,9 @@ function App() {
     if (window.electronAPI) {
       window.electronAPI.onProgress((event, progressData) => {
         setProgress(progressData);
+        if (progressData.statusLevel !== 'info' || progressData.issueCount > 0) {
+          setShowProgressPanel(true);
+        }
       });
     }
   };
@@ -103,10 +135,13 @@ function App() {
         await window.electronAPI.loadPhotos(accountId);
       }
     } catch (error) {
+      const msg =
+        error instanceof Error ? error.message : 'Unknown error';
       addLog(
-        `Failed to load photos for account ${accountId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `Failed to load photos for account ${accountId}: ${msg}`,
         'error'
       );
+      setActiveIncident(createUserIncident('photos', msg));
     }
   };
 
@@ -119,7 +154,9 @@ function App() {
         addLog('Settings updated', 'success');
       }
     } catch (error) {
-      addLog(`Failed to update settings: ${error}`, 'error');
+      const msg = error instanceof Error ? error.message : String(error);
+      addLog(`Failed to update settings: ${msg}`, 'error');
+      setActiveIncident(createUserIncident('updateSettings', msg));
     }
   };
 
@@ -130,6 +167,33 @@ function App() {
     const timestamp = new Date().toLocaleTimeString();
     setLogs(prev => [...prev.slice(-99), { message, type, timestamp }]);
   };
+
+  const dismissIncident = useCallback(() => setActiveIncident(null), []);
+
+  const clearPhotosIncident = useCallback(() => {
+    setActiveIncident(prev => (prev?.source === 'photos' ? null : prev));
+  }, []);
+
+  const handleOpenPathInExplorer = useCallback(
+    async (folderPath: string) => {
+      if (!window.electronAPI?.openPathInExplorer) {
+        return;
+      }
+      const r = await window.electronAPI.openPathInExplorer(folderPath);
+      if (!r.success) {
+        const timestamp = new Date().toLocaleTimeString();
+        setLogs(prev => [
+          ...prev.slice(-99),
+          {
+            message: r.error ?? 'Could not open folder',
+            type: 'error' as const,
+            timestamp,
+          },
+        ]);
+      }
+    },
+    []
+  );
 
   const addResult = (
     operation: string,
@@ -146,7 +210,25 @@ function App() {
   const clearLogs = () => {
     setLogs([]);
     setResults([]);
+    setActiveIncident(null);
   };
+
+  const openOperationResults = useCallback(() => {
+    setDebugMenuOpen(true);
+    setResultsScrollRequestId(prev => prev + 1);
+  }, []);
+
+  const handleDownloadDraftChange = useCallback(
+    (draft: DownloadRequestState) => {
+      setDownloadDraft(draft);
+    },
+    []
+  );
+
+  const retryRequest = downloadDraft ?? lastDownloadRequest;
+  const canRetryDownload = Boolean(
+    retryRequest?.username.trim() && retryRequest?.filePath.trim()
+  );
 
   const isProgressIdle =
     !progress.isRunning &&
@@ -162,11 +244,26 @@ function App() {
     if (!username.trim() || !filePath.trim()) {
       return;
     }
+
+    setActiveIncident(null);
+
     const {
       forceAccountsRefresh = false,
       forceRoomsRefresh = false,
       forceEventsRefresh = false,
     } = refreshOptions;
+    const requestState: DownloadRequestState = {
+      username,
+      token,
+      filePath,
+      refreshOptions: {
+        forceAccountsRefresh,
+        forceRoomsRefresh,
+        forceEventsRefresh,
+      },
+    };
+
+    setLastDownloadRequest(requestState);
 
     setIsDownloading(true);
     addLog(`Starting download for username: ${username}`, 'info');
@@ -176,6 +273,11 @@ function App() {
       progress: 0,
       total: 0,
       current: 0,
+      statusLevel: 'info',
+      issueCount: 0,
+      retryAttempts: 0,
+      failedItems: 0,
+      recoveredAfterRetry: 0,
     });
 
     try {
@@ -274,15 +376,28 @@ function App() {
         const downloadStats = downloadResult.data?.downloadStats;
         if (downloadStats) {
           addLog(
-            `Download complete: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} failed`,
-            'success'
+            downloadStats.failedDownloads > 0
+              ? `Download complete with warnings: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} missed after retries`
+              : `Download complete: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} failed`,
+            downloadStats.failedDownloads > 0 ? 'warning' : 'success'
           );
+          if (downloadStats.retryAttempts > 0) {
+            addLog(
+              downloadStats.failedDownloads > 0
+                ? `Retried user photo downloads ${downloadStats.retryAttempts} time(s) across failed attempts. ${downloadStats.recoveredAfterRetry} photo(s) recovered automatically.`
+                : `Retried user photo downloads ${downloadStats.retryAttempts} time(s) and recovered ${downloadStats.recoveredAfterRetry} photo(s) automatically.`,
+              downloadStats.failedDownloads > 0 ? 'warning' : 'info'
+            );
+          }
           if (downloadResult.data?.photosDirectory) {
             addLog(
               `User photos saved to: ${downloadResult.data.photosDirectory}`,
               'info'
             );
           }
+          downloadResult.data?.guidance?.forEach(message =>
+            addLog(message, 'warning')
+          );
           addResult('Download', downloadResult.data, 'success');
         }
 
@@ -301,37 +416,111 @@ function App() {
         const downloadFeedStats = downloadFeedResult.data?.downloadStats;
         if (downloadFeedStats) {
           addLog(
-            `Feed download complete: ${downloadFeedStats.newDownloads} new, ${downloadFeedStats.alreadyDownloaded} existing, ${downloadFeedStats.failedDownloads} failed`,
-            'success'
+            downloadFeedStats.failedDownloads > 0
+              ? `Feed download complete with warnings: ${downloadFeedStats.newDownloads} new, ${downloadFeedStats.alreadyDownloaded} existing, ${downloadFeedStats.failedDownloads} missed after retries`
+              : `Feed download complete: ${downloadFeedStats.newDownloads} new, ${downloadFeedStats.alreadyDownloaded} existing, ${downloadFeedStats.failedDownloads} failed`,
+            downloadFeedStats.failedDownloads > 0 ? 'warning' : 'success'
           );
+          if (downloadFeedStats.retryAttempts > 0) {
+            addLog(
+              downloadFeedStats.failedDownloads > 0
+                ? `Retried feed photo downloads ${downloadFeedStats.retryAttempts} time(s) across failed attempts. ${downloadFeedStats.recoveredAfterRetry} photo(s) recovered automatically.`
+                : `Retried feed photo downloads ${downloadFeedStats.retryAttempts} time(s) and recovered ${downloadFeedStats.recoveredAfterRetry} photo(s) automatically.`,
+              downloadFeedStats.failedDownloads > 0 ? 'warning' : 'info'
+            );
+          }
           if (downloadFeedResult.data?.feedPhotosDirectory) {
             addLog(
               `Feed photos saved to: ${downloadFeedResult.data.feedPhotosDirectory}`,
               'info'
             );
           }
+          downloadFeedResult.data?.guidance?.forEach(message =>
+            addLog(message, 'warning')
+          );
           addResult('Feed Download', downloadFeedResult.data, 'success');
         }
 
         // Reload photos after download completes
         loadPhotosForAccount(accountId);
+        setActiveIncident(null);
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Download failed';
-      addLog(`Download failed: ${errorMessage}`, 'error');
-      addResult('Download', { error: errorMessage }, 'error');
+
+      if (errorMessage === 'Operation cancelled') {
+        addLog('Download cancelled by user.', 'warning');
+        setProgress(prev => ({
+          ...prev,
+          isRunning: false,
+          currentStep: 'Cancelled',
+          total: 0,
+          current: 0,
+          statusLevel: 'info',
+          issueCount: 0,
+          failedItems: 0,
+          lastIssue: undefined,
+        }));
+        setActiveIncident(
+          createUserIncident('download', errorMessage, { severity: 'warning' })
+        );
+      } else {
+        addLog(`Download failed: ${errorMessage}`, 'error');
+        classifyError(errorMessage, 'download').guidance.forEach(message =>
+          addLog(message, 'warning')
+        );
+        setShowProgressPanel(true);
+        setProgress(prev => ({
+          ...prev,
+          isRunning: false,
+          currentStep: 'Failed',
+          progress: 100,
+          total: 0,
+          current: 0,
+          statusLevel: 'error',
+          issueCount: Math.max(prev.issueCount, 1),
+          failedItems: Math.max(prev.failedItems, 1),
+          lastIssue: errorMessage,
+        }));
+        setActiveIncident(createUserIncident('download', errorMessage));
+        addResult(
+          'Download',
+          toOperationErrorData(errorMessage, 'download'),
+          'error'
+        );
+      }
     } finally {
       setIsDownloading(false);
-      setProgress({
+      setProgress(prev => ({
+        ...prev,
         isRunning: false,
-        currentStep: 'Complete',
-        progress: 100,
+        currentStep:
+          prev.currentStep === 'Cancelled'
+            ? 'Cancelled'
+            : prev.currentStep === 'Failed'
+              ? 'Failed'
+              : 'Complete',
+        progress:
+          prev.currentStep === 'Cancelled' ? prev.progress : 100,
         total: 0,
         current: 0,
-      });
+      }));
     }
   };
+
+  const handleRetryDownload = useCallback(async () => {
+    if (!retryRequest || isDownloading) {
+      return;
+    }
+
+    await handleDownload(
+      retryRequest.username,
+      retryRequest.token,
+      retryRequest.filePath,
+      retryRequest.refreshOptions
+    );
+  }, [handleDownload, isDownloading, retryRequest]);
 
   const handleViewerAccountChange = useCallback(
     (accountId?: string) => {
@@ -343,6 +532,18 @@ function App() {
     [isDownloading]
   );
 
+  const handleOpenActivityMenu = useCallback(() => {
+    setDebugMenuOpen(true);
+  }, []);
+
+  const handleRevealOutputFolder = useCallback(() => {
+    void handleOpenPathInExplorer(settings.outputRoot);
+  }, [handleOpenPathInExplorer, settings.outputRoot]);
+
+  const handlePhotosLoadError = useCallback((message: string) => {
+    setActiveIncident(createUserIncident('photos', message));
+  }, []);
+
   const handleCancelDownload = async () => {
     try {
       if (window.electronAPI) {
@@ -350,13 +551,14 @@ function App() {
         if (cancelled) {
           addLog('Download cancelled', 'warning');
           setIsDownloading(false);
-          setProgress({
+          setProgress(prev => ({
+            ...prev,
             isRunning: false,
             currentStep: 'Cancelled',
             progress: 0,
             total: 0,
             current: 0,
-          });
+          }));
         }
       }
     } catch (error) {
@@ -403,18 +605,38 @@ function App() {
     <FavoritesProvider>
       <div className="min-h-screen bg-background">
         {/* Custom Title Bar */}
-        <CustomTitleBar
-          onDownloadClick={() => setDownloadPanelOpen(true)}
-          onStatsClick={() => setStatsDialogOpen(true)}
-          settings={settings}
-          onUpdateSettings={updateSettings}
-          logs={logs}
-          results={results}
-          onClearLogs={clearLogs}
-          currentAccountId={currentAccountId}
-        />
+          <CustomTitleBar
+            onDownloadClick={() => setDownloadPanelOpen(true)}
+            onStatsClick={() => setStatsDialogOpen(true)}
+            settings={settings}
+            onUpdateSettings={updateSettings}
+            logs={logs}
+            results={results}
+            onClearLogs={clearLogs}
+            currentAccountId={currentAccountId}
+            debugMenuOpen={debugMenuOpen}
+            onDebugMenuOpenChange={setDebugMenuOpen}
+            resultsScrollRequestId={resultsScrollRequestId}
+            onRetryDownload={handleRetryDownload}
+            canRetryDownload={canRetryDownload}
+            isRetryingDownload={isDownloading}
+            onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
+            onOpenOutputFolder={handleOpenPathInExplorer}
+            outputRoot={settings.outputRoot}
+          />
 
         <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden pt-14">
+          <ErrorRecoveryBanner
+            incident={activeIncident}
+            outputRoot={settings.outputRoot}
+            onDismiss={dismissIncident}
+            onRetryDownload={handleRetryDownload}
+            canRetryDownload={canRetryDownload}
+            isRetrying={isDownloading}
+            onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
+            onOpenOperationResults={openOperationResults}
+            onOpenPathInExplorer={handleOpenPathInExplorer}
+          />
           {/* Header space removed - using custom title bar instead */}
 
           {/* Download Panel Modal */}
@@ -423,6 +645,7 @@ function App() {
               open={downloadPanelOpen}
               onOpenChange={setDownloadPanelOpen}
               onDownload={handleDownload}
+              onDraftChange={handleDownloadDraftChange}
               onCancel={handleCancelDownload}
               isDownloading={isDownloading}
               settings={settings}
@@ -445,6 +668,11 @@ function App() {
               <ProgressDisplay
                 progress={progress}
                 onClose={() => setShowProgressPanel(false)}
+                onOpenOperationResults={openOperationResults}
+                onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
+                onRetryDownload={handleRetryDownload}
+                canRetryDownload={canRetryDownload}
+                isRetrying={isDownloading}
               />
             </div>
           )}
@@ -453,7 +681,7 @@ function App() {
           <div className="flex-1 min-h-0 relative">
             {hasScrolledDown && headerMode === 'hidden' && (
               <div
-                className="absolute left-0 right-0 top-0 h-3 z-30"
+                className="absolute left-0 right-0 top-0 z-30 h-3"
                 onMouseEnter={() => setHeaderMode('compact')}
               />
             )}
@@ -466,6 +694,10 @@ function App() {
                 onScrollPositionChange={handlePhotoScroll}
                 scrollContainerRef={photoScrollRef}
                 headerMode={headerMode}
+                onOpenActivityMenu={handleOpenActivityMenu}
+                onRevealOutputFolder={handleRevealOutputFolder}
+                onPhotosLoadError={handlePhotosLoadError}
+                onPhotosLoadSuccess={clearPhotosIncident}
               />
             </ErrorBoundary>
           </div>

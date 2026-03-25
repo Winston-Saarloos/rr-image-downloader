@@ -25,6 +25,12 @@ export interface Progress {
   progress: number;
   total: number;
   current: number;
+  statusLevel: 'info' | 'warning' | 'error';
+  issueCount: number;
+  retryAttempts: number;
+  failedItems: number;
+  recoveredAfterRetry: number;
+  lastIssue?: string;
 }
 
 export type Photo = Omit<ImageDto, 'PlayerEventId'> & {
@@ -82,6 +88,8 @@ export interface DownloadStats {
   newDownloads: number;
   failedDownloads: number;
   skipped: number;
+  retryAttempts: number;
+  recoveredAfterRetry: number;
 }
 
 export interface DownloadResultItem {
@@ -97,6 +105,8 @@ export interface DownloadResultItem {
   error?: string;
   photo?: string;
   imageName?: string;
+  attempts?: number;
+  retries?: number;
 }
 
 export interface DownloadResult {
@@ -107,12 +117,49 @@ export interface DownloadResult {
   downloadStats: DownloadStats;
   downloadResults: DownloadResultItem[];
   totalResults: number;
+  guidance?: string[];
 }
 
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+/** Where a user-facing error originated (drives copy and recovery actions). */
+export type ErrorContext =
+  | 'download'
+  | 'settings'
+  | 'photos'
+  | 'updateSettings';
+
+export type UserErrorCategory =
+  | 'auth'
+  | 'network'
+  | 'account'
+  | 'disk'
+  | 'cancelled'
+  | 'settings'
+  | 'unknown';
+
+/** Stored on failed operation rows in Operation Results. */
+export interface OperationResultErrorData {
+  error: string;
+  guidance?: string[];
+  category?: UserErrorCategory;
+  title?: string;
+}
+
+/** Inline banner / recovery state in the shell. */
+export interface UserFacingIncident {
+  id: string;
+  source: ErrorContext;
+  severity: 'error' | 'warning';
+  category: UserErrorCategory;
+  title: string;
+  detail: string;
+  guidance: string[];
+  technicalDetail?: string;
 }
 
 export interface AvailableAccount {

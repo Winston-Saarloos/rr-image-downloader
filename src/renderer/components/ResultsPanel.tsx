@@ -13,6 +13,8 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import type { OperationResultErrorData } from '../../shared/types';
 
 interface Result {
   operation: string;
@@ -23,9 +25,23 @@ interface Result {
 
 interface ResultsPanelProps {
   results: Result[];
+  onRetryDownload?: () => void | Promise<void>;
+  canRetryDownload?: boolean;
+  isRetryingDownload?: boolean;
+  onOpenDownloadPanel?: () => void;
+  onOpenOutputFolder?: (folderPath: string) => void | Promise<void>;
+  outputRoot?: string;
 }
 
-export const ResultsPanel: React.FC<ResultsPanelProps> = ({ results }) => {
+export const ResultsPanel: React.FC<ResultsPanelProps> = ({
+  results,
+  onRetryDownload,
+  canRetryDownload = false,
+  isRetryingDownload = false,
+  onOpenDownloadPanel,
+  onOpenOutputFolder,
+  outputRoot = '',
+}) => {
   const getResultIcon = (type: 'success' | 'error') => {
     return type === 'success' ? (
       <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
@@ -42,16 +58,78 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ results }) => {
 
   const renderResultContent = (result: Result) => {
     if (result.type === 'error') {
-      const errorData = result.data as { error?: string };
+      const errorData = result.data as OperationResultErrorData;
+      const headline =
+        errorData.title ||
+        (result.operation === 'Download'
+          ? 'Download failed'
+          : 'Something went wrong');
+      const isDownloadOp = result.operation === 'Download';
+      const showRetry =
+        isDownloadOp &&
+        canRetryDownload &&
+        onRetryDownload &&
+        errorData.category !== 'cancelled';
+
       return (
-        <div className="flex items-start gap-3">
-          <XCircle className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="text-red-600 dark:text-red-400 font-medium">Error:</p>
-            <p className="text-red-600 dark:text-red-400 text-sm">
-              {errorData.error || 'Unknown error'}
-            </p>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+            <div className="space-y-2 min-w-0 flex-1">
+              <div>
+                <p className="text-red-600 dark:text-red-400 font-medium">
+                  {headline}
+                </p>
+                <p className="text-red-600/90 dark:text-red-400/90 text-sm break-words">
+                  {errorData.error || 'Unknown error'}
+                </p>
+              </div>
+
+              {errorData.guidance && errorData.guidance.length > 0 && (
+                <div className="space-y-1">
+                  {errorData.guidance.map((message, index) => (
+                    <div key={index} className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+                      <p className="text-yellow-700 dark:text-yellow-300 text-sm">
+                        {message}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
+
+          {(showRetry ||
+            onOpenDownloadPanel ||
+            (onOpenOutputFolder && outputRoot.trim())) && (
+            <div className="flex flex-wrap gap-2 pl-8">
+              {showRetry && (
+                <Button
+                  size="sm"
+                  variant="default"
+                  disabled={isRetryingDownload}
+                  onClick={() => void onRetryDownload()}
+                >
+                  {isRetryingDownload ? 'Retrying…' : 'Retry download'}
+                </Button>
+              )}
+              {onOpenDownloadPanel && (
+                <Button size="sm" variant="outline" onClick={onOpenDownloadPanel}>
+                  Open download
+                </Button>
+              )}
+              {onOpenOutputFolder && outputRoot.trim() ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void onOpenOutputFolder(outputRoot)}
+                >
+                  Open output folder
+                </Button>
+              ) : null}
+            </div>
+          )}
         </div>
       );
     }
@@ -63,10 +141,13 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ results }) => {
         newDownloads: number;
         alreadyDownloaded: number;
         failedDownloads: number;
+        retryAttempts: number;
+        recoveredAfterRetry: number;
       };
       saved?: string;
       photosDirectory?: string;
       feedPhotosDirectory?: string;
+      guidance?: string[];
     };
 
     return (
@@ -105,6 +186,18 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ results }) => {
               </span>
             </div>
 
+            {data.downloadStats.retryAttempts > 0 && (
+              <div className="flex items-center gap-2">
+                <Info className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span className="text-blue-600 dark:text-blue-400">
+                  Retry attempts: {data.downloadStats.retryAttempts}
+                  {data.downloadStats.recoveredAfterRetry > 0
+                    ? ` (${data.downloadStats.recoveredAfterRetry} recovered)`
+                    : ''}
+                </span>
+              </div>
+            )}
+
             {data.downloadStats.failedDownloads > 0 && (
               <div className="flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
@@ -140,6 +233,19 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ results }) => {
             <span className="text-blue-600 dark:text-blue-400 text-sm">
               Feed: {data.feedPhotosDirectory}
             </span>
+          </div>
+        )}
+
+        {data.guidance && data.guidance.length > 0 && (
+          <div className="space-y-1 pt-1">
+            {data.guidance.map((message, index) => (
+              <div key={index} className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+                <p className="text-yellow-700 dark:text-yellow-300 text-sm">
+                  {message}
+                </p>
+              </div>
+            ))}
           </div>
         )}
       </div>
