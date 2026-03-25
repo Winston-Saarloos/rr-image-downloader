@@ -296,8 +296,8 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   const paddingBottom = Math.max(0, (totalRows - endRow) * ROW_HEIGHT);
 
   const renderVirtualizedGrid = () => (
-    <div className={`flex h-full flex-col space-y-4 ${className}`}>
-      <div ref={scrollRef} className="h-full overflow-auto">
+    <div className={`flex h-full min-h-0 flex-col space-y-4 ${className}`}>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         <div
           style={{
             paddingTop,
@@ -410,8 +410,8 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
         : 0);
 
     return (
-      <div className={`flex h-full flex-col ${className}`}>
-        <div ref={scrollRef} className="h-full overflow-auto">
+      <div className={`flex h-full min-h-0 flex-col ${className}`}>
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
           <div style={{ paddingTop, paddingBottom }}>
             {visibleGroups.map(({ groupName, photos }) => (
               <div key={groupName} style={{ marginBottom: GROUP_SPACING }}>

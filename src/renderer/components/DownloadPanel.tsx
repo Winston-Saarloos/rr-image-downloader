@@ -32,6 +32,16 @@ interface DownloadPanelProps {
       forceEventsRefresh: boolean;
     }
   ) => Promise<void>;
+  onDraftChange?: (draft: {
+    username: string;
+    token: string;
+    filePath: string;
+    refreshOptions: {
+      forceAccountsRefresh: boolean;
+      forceRoomsRefresh: boolean;
+      forceEventsRefresh: boolean;
+    };
+  }) => void;
   onCancel?: () => void;
   isDownloading?: boolean;
   settings: RecNetSettings;
@@ -41,6 +51,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   open,
   onOpenChange,
   onDownload,
+  onDraftChange,
   onCancel,
   isDownloading = false,
   settings,
@@ -90,6 +101,27 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       setForceEventsRefresh(false);
     }
   }, [open]);
+
+  useEffect(() => {
+    onDraftChange?.({
+      username,
+      token,
+      filePath,
+      refreshOptions: {
+        forceAccountsRefresh,
+        forceRoomsRefresh,
+        forceEventsRefresh,
+      },
+    });
+  }, [
+    filePath,
+    forceAccountsRefresh,
+    forceEventsRefresh,
+    forceRoomsRefresh,
+    onDraftChange,
+    token,
+    username,
+  ]);
 
   // Re-validate token when accountId changes
   useEffect(() => {
@@ -521,6 +553,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               </Button>
             </div>
           </div>
+
+          {!isFormValid && (
+            <p className="text-sm text-muted-foreground">
+              Enter your username and save folder to start.
+            </p>
+          )}
 
           <div className="flex gap-2">
             <Button

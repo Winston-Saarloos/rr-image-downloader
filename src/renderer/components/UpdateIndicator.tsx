@@ -155,6 +155,11 @@ export const UpdateIndicator: React.FC = () => {
           {error ? (
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">{error}</p>
+              {/network|offline|ENOTFOUND|timeout|internet/i.test(error) && (
+                <p className="text-xs text-muted-foreground">
+                  Check your internet connection, then try again.
+                </p>
+              )}
               <Button
                 variant="outline"
                 size="sm"

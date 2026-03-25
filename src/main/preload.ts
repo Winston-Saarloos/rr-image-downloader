@@ -39,6 +39,8 @@ const electronAPI: ElectronAPI = {
   isFavorite: (photoId) => ipcRenderer.invoke('is-favorite', photoId),
 
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  openPathInExplorer: (targetPath: string) =>
+    ipcRenderer.invoke('open-path-in-explorer', targetPath),
 
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   downloadUpdate: () => ipcRenderer.invoke('download-update'),

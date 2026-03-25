@@ -846,6 +846,21 @@ ipcMain.handle(
   }
 );
 
+ipcMain.handle(
+  'open-path-in-explorer',
+  async (_event: IpcMainInvokeEvent, targetPath: string) => {
+    const resolved = path.resolve(targetPath);
+    if (!(await fs.pathExists(resolved))) {
+      return { success: false as const, error: 'Path does not exist' };
+    }
+    const errMsg = await shell.openPath(resolved);
+    if (errMsg) {
+      return { success: false as const, error: errMsg };
+    }
+    return { success: true as const };
+  }
+);
+
 // Auto-updater IPC handlers
 ipcMain.handle('check-for-updates', async (): Promise<void> => {
   if (!isDev) {
