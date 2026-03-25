@@ -326,7 +326,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="w-[calc(100%-2rem)] max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Download className="h-5 w-5" />
@@ -547,7 +547,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
 
       {/* Token Help Dialog */}
       <Dialog open={tokenHelpOpen} onOpenChange={setTokenHelpOpen}>
-        <DialogContent>
+        <DialogContent className="w-[calc(100%-2rem)] max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>How to Get Your Token</DialogTitle>
             <DialogDescription>
