@@ -824,7 +824,6 @@ export class RecNetService extends EventEmitter {
       let failedDownloads = 0;
       let skipped = 0;
       const downloadResults: DownloadResultItem[] = [];
-      const rateLimitMs = 1000;
       let processedCount = 0;
 
       this.updateProgress('Downloading user photos...', 0, totalPhotos, 0);
@@ -933,8 +932,8 @@ export class RecNetService extends EventEmitter {
         }
 
         // Rate limiting
-        if (rateLimitMs > 0) {
-          await this.delay(rateLimitMs);
+        if (this.settings.interPageDelayMs > 0) {
+          await this.delay(this.settings.interPageDelayMs);
         }
 
         processedCount++;
@@ -1062,7 +1061,6 @@ export class RecNetService extends EventEmitter {
       let failedDownloads = 0;
       let skipped = 0;
       const downloadResults: DownloadResultItem[] = [];
-      const rateLimitMs = 1000;
       let processedCount = 0;
 
       this.updateProgress('Downloading feed photos...', 0, totalPhotos, 0);
@@ -1169,8 +1167,8 @@ export class RecNetService extends EventEmitter {
         }
 
         // Rate limiting
-        if (rateLimitMs > 0) {
-          await this.delay(rateLimitMs);
+        if (this.settings.interPageDelayMs > 0) {
+          await this.delay(this.settings.interPageDelayMs);
         }
 
         processedCount++;
