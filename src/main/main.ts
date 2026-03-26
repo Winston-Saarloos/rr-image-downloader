@@ -47,6 +47,7 @@ interface CollectFeedPhotosParams {
 
 interface DownloadPhotosParams {
   accountId: string;
+  token?: string;
 }
 
 interface ApiResponse<T> {
@@ -373,7 +374,10 @@ ipcMain.handle(
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
-      const result = await recNetService.downloadPhotos(params.accountId);
+      const result = await recNetService.downloadPhotos(
+        params.accountId,
+        params.token
+      );
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -388,7 +392,10 @@ ipcMain.handle(
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
-      const result = await recNetService.downloadFeedPhotos(params.accountId);
+      const result = await recNetService.downloadFeedPhotos(
+        params.accountId,
+        params.token
+      );
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -455,13 +462,32 @@ ipcMain.handle(
   'search-accounts',
   async (
     event: IpcMainInvokeEvent,
-    username: string
+    username: string,
+    token?: string
   ): Promise<ApiResponse<AccountInfo[]>> => {
     try {
-      const result = await recNetService.searchAccounts(username);
+      const result = token
+        ? await recNetService.searchAccounts(username, token)
+        : await recNetService.searchAccounts(username);
       return { success: true, data: result };
     } catch (error) {
-      return { success: false, error: (error as Error).message };
+      const message = (error as Error).message ?? String(error);
+
+      // If the provided token isn't authorized, still allow downloads by
+      // falling back to unauthenticated account search.
+      if (token && /HTTP\s+(401|403)\b/.test(message)) {
+        try {
+          const result = await recNetService.searchAccounts(username);
+          return { success: true, data: result };
+        } catch (fallbackError) {
+          return {
+            success: false,
+            error: (fallbackError as Error).message ?? String(fallbackError),
+          };
+        }
+      }
+
+      return { success: false, error: message };
     }
   }
 );

@@ -831,7 +831,10 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async downloadPhotos(accountId: string): Promise<DownloadResult> {
+  async downloadPhotos(
+    accountId: string,
+    token?: string
+  ): Promise<DownloadResult> {
     await this.ensureSettingsLoaded();
     this.currentOperation = { cancelled: false };
 
@@ -1002,7 +1005,7 @@ export class RecNetService extends EventEmitter {
         // Check if we've reached the download limit (only for new downloads)
         let attemptsUsed = 1;
         try {
-          const attempt = await this.downloadPhotoWithRetry(imageName);
+          const attempt = await this.downloadPhotoWithRetry(imageName, token);
           attemptsUsed = attempt.attempts;
           retryAttempts += Math.max(0, attempt.attempts - 1);
           if (
@@ -1100,7 +1103,10 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async downloadFeedPhotos(accountId: string): Promise<DownloadResult> {
+  async downloadFeedPhotos(
+    accountId: string,
+    token?: string
+  ): Promise<DownloadResult> {
     await this.ensureSettingsLoaded();
     this.currentOperation = { cancelled: false };
 
@@ -1268,7 +1274,7 @@ export class RecNetService extends EventEmitter {
 
         let attemptsUsed = 1;
         try {
-          const attempt = await this.downloadPhotoWithRetry(imageName);
+          const attempt = await this.downloadPhotoWithRetry(imageName, token);
           attemptsUsed = attempt.attempts;
           retryAttempts += Math.max(0, attempt.attempts - 1);
           if (
@@ -1633,7 +1639,8 @@ export class RecNetService extends EventEmitter {
   }
 
   private async downloadPhotoWithRetry(
-    imageName: string
+    imageName: string,
+    token?: string
   ): Promise<PhotoDownloadAttempt> {
     let attempts = 0;
     let lastResponse: PhotoDownloadAttempt['response'];
@@ -1649,7 +1656,8 @@ export class RecNetService extends EventEmitter {
       try {
         const response = await this.photosController.downloadPhoto(
           imageName,
-          this.settings.cdnBase
+          this.settings.cdnBase,
+          token
         );
         if (response?.success && response.value) {
           if (attempts > 1) {
@@ -2115,9 +2123,12 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async searchAccounts(username: string): Promise<AccountInfo[]> {
+  async searchAccounts(
+    username: string,
+    token?: string
+  ): Promise<AccountInfo[]> {
     try {
-      return await this.accountsController.searchAccounts(username);
+      return await this.accountsController.searchAccounts(username, token);
     } catch (error) {
       throw new Error(`Failed to search accounts: ${(error as Error).message}`);
     }

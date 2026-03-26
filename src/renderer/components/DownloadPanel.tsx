@@ -67,7 +67,6 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     'idle' | 'checking' | 'valid' | 'invalid'
   >('idle');
   const [tokenExpiringSoon, setTokenExpiringSoon] = useState(false);
-  const [accountId, setAccountId] = useState<string | null>(null);
   const [tokenHelpOpen, setTokenHelpOpen] = useState(false);
   const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(
     null
@@ -123,55 +122,27 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     username,
   ]);
 
-  // Re-validate token when accountId changes
-  useEffect(() => {
-    if (token.trim() && accountId) {
-      // Clear existing timeout
-      if (tokenTimeout) {
-        clearTimeout(tokenTimeout);
-      }
-      const timeout = setTimeout(() => {
-        validateToken(token, accountId);
-      }, 300);
-      setTokenTimeout(timeout);
-    } else if (!accountId && token.trim()) {
-      setTokenStatus('invalid');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId]);
-
   const checkUsername = async (value: string) => {
     if (!value.trim()) {
       setUsernameStatus('idle');
-      setAccountId(null);
       return;
     }
 
     setUsernameStatus('checking');
     try {
       if (electronAPI) {
-        const result = await electronAPI.searchAccounts(value);
+        const result = await electronAPI.searchAccounts(
+          value,
+          token.trim() || undefined
+        );
         if (result.success && result.data && result.data.length > 0) {
           setUsernameStatus('found');
-          const account = result.data[0];
-          const foundAccountId = account.accountId.toString();
-          setAccountId(foundAccountId);
-          // Re-validate token if it exists (useEffect will also handle this, but this provides immediate feedback)
-          if (token.trim()) {
-            const cleaned = cleanToken(token);
-            if (cleaned !== token) {
-              setToken(cleaned);
-            }
-            validateToken(cleaned, foundAccountId);
-          }
         } else {
           setUsernameStatus('not-found');
-          setAccountId(null);
         }
       }
     } catch (error) {
       setUsernameStatus('not-found');
-      setAccountId(null);
     }
   };
 
@@ -221,18 +192,9 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     return timeUntilExpiration <= twentyMinutesInMs && timeUntilExpiration > 0;
   };
 
-  const validateToken = (
-    tokenValue: string,
-    expectedAccountId: string | null
-  ) => {
+  const validateToken = (tokenValue: string) => {
     if (!tokenValue.trim()) {
       setTokenStatus('idle');
-      setTokenExpiringSoon(false);
-      return;
-    }
-
-    if (!expectedAccountId) {
-      setTokenStatus('invalid');
       setTokenExpiringSoon(false);
       return;
     }
@@ -244,10 +206,10 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       // Clean the token
       const cleaned = cleanToken(tokenValue);
 
-      // Decode the JWT
+      // Decode the JWT (no ownership/account checks)
       const decoded = decodeJWT(cleaned);
 
-      if (!decoded || !decoded.sub) {
+      if (!decoded) {
         setTokenStatus('invalid');
         setTokenExpiringSoon(false);
         return;
@@ -256,16 +218,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       // Check if token is expiring soon
       const isExpiringSoon = checkTokenExpiration(decoded);
       setTokenExpiringSoon(isExpiringSoon);
-
-      // Compare 'sub' with account ID
-      const tokenSub = decoded.sub.toString();
-      const accountIdStr = expectedAccountId.toString();
-
-      if (tokenSub === accountIdStr) {
-        setTokenStatus('valid');
-      } else {
-        setTokenStatus('invalid');
-      }
+      setTokenStatus('valid');
     } catch (error) {
       setTokenStatus('invalid');
       setTokenExpiringSoon(false);
@@ -333,11 +286,29 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
 
     // Debounce the validation
     const timeout = setTimeout(() => {
-      validateToken(cleaned, accountId);
+      validateToken(cleaned);
     }, 500);
 
     setTokenTimeout(timeout);
   };
+
+  // Re-check username existence when token changes, so optional auth
+  // is used for account lookup.
+  useEffect(() => {
+    if (!username.trim()) return;
+
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+
+    const timeout = setTimeout(() => {
+      void checkUsername(username);
+    }, 1000);
+
+    setSearchTimeout(timeout);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const handleDownload = async () => {
     if (!username.trim() || !filePath.trim()) {
@@ -395,31 +366,6 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             </ol>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="username">Username</Label>
-            <Input
-              id="username"
-              placeholder="Enter your username"
-              value={username}
-              onChange={handleUsernameChange}
-            />
-            {usernameStatus === 'found' && (
-              <p className="text-sm text-green-600 dark:text-green-400">
-                Username found successfully
-              </p>
-            )}
-            {usernameStatus === 'not-found' && (
-              <p className="text-sm text-red-600 dark:text-red-400">
-                Username not found
-              </p>
-            )}
-            {usernameStatus === 'checking' && (
-              <p className="text-sm text-muted-foreground">
-                Checking username...
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Label htmlFor="token" className="flex items-center gap-2">
                 <Key className="h-4 w-4" />
@@ -446,13 +392,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             />
             {tokenStatus === 'valid' && (
               <p className="text-sm text-green-600 dark:text-green-400">
-                Token validated successfully - Account ID matches
+                Token validated successfully
               </p>
             )}
             {tokenStatus === 'invalid' && (
               <p className="text-sm text-red-600 dark:text-red-400">
-                Token validation failed - Account ID does not match or token is
-                invalid
+                Token is invalid or could not be parsed
               </p>
             )}
             {tokenStatus === 'checking' && (
@@ -462,14 +407,39 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             )}
             {tokenStatus === 'idle' && (
               <p className="text-sm text-muted-foreground">
-                Required if you want to download private photos as well as
-                public ones
+                Optional - required if you want to download private photos as well
+                as public ones
               </p>
             )}
             {tokenExpiringSoon && (
               <p className="text-sm text-red-600 dark:text-red-400">
                 Warning: Your token is expiring in 20 minutes or less. Please
                 get a fresh token (tokens last 1 hour).
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="username">Username</Label>
+            <Input
+              id="username"
+              placeholder="Enter your username"
+              value={username}
+              onChange={handleUsernameChange}
+            />
+            {usernameStatus === 'found' && (
+              <p className="text-sm text-green-600 dark:text-green-400">
+                Username found successfully
+              </p>
+            )}
+            {usernameStatus === 'not-found' && (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                Username not found
+              </p>
+            )}
+            {usernameStatus === 'checking' && (
+              <p className="text-sm text-muted-foreground">
+                Checking username...
               </p>
             )}
           </div>

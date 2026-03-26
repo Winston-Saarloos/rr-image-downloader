@@ -289,7 +289,10 @@ function App() {
 
         // Search for account by username
         addLog(`Searching for account: ${username}`, 'info');
-        const searchResult = await window.electronAPI.searchAccounts(username);
+        const searchResult = await window.electronAPI.searchAccounts(
+          username,
+          token.trim() || undefined
+        );
         if (
           !searchResult.success ||
           !searchResult.data ||
@@ -367,6 +370,7 @@ function App() {
         addLog('Step 2: Downloading photos...', 'info');
         const downloadResult = await window.electronAPI.downloadPhotos({
           accountId,
+          token: token.trim() || undefined,
         });
 
         if (!downloadResult.success) {
@@ -405,6 +409,7 @@ function App() {
         addLog('Step 3: Downloading feed photos...', 'info');
         const downloadFeedResult = await window.electronAPI.downloadFeedPhotos({
           accountId,
+          token: token.trim() || undefined,
         });
 
         if (!downloadFeedResult.success) {
