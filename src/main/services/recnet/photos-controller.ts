@@ -1,4 +1,7 @@
-import { buildCdnImageUrl } from '../../../shared/cdnUrl';
+import {
+  buildCdnImageUrl,
+  shouldIncludeTokenForCdnBase,
+} from '../../../shared/cdnUrl';
 import { ImageDto } from '../../models/ImageDto';
 import { GenericResponse } from '../../models/GenericResponse';
 import { RecNetHttpClient } from './http-client';
@@ -38,13 +41,16 @@ export class PhotosController {
     token?: string
   ): Promise<GenericResponse<ArrayBuffer>> {
     const url = buildCdnImageUrl(cdnBase, imageName);
+    const tokenForRequest = shouldIncludeTokenForCdnBase(cdnBase)
+      ? token
+      : undefined;
     return this.http.request<ArrayBuffer>(
       {
         url,
         method: 'GET',
         responseType: 'arraybuffer',
       },
-      token
+      tokenForRequest
     );
   }
 }

@@ -1,6 +1,7 @@
 import {
   buildCdnImageUrl,
   DEFAULT_CDN_BASE,
+  shouldIncludeTokenForCdnBase,
 } from '../cdnUrl';
 
 describe('buildCdnImageUrl', () => {
@@ -28,5 +29,16 @@ describe('buildCdnImageUrl', () => {
   it('returns empty string when image name is empty', () => {
     expect(buildCdnImageUrl(DEFAULT_CDN_BASE, '')).toBe('');
     expect(buildCdnImageUrl(DEFAULT_CDN_BASE, '   ')).toBe('');
+  });
+});
+
+describe('shouldIncludeTokenForCdnBase', () => {
+  it('returns false for cdn.rec.net', () => {
+    expect(shouldIncludeTokenForCdnBase('https://cdn.rec.net/img/')).toBe(false);
+    expect(shouldIncludeTokenForCdnBase('cdn.rec.net/img')).toBe(false);
+  });
+
+  it('returns true for img.rec.net', () => {
+    expect(shouldIncludeTokenForCdnBase('https://img.rec.net/')).toBe(true);
   });
 });

@@ -30,3 +30,26 @@ export function buildCdnImageUrl(cdnBase: string, imageName: string): string {
     : `${withoutPlaceholder}/`;
   return `${base}${name}`;
 }
+
+/**
+ * Returns true when image requests should include the user token.
+ *
+ * `cdn.rec.net` must not receive auth tokens because it returns 403 when
+ * Authorization is present. `img.rec.net` still accepts authenticated requests.
+ */
+export function shouldIncludeTokenForCdnBase(cdnBase: string): boolean {
+  const raw = cdnBase.trim();
+  if (!raw) {
+    return true;
+  }
+
+  const candidate = raw.includes('://') ? raw : `https://${raw}`;
+
+  try {
+    const hostname = new URL(candidate).hostname.toLowerCase();
+    return hostname !== 'cdn.rec.net';
+  } catch {
+    // Preserve historical behavior if a custom value cannot be parsed.
+    return true;
+  }
+}
