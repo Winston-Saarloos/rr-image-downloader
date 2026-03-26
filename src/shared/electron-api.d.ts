@@ -44,6 +44,7 @@ export interface ElectronAPI {
   removeProgressListener: (callback: (event: unknown, progress: Progress) => void) => void;
 
   lookupAccount: (accountId: string) => Promise<ApiResponse<AccountInfo[]>>;
+  lookupAccountByUsername: (username: string, token?: string) => Promise<AccountInfo>;
   searchAccounts: (username: string, token?: string) => Promise<ApiResponse<AccountInfo[]>>;
   clearAccountData: (accountId: string) => Promise<ApiResponse<{ filesRemoved: number }>>;
   loadPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;

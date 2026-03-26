@@ -72,6 +72,20 @@ export class AccountsController {
     return this.normalizeAccounts(accounts);
   }
 
+  async lookupAccountByUsername(
+    username: string,
+    token?: string
+  ): Promise<AccountInfo> {
+    const account = await this.http.requestOrThrow<PlayerResult>(
+      {
+        url: `https://apim.rec.net/accounts/account/?username=${encodeURIComponent(username)}`,
+        method: 'GET',
+      },
+      token
+    );
+    return this.normalizeAccount(account);
+  }
+
   async searchAccounts(
     username: string,
     token?: string
@@ -91,9 +105,13 @@ export class AccountsController {
   }
 
   private normalizeAccounts(accounts: PlayerResult[]): PlayerResult[] {
-    return accounts.map(account => ({
-      ...account,
-      accountId: String(account.accountId),
-    }));
+    return accounts.map(account => this.normalizeAccount(account));
+  }
+
+  private normalizeAccount(account: PlayerResult): PlayerResult {
+      return {
+        ...account,
+        accountId: String(account.accountId),
+      };
   }
 }

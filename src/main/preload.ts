@@ -24,6 +24,8 @@ const electronAPI: ElectronAPI = {
   },
 
   lookupAccount: (accountId) => ipcRenderer.invoke('lookup-account', accountId),
+  lookupAccountByUsername: (username: string) =>
+    ipcRenderer.invoke('lookup-account-by-username', username),
   searchAccounts: (username: string, token?: string) =>
     ipcRenderer.invoke('search-accounts', username, token),
   clearAccountData: (accountId) => ipcRenderer.invoke('clear-account-data', accountId),
