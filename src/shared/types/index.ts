@@ -168,4 +168,9 @@ export interface AvailableAccount {
   hasFeed: boolean;
   photoCount: number;
   feedCount: number;
+  /**
+   * Optional human-friendly label for the folder owner.
+   * Populated from per-folder metadata when available.
+   */
+  displayLabel?: string;
 }

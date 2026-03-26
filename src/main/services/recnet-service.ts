@@ -44,6 +44,21 @@ interface PhotoDownloadAttempt {
   attempts: number;
 }
 
+type FolderMetaOwner = {
+  accountId: string;
+  username?: string;
+  displayName?: string;
+  displayLabel?: string;
+};
+
+type FolderMetaV1 = {
+  schemaVersion: 1;
+  accountId: string;
+  updatedAt: string;
+  owner?: FolderMetaOwner;
+  cache?: Record<string, unknown>;
+};
+
 const DEFAULT_SETTINGS: RecNetSettings = {
   outputRoot: 'output',
   cdnBase: DEFAULT_CDN_BASE,
@@ -1440,6 +1455,102 @@ export class RecNetService extends EventEmitter {
     }));
   }
 
+  private getFolderMetaPath(accountDir: string): string {
+    return path.join(accountDir, 'folder-meta.json');
+  }
+
+  private async readFolderMeta(accountDir: string): Promise<FolderMetaV1 | null> {
+    try {
+      const metaPath = this.getFolderMetaPath(accountDir);
+      if (!(await fs.pathExists(metaPath))) {
+        return null;
+      }
+      const parsed = (await fs.readJson(metaPath)) as Partial<FolderMetaV1>;
+      if (!parsed || parsed.schemaVersion !== 1 || !parsed.accountId) {
+        return null;
+      }
+      return parsed as FolderMetaV1;
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeFolderMeta(
+    accountDir: string,
+    accountId: string,
+    patch: Partial<FolderMetaV1>
+  ): Promise<void> {
+    const metaPath = this.getFolderMetaPath(accountDir);
+    const existing = (await this.readFolderMeta(accountDir)) ?? null;
+    const next: FolderMetaV1 = {
+      schemaVersion: 1,
+      accountId: this.normalizeId(accountId),
+      updatedAt: new Date().toISOString(),
+      owner: existing?.owner,
+      cache: existing?.cache,
+      ...patch,
+    };
+
+    // Shallow-merge owner/cache so future additions don't get dropped.
+    next.owner = {
+      ...(existing?.owner ?? {}),
+      ...(patch.owner ?? {}),
+      accountId: this.normalizeId(
+        patch.owner?.accountId ?? existing?.owner?.accountId ?? accountId
+      ),
+    };
+    next.cache = { ...(existing?.cache ?? {}), ...(patch.cache ?? {}) };
+
+    await fs.writeJson(metaPath, next, { spaces: 2 });
+  }
+
+  private computeOwnerFromAccounts(
+    accounts: PlayerResult[],
+    ownerAccountId: string
+  ): FolderMetaOwner | null {
+    const normalizedOwnerId = this.normalizeId(ownerAccountId);
+    const owner = accounts.find(
+      a => this.normalizeId(a.accountId) === normalizedOwnerId
+    );
+    if (!owner) {
+      return null;
+    }
+    const username = (owner.username || '').trim() || undefined;
+    const displayName = (owner.displayName || '').trim() || undefined;
+    const displayLabel = this.formatOwnerDisplayLabel({
+      ownerAccountId: normalizedOwnerId,
+      displayName,
+      username,
+    });
+    return {
+      accountId: normalizedOwnerId,
+      username,
+      displayName,
+      displayLabel,
+    };
+  }
+
+  private formatOwnerDisplayLabel(params: {
+    ownerAccountId: string;
+    displayName?: string;
+    username?: string;
+  }): string {
+    const ownerAccountId = this.normalizeId(params.ownerAccountId);
+    const displayName = (params.displayName || '').trim() || undefined;
+    const username = (params.username || '').trim() || undefined;
+
+    if (displayName && username) {
+      return `${displayName} (@${username})`;
+    }
+    if (displayName) {
+      return displayName;
+    }
+    if (username) {
+      return `@${username}`;
+    }
+    return ownerAccountId;
+  }
+
   private normalizeRooms(rooms: RoomDto[]): RoomDto[] {
     return rooms.map(room => ({
       ...room,
@@ -1756,6 +1867,14 @@ export class RecNetService extends EventEmitter {
               await fs.writeJson(accountsJsonPath, cachedAccounts, {
                 spaces: 2,
               });
+
+              const owner = this.computeOwnerFromAccounts(
+                cachedAccounts,
+                accountId
+              );
+              if (owner) {
+                await this.writeFolderMeta(accountDir, accountId, { owner });
+              }
             }
           } catch (error) {
             console.log(
@@ -1806,6 +1925,11 @@ export class RecNetService extends EventEmitter {
           await fs.writeJson(accountsJsonPath, mergedAccounts, {
             spaces: 2,
           });
+
+          const owner = this.computeOwnerFromAccounts(mergedAccounts, accountId);
+          if (owner) {
+            await this.writeFolderMeta(accountDir, accountId, { owner });
+          }
           console.log(
             `Saved ${mergedAccounts.length} accounts to ${accountsJsonPath} (downloaded ${normalizedAccounts.length} new entries)`
           );
@@ -2121,6 +2245,7 @@ export class RecNetService extends EventEmitter {
       hasFeed: boolean;
       photoCount: number;
       feedCount: number;
+      displayLabel?: string;
     }>
   > {
     await this.ensureSettingsLoaded();
@@ -2130,6 +2255,7 @@ export class RecNetService extends EventEmitter {
       hasFeed: boolean;
       photoCount: number;
       feedCount: number;
+      displayLabel?: string;
     }> = [];
 
     try {
@@ -2155,11 +2281,16 @@ export class RecNetService extends EventEmitter {
           `${accountId}_photos.json`
         );
         const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
+        const accountsJsonPath = path.join(
+          accountDir,
+          `${accountId}_accounts.json`
+        );
 
         let hasPhotos = false;
         let hasFeed = false;
         let photoCount = 0;
         let feedCount = 0;
+        let displayLabel: string | undefined;
 
         // Check for photos metadata
         if (await fs.pathExists(photosJsonPath)) {
@@ -2195,12 +2326,52 @@ export class RecNetService extends EventEmitter {
 
         // Only include accounts that have at least one metadata file
         if (hasPhotos || hasFeed) {
+          // Prefer small folder metadata for owner display.
+          const meta = await this.readFolderMeta(accountDir);
+          if (meta?.owner) {
+            // Compute label from fields so older metas can be upgraded automatically.
+            const computedLabel = this.formatOwnerDisplayLabel({
+              ownerAccountId: accountId,
+              displayName: meta.owner.displayName,
+              username: meta.owner.username,
+            });
+            displayLabel = computedLabel;
+
+            if (meta.owner.displayLabel !== computedLabel) {
+              await this.writeFolderMeta(accountDir, accountId, {
+                owner: { ...meta.owner, displayLabel: computedLabel },
+              });
+            }
+          } else {
+            displayLabel = undefined;
+          }
+
+          // One-time backfill for legacy folders: derive owner from accounts cache once.
+          if (!displayLabel && (await fs.pathExists(accountsJsonPath))) {
+            try {
+              const accountsData = (await fs.readJson(
+                accountsJsonPath
+              )) as PlayerResult[];
+              const normalized = Array.isArray(accountsData)
+                ? this.normalizeAccounts(accountsData)
+                : [];
+              const owner = this.computeOwnerFromAccounts(normalized, accountId);
+              if (owner) {
+                displayLabel = owner.displayLabel;
+                await this.writeFolderMeta(accountDir, accountId, { owner });
+              }
+            } catch {
+              // ignore backfill errors; fallback to showing id
+            }
+          }
+
           accounts.push({
             accountId,
             hasPhotos,
             hasFeed,
             photoCount,
             feedCount,
+            displayLabel,
           });
         }
       }

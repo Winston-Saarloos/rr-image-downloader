@@ -646,6 +646,7 @@ ipcMain.handle(
         hasFeed: boolean;
         photoCount: number;
         feedCount: number;
+        displayLabel?: string;
       }>
     >
   > => {
