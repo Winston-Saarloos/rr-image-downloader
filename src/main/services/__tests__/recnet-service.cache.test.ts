@@ -143,6 +143,7 @@ describe('RecNetService - Caching Functionality', () => {
      */
     it('should use cached accounts when available and not forcing refresh', async () => {
       const cachedAccounts: PlayerResult[] = [
+        createMockAccount(testAccountId),
         createMockAccount('account-1'),
         createMockAccount('account-2'),
       ];
@@ -157,10 +158,12 @@ describe('RecNetService - Caching Functionality', () => {
         accountDir,
         `${testAccountId}_accounts.json`
       );
+      const metaPath = path.join(accountDir, 'folder-meta.json');
 
       (mockedFs.pathExists as jest.Mock).mockImplementation(
         async (p: string) => {
           if (p === accountsJsonPath) return true;
+          if (p === metaPath) return false;
           return false;
         }
       );
@@ -179,6 +182,18 @@ describe('RecNetService - Caching Functionality', () => {
 
       expect(result.accountsFetched).toBe(0); // No new accounts fetched
       expect(mockAccountsController.fetchBulkAccounts).not.toHaveBeenCalled();
+      // folder-meta.json should be written from cached accounts (owner row exists).
+      expect(mockedFs.writeJson).toHaveBeenCalledWith(
+        metaPath,
+        expect.objectContaining({
+          schemaVersion: 1,
+          accountId: testAccountId,
+          owner: expect.objectContaining({
+            accountId: testAccountId,
+          }),
+        }),
+        expect.anything()
+      );
     });
 
     /**

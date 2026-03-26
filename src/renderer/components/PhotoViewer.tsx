@@ -367,10 +367,11 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   };
 
   const getAccountDisplayName = (account: AvailableAccount): string => {
-    const accountUsername =
-      accountMap.get(account.accountId) || account.accountId;
-
-    return accountUsername;
+    return (
+      account.displayLabel ||
+      accountMap.get(account.accountId) ||
+      account.accountId
+    );
   };
 
   return (
