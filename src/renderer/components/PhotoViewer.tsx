@@ -64,7 +64,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     'none' | 'room' | 'user' | 'date' | 'event'
   >('none');
   const [sortBy, setSortBy] = useState<
-    'oldest-to-newest' | 'newest-to-oldest' | 'most-popular'
+    'oldest-to-newest' | 'newest-to-oldest' | 'most-cheered' | 'most-comments'
   >('newest-to-oldest');
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -479,7 +479,11 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
             <Select
               value={sortBy}
               onValueChange={(
-                value: 'oldest-to-newest' | 'newest-to-oldest' | 'most-popular'
+                value:
+                  | 'oldest-to-newest'
+                  | 'newest-to-oldest'
+                  | 'most-cheered'
+                  | 'most-comments'
               ) => setSortBy(value)}
             >
               <SelectTrigger className="w-full sm:w-[200px]">
@@ -489,7 +493,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
               <SelectContent>
                 <SelectItem value="oldest-to-newest">Oldest to Newest</SelectItem>
                 <SelectItem value="newest-to-oldest">Newest to Oldest</SelectItem>
-                <SelectItem value="most-popular">Most Popular</SelectItem>
+                <SelectItem value="most-cheered">Most Cheered</SelectItem>
+                <SelectItem value="most-comments">Most Comments</SelectItem>
               </SelectContent>
             </Select>
           </div>

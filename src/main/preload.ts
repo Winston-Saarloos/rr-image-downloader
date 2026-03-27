@@ -44,6 +44,8 @@ const electronAPI: ElectronAPI = {
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   openPathInExplorer: (targetPath: string) =>
     ipcRenderer.invoke('open-path-in-explorer', targetPath),
+  revealPathInExplorer: (targetPath: string) =>
+    ipcRenderer.invoke('reveal-path-in-explorer', targetPath),
 
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   downloadUpdate: () => ipcRenderer.invoke('download-update'),
