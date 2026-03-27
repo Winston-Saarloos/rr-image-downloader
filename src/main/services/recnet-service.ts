@@ -876,21 +876,14 @@ export class RecNetService extends EventEmitter {
 
       const totalPhotos = sortedPhotos.length;
       const maxPhotosToDownload = this.settings.maxPhotosToDownload;
-      const hasDownloadLimit =
-        typeof maxPhotosToDownload === 'number' && maxPhotosToDownload > 0;
+      const hasDownloadLimit = maxPhotosToDownload && maxPhotosToDownload > 0;
+
       const existingPhotoFiles = (await fs.readdir(photosDir)).filter(file =>
         file.toLowerCase().endsWith('.jpg')
       ).length;
-      let remainingDownloadSlots = hasDownloadLimit
-        ? Math.max(0, maxPhotosToDownload - existingPhotoFiles)
-        : undefined;
-      const decrementRemainingSlots = () => {
-        if (remainingDownloadSlots === undefined) return;
-        if (remainingDownloadSlots > 0) {
-          remainingDownloadSlots--;
-        }
-      };
-      if (hasDownloadLimit && remainingDownloadSlots === 0) {
+      let remainingDownloadSlots = (maxPhotosToDownload || 0) - existingPhotoFiles;
+
+      if (hasDownloadLimit && remainingDownloadSlots <= 0) {
         console.log(
           `Skipping photo downloads: limit ${maxPhotosToDownload} reached by existing files (${existingPhotoFiles})`
         );
@@ -937,9 +930,19 @@ export class RecNetService extends EventEmitter {
 
       this.updateProgress('Downloading user photos...', 0, totalPhotos, 0);
 
+      let delay = 0;
       const promises = [];
       for (const photo of sortedPhotos) {
+        if (hasDownloadLimit && remainingDownloadSlots <= 0) { 
+          break;
+        } 
+        else {
+          remainingDownloadSlots--;
+        }
+
         promises.push(new Promise(async (resolve) => {
+          if (delay) { await this.delay(delay); }
+
           const result = await this.downloadImage(photo, photosDir, feedDir, false);
           const status = result.status;
           if (status === 'downloaded') {
@@ -953,14 +956,7 @@ export class RecNetService extends EventEmitter {
           this.updateProgress('Downloading user photos...', processedCount, totalPhotos);
           resolve(result);
         }))
-
-        decrementRemainingSlots();
-        if (
-          remainingDownloadSlots &&
-          remainingDownloadSlots <= 0
-        ) {
-          break;
-        }
+        delay += this.settings.interPageDelayMs;
       }
       await Promise.all(promises);
 
@@ -1037,20 +1033,13 @@ export class RecNetService extends EventEmitter {
 
       const totalPhotos = sortedPhotos.length;
       const maxPhotosToDownload = this.settings.maxPhotosToDownload;
-      const hasDownloadLimit =
-        typeof maxPhotosToDownload === 'number' && maxPhotosToDownload > 0;
+      const hasDownloadLimit = maxPhotosToDownload && maxPhotosToDownload > 0;
+
       const existingFeedFiles = (await fs.readdir(feedPhotosDir)).filter(file =>
         file.toLowerCase().endsWith('.jpg')
       ).length;
-      let remainingDownloadSlots = hasDownloadLimit
-        ? Math.max(0, maxPhotosToDownload - existingFeedFiles)
-        : undefined;
-      const decrementRemainingSlots = () => {
-        if (remainingDownloadSlots === undefined) return;
-        if (remainingDownloadSlots > 0) {
-          remainingDownloadSlots--;
-        }
-      };
+      let remainingDownloadSlots = (maxPhotosToDownload || 0) - existingFeedFiles;
+      
       if (hasDownloadLimit && remainingDownloadSlots === 0) {
         console.log(
           `Skipping feed photo downloads: limit ${maxPhotosToDownload} reached by existing files (${existingFeedFiles})`
@@ -1098,10 +1087,19 @@ export class RecNetService extends EventEmitter {
 
       this.updateProgress('Downloading feed photos...', 0, totalPhotos, 0);
 
-
+      let delay = 0;
       const promises = [];
       for (const photo of sortedPhotos) {
+        if (hasDownloadLimit && remainingDownloadSlots <= 0) { 
+          break;
+        } 
+        else {
+          remainingDownloadSlots--;
+        }
+
         promises.push(new Promise(async (resolve) => {
+          if (delay) { await this.delay(delay); }
+
           const result = await this.downloadImage(photo, photosDir, feedPhotosDir, true);
           const status = result.status;
           if (status === 'downloaded') {
@@ -1115,6 +1113,7 @@ export class RecNetService extends EventEmitter {
           this.updateProgress('Downloading feed photos...', processedCount, totalPhotos);
           resolve(result);
         }))
+        delay += this.settings.interPageDelayMs;
       }
       await Promise.all(promises);
 
