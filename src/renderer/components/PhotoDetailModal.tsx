@@ -4,6 +4,7 @@ import {
   Users,
   Calendar,
   Heart,
+  FolderOpen,
   Ticket,
   MessageCircle,
   ThumbsUp,
@@ -20,7 +21,7 @@ import { Chip } from '../components/ui/chip';
 import { Photo } from '../../shared/types';
 import { format } from 'date-fns';
 import { DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
-import { ExtendedPhoto, usePhotoMetadata } from '../hooks/usePhotoMetadata';
+import { usePhotoMetadata } from '../hooks/usePhotoMetadata';
 import { useFavorites } from '../hooks/useFavorites';
 
 interface PhotoDetailModalProps {
@@ -32,6 +33,13 @@ interface PhotoDetailModalProps {
   eventMap?: Map<string, string>;
   cdnBase?: string;
 }
+
+type OptionalElectronAPI = {
+  openPathInExplorer?: (
+    targetPath: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  openExternal?: (url: string) => Promise<void>;
+};
 
 const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   photo,
@@ -45,23 +53,35 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl, getPhotoEvent } =
     usePhotoMetadata(roomMap, accountMap, eventMap, cdnBase);
   const { isFavorite, toggleFavorite } = useFavorites();
+  const electronAPI = (window as Window & { electronAPI?: OptionalElectronAPI })
+    .electronAPI;
 
   if (!photo) return null;
 
-  const extended = photo as ExtendedPhoto;
+  const extended = photo as Photo & { Description?: string };
   const room = getPhotoRoom(photo);
   const users = getPhotoUsers(photo);
   const description = extended.Description || '';
   const imageUrl = getPhotoImageUrl(photo);
   const createdAt = photo.CreatedAt ? new Date(photo.CreatedAt) : null;
-  const commentCount = typeof photo.CommentCount === 'number' ? photo.CommentCount : 0;
-  const cheerCount = typeof photo.CheerCount === 'number' ? photo.CheerCount : 0;
+  const commentCount =
+    typeof photo.CommentCount === 'number' ? photo.CommentCount : 0;
+  const cheerCount =
+    typeof photo.CheerCount === 'number' ? photo.CheerCount : 0;
   const photoId = photo.Id.toString();
   const favorited = isFavorite(photoId);
   const eventInfo = getPhotoEvent(photo);
+  const localFilePath = photo.localFilePath?.trim() || '';
 
   const handleFavoriteClick = () => {
     toggleFavorite(photoId);
+  };
+
+  const handleViewFullResolution = async () => {
+    if (!localFilePath || !electronAPI?.openPathInExplorer) {
+      return;
+    }
+    await electronAPI.openPathInExplorer(localFilePath);
   };
 
   return (
@@ -166,10 +186,22 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
               </div>
             </div>
 
-            {description && (
-              <div className="pt-2 border-t">
-                <p className="font-medium mb-2">Description:</p>
-                <p className="text-muted-foreground">{description}</p>
+            {localFilePath && (
+              <div className="flex items-start gap-2">
+                <FolderOpen className="h-4 w-4 text-muted-foreground mt-0.5" />
+                <div className="min-w-0">
+                  <span className="font-medium">Saved on disk: </span>
+                  <button
+                    className="text-blue-500 hover:text-blue-600 underline ml-1 cursor-pointer"
+                    onClick={handleViewFullResolution}
+                    type="button"
+                  >
+                    View full resolution
+                  </button>
+                  <p className="text-xs text-muted-foreground mt-1 break-all">
+                    {localFilePath}
+                  </p>
+                </div>
               </div>
             )}
 
@@ -182,8 +214,8 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
                   className="text-blue-500 hover:text-blue-600 underline ml-1 cursor-pointer"
                   onClick={() => {
                     const url = `https://rec.net/image/${photo.Id}`;
-                    if (window.electronAPI) {
-                      window.electronAPI.openExternal(url);
+                    if (electronAPI) {
+                      void electronAPI.openExternal?.(url);
                     }
                   }}
                 >

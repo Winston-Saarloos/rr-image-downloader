@@ -62,6 +62,9 @@ export interface ElectronAPI {
   openPathInExplorer: (
     targetPath: string
   ) => Promise<{ success: boolean; error?: string }>;
+  revealPathInExplorer: (
+    targetPath: string
+  ) => Promise<{ success: boolean; error?: string }>;
 
   checkForUpdates: () => Promise<void>;
   downloadUpdate: () => Promise<void>;
