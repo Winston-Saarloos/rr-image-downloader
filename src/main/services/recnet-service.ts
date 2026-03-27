@@ -70,6 +70,7 @@ const PHOTO_DOWNLOAD_RETRY_COUNT = 3;
 const PHOTO_DOWNLOAD_MAX_ATTEMPTS = PHOTO_DOWNLOAD_RETRY_COUNT + 1;
 const PHOTO_DOWNLOAD_RETRY_DELAY_MS = 750;
 const PHOTO_DOWNLOAD_MAX_CONCURRENT_REQUESTS = 30;
+const PHOTO_MAX_PAGE_SIZE = 1_000;
 
 function normalizeRecNetSettings(input: unknown): RecNetSettings {
   const raw =
@@ -385,7 +386,7 @@ export class RecNetService extends EventEmitter {
 
         let url = `https://apim.rec.net/apis/api/images/v4/player/${encodeURIComponent(
           accountId
-        )}?skip=${skip}&take=${150}&sort=2`;
+        )}?skip=${skip}&take=${PHOTO_MAX_PAGE_SIZE}&sort=2`;
 
         if (lastSortValue) {
           url += `&after=${encodeURIComponent(lastSortValue)}`;
@@ -394,7 +395,7 @@ export class RecNetService extends EventEmitter {
         const photos = this.normalizePhotos(
           await this.photosController.fetchPlayerPhotos(
             accountId,
-            { skip, take: 150, sort: 2, after: lastSortValue },
+            { skip, take: PHOTO_MAX_PAGE_SIZE, sort: 2, after: lastSortValue },
             token
           )
         );
@@ -449,7 +450,7 @@ export class RecNetService extends EventEmitter {
           iteration: iteration + 1,
           url,
           skip,
-          take: 150,
+          take: PHOTO_MAX_PAGE_SIZE,
           itemsReceived: photos.length,
           newPhotosAdded,
           totalSoFar: totalFetched,
@@ -466,13 +467,13 @@ export class RecNetService extends EventEmitter {
           hasMorePhotos = false;
         }
 
-        if (photos.length < 150) {
+        if (photos.length < PHOTO_MAX_PAGE_SIZE) {
           // No more photos available
           hasMorePhotos = false;
         }
 
         if (hasMorePhotos) {
-          skip += 150;
+          skip += PHOTO_MAX_PAGE_SIZE;
           iteration++;
 
           if (this.settings.interPageDelayMs > 0) {
@@ -540,7 +541,7 @@ export class RecNetService extends EventEmitter {
         totalNewPhotosAdded,
         totalPhotos: normalizedAll.length,
         totalFetched,
-        pageSize: 150,
+        pageSize: PHOTO_MAX_PAGE_SIZE,
         delayMs: this.settings.interPageDelayMs,
         iterationsCompleted: iterationDetails.length,
         lastSortValue,
@@ -682,12 +683,12 @@ export class RecNetService extends EventEmitter {
         const sinceParam = sinceTime.toISOString();
         const url = `https://apim.rec.net/apis/api/images/v3/feed/player/${encodeURIComponent(
           accountId
-        )}?skip=${skip}&take=${150}&since=${encodeURIComponent(sinceParam)}`;
+        )}?skip=${skip}&take=${PHOTO_MAX_PAGE_SIZE}&since=${encodeURIComponent(sinceParam)}`;
 
         const photos = this.normalizePhotos(
           await this.photosController.fetchFeedPhotos(
             accountId,
-            { skip, take: 150, since: sinceParam },
+            { skip, take: PHOTO_MAX_PAGE_SIZE, since: sinceParam },
             token
           )
         );
@@ -734,7 +735,7 @@ export class RecNetService extends EventEmitter {
           iteration: iteration + 1,
           url,
           skip,
-          take: 150,
+          take: PHOTO_MAX_PAGE_SIZE,
           since: sinceParam,
           itemsReceived: photos.length,
           newPhotosAdded,
@@ -744,13 +745,13 @@ export class RecNetService extends EventEmitter {
           incrementalMode: existingPhotoCount > 0,
         });
 
-        if (photos.length < 150) {
+        if (photos.length < PHOTO_MAX_PAGE_SIZE) {
           // No more photos available
           hasMoreFeedPhotos = false;
         }
 
         if (hasMoreFeedPhotos) {
-          skip += 150;
+          skip += PHOTO_MAX_PAGE_SIZE;
           iteration++;
 
           if (this.settings.interPageDelayMs > 0) {
@@ -817,7 +818,7 @@ export class RecNetService extends EventEmitter {
         totalNewPhotosAdded,
         totalPhotos: normalizedFeed.length,
         totalFetched,
-        pageSize: 150,
+        pageSize: PHOTO_MAX_PAGE_SIZE,
         delayMs: this.settings.interPageDelayMs,
         iterationsCompleted: iterationDetails.length,
         sinceTime: sinceTime.toISOString(),
