@@ -953,6 +953,9 @@ export class RecNetService extends EventEmitter {
               newDownloads++;
               // result attempts can be undefined and we don't want to increment successful attempts
               retryAttempts += (result.attempts || 1 - 1);
+              if (result.recoveredAfterRetry) {
+                recoveredAfterRetry++;
+              }
             } else if (status && status.startsWith('already_exists')) {
               alreadyDownloaded++;
             } else {
@@ -1122,6 +1125,9 @@ export class RecNetService extends EventEmitter {
               newDownloads++;
               // result attempts can be undefined and we don't want to increment successful attempts
               retryAttempts += (result.attempts || 1 - 1);
+              if (result.recoveredAfterRetry) {
+                recoveredAfterRetry++;
+              }
             } else if (status && status.startsWith('already_exists')) {
               alreadyDownloaded++;
             } else {
@@ -1218,16 +1224,14 @@ export class RecNetService extends EventEmitter {
     try {
       const attempt = await this.downloadPhotoWithRetry(imageName, token);
       attemptsUsed = attempt.attempts;
-      /*
-      retryAttempts += Math.max(0, attempt.attempts - 1);
+      let recoveredAfterRetry = false;
       if (
         attempt.attempts > 1 &&
         attempt.response?.success &&
         attempt.response.value
       ) {
-        recoveredAfterRetry++;
+        recoveredAfterRetry = true;
       }
-        */
 
       const response = attempt.response;
       if (response?.success && response.value) {
@@ -1241,6 +1245,7 @@ export class RecNetService extends EventEmitter {
           url: photoUrl,
           attempts: attempt.attempts,
           retries: Math.max(0, attempt.attempts - 1),
+          recoveredAfterRetry
         };
       } else if (response) {
         return {
