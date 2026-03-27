@@ -1,5 +1,5 @@
 import { RoomDto } from '../../models/RoomDto';
-import { RecNetHttpClient } from './http-client';
+import { RecNetHttpClient, UNIVERSAL_BATCH_SIZE } from './http-client';
 
 export class RoomsController {
   constructor(private readonly http: RecNetHttpClient) {}
@@ -10,7 +10,7 @@ export class RoomsController {
     }
 
     const results: RoomDto[] = [];
-    const batchSize = 100;
+    const batchSize = UNIVERSAL_BATCH_SIZE;
 
     for (let i = 0; i < roomIds.length; i += batchSize) {
       const batch = roomIds.slice(i, i + batchSize);
@@ -34,6 +34,7 @@ export class RoomsController {
         );
 
         if (response.success && Array.isArray(response.value)) {
+          console.log(`Rooms pulled: ${response.value.length}`)
           results.push(
             ...response.value.map(room => ({
               ...room,
