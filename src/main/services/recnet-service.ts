@@ -927,7 +927,6 @@ export class RecNetService extends EventEmitter {
       let skipped = 0;
       let retryAttempts = 0;
       let recoveredAfterRetry = 0;
-      const downloadResults: DownloadResultItem[] = [];
       let processedCount = 0;
 
       this.updateProgress('Downloading user photos...', 0, totalPhotos, 0);
@@ -943,7 +942,7 @@ export class RecNetService extends EventEmitter {
           remainingDownloadSlots--;
         }
 
-        promises.push(new Promise(async (resolve) => {
+        promises.push(new Promise<DownloadResultItem>(async (resolve) => {
           if (delay) { await this.delay(delay); }
           await semaphore.acquire();
           try {
@@ -970,7 +969,7 @@ export class RecNetService extends EventEmitter {
         }))
         delay += this.settings.interPageDelayMs;
       }
-      await Promise.all(promises);
+      const downloadResults: DownloadResultItem[] = await Promise.all<DownloadResultItem>(promises);
 
       this.setOperationComplete();
 
@@ -1094,7 +1093,6 @@ export class RecNetService extends EventEmitter {
       let skipped = 0;
       let retryAttempts = 0;
       let recoveredAfterRetry = 0;
-      const downloadResults: DownloadResultItem[] = [];
       let processedCount = 0;
 
       this.updateProgress('Downloading feed photos...', 0, totalPhotos, 0);
@@ -1110,7 +1108,7 @@ export class RecNetService extends EventEmitter {
           remainingDownloadSlots--;
         }
 
-        promises.push(new Promise(async (resolve) => {
+        promises.push(new Promise<DownloadResultItem>(async (resolve) => {
           if (delay) { await this.delay(delay); }
           await semaphore.acquire();
           try {
@@ -1137,8 +1135,8 @@ export class RecNetService extends EventEmitter {
         }))
         delay += this.settings.interPageDelayMs;
       }
-      await Promise.all(promises);
-
+      const downloadResults: DownloadResultItem[] = await Promise.all<DownloadResultItem>(promises);
+      
       this.setOperationComplete();
 
       const downloadStats: DownloadStats = {
