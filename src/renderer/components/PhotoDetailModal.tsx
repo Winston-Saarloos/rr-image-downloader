@@ -1,5 +1,13 @@
 import React from 'react';
-import { MapPin, Users, Calendar, Heart, Ticket } from 'lucide-react';
+import {
+  MapPin,
+  Users,
+  Calendar,
+  Heart,
+  Ticket,
+  MessageCircle,
+  ThumbsUp,
+} from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -46,6 +54,8 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   const description = extended.Description || '';
   const imageUrl = getPhotoImageUrl(photo);
   const createdAt = photo.CreatedAt ? new Date(photo.CreatedAt) : null;
+  const commentCount = typeof photo.CommentCount === 'number' ? photo.CommentCount : 0;
+  const cheerCount = typeof photo.CheerCount === 'number' ? photo.CheerCount : 0;
   const photoId = photo.Id.toString();
   const favorited = isFavorite(photoId);
   const eventInfo = getPhotoEvent(photo);
@@ -142,6 +152,19 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
                 <span>{format(createdAt, 'MMMM d, yyyy h:mm a')}</span>
               </div>
             )}
+
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <MessageCircle className="h-4 w-4 text-muted-foreground" />
+                <span className="font-medium">Comments:</span>
+                <span>{commentCount}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <ThumbsUp className="h-4 w-4 text-muted-foreground" />
+                <span className="font-medium">Cheers:</span>
+                <span>{cheerCount}</span>
+              </div>
+            </div>
 
             {description && (
               <div className="pt-2 border-t">
