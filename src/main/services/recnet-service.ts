@@ -960,6 +960,8 @@ export class RecNetService extends EventEmitter {
               alreadyDownloaded++;
             } else if (status && (status === 'error' || status === 'failed')) {
               failedDownloads++;
+            } else if (status && status === 'cancelled') {
+              skipped++;
             }
             resolve(result);
           }
@@ -1011,7 +1013,6 @@ export class RecNetService extends EventEmitter {
     token?: string
   ): Promise<DownloadResult> {
     await this.ensureSettingsLoaded();
-    this.currentOperation = { cancelled: false };
 
     try {
       this.resetProgressIssueState();
@@ -1037,6 +1038,8 @@ export class RecNetService extends EventEmitter {
         throw new Error('No feed photos found in the JSON file.');
       }
 
+
+
       const sortedPhotos = [...photos].sort((a, b) => {
         const timeA = a.CreatedAt
           ? new Date(a.CreatedAt).getTime()
@@ -1057,6 +1060,26 @@ export class RecNetService extends EventEmitter {
       ).length;
       let remainingDownloadSlots = (maxPhotosToDownload || 0) - existingFeedFiles;
       
+      if (this.currentOperation && this.currentOperation.cancelled) {
+        this.setOperationComplete();
+        return {
+          accountId,
+          feedPhotosDirectory: feedPhotosDir,
+          processedCount: 0,
+          downloadStats: {
+            totalPhotos,
+            alreadyDownloaded: existingFeedFiles,
+            newDownloads: 0,
+            failedDownloads: 0,
+            skipped: totalPhotos,
+            retryAttempts: 0,
+            recoveredAfterRetry: 0,
+          },
+          downloadResults: [],
+          totalResults: 0,
+        };
+      }
+
       if (hasDownloadLimit && remainingDownloadSlots === 0) {
         console.log(
           `Skipping feed photo downloads: limit ${maxPhotosToDownload} reached by existing files (${existingFeedFiles})`
@@ -1132,6 +1155,8 @@ export class RecNetService extends EventEmitter {
               alreadyDownloaded++;
             } else if (status && (status === 'error' || status === 'failed')) {
               failedDownloads++;
+            } else if (status && status === 'cancelled') {
+              skipped++;
             }
             resolve(result);
           }
@@ -1179,10 +1204,6 @@ export class RecNetService extends EventEmitter {
   }
 
   async downloadImage(photo: Photo, photosDir: string, feedPhotosDir: string, isFeed: boolean, token?: string): Promise<DownloadResultItem> {
-    if (this.currentOperation && this.currentOperation.cancelled) {
-      throw new Error('Operation cancelled');
-    }
-
     const photoId = this.normalizeId(photo.Id);
     const imageName = photo.ImageName;
     const photoUrl = buildCdnImageUrl(this.settings.cdnBase, imageName);
@@ -1193,6 +1214,13 @@ export class RecNetService extends EventEmitter {
         photoId,
         imageName,
         photo: JSON.stringify(photo),
+      };
+    }
+
+    if (this.currentOperation && this.currentOperation.cancelled) {
+      return {
+        photoId,
+        status: 'cancelled',
       };
     }
 
