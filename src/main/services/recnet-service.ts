@@ -1101,6 +1101,7 @@ export class RecNetService extends EventEmitter {
 
       let delay = 0;
       const promises = [];
+      const semaphore = new Semaphore(PHOTO_DOWNLOAD_MAX_CONCURRENT_REQUESTS);
       for (const photo of sortedPhotos) {
         if (hasDownloadLimit && remainingDownloadSlots <= 0) { 
           break;
@@ -1111,19 +1112,28 @@ export class RecNetService extends EventEmitter {
 
         promises.push(new Promise(async (resolve) => {
           if (delay) { await this.delay(delay); }
-
-          const result = await this.downloadImage(photo, photosDir, feedPhotosDir, true);
-          const status = result.status;
-          if (status === 'downloaded') {
-            newDownloads++;
-          } else if (status && status.startsWith('already_exists')) {
-            alreadyDownloaded++;
-          } else {
-            failedDownloads++;
+          await semaphore.acquire();
+          try {
+            const result = await this.downloadImage(photo, photosDir, feedPhotosDir, true);
+            const status = result.status;
+            if (status === 'downloaded') {
+              newDownloads++;
+            } else if (status && status.startsWith('already_exists')) {
+              alreadyDownloaded++;
+            } else {
+              failedDownloads++;
+            }
+            resolve(result);
           }
-          processedCount++;
-          this.updateProgress('Downloading feed photos...', processedCount, totalPhotos);
-          resolve(result);
+          catch (error) {
+            // downloadImage already has error handling, if it throws, we'll assume it's fatal
+            throw error;
+          }
+          finally {
+            semaphore.release()
+            this.updateProgress('Downloading feed photos...', processedCount, totalPhotos);
+            processedCount++;
+          };
         }))
         delay += this.settings.interPageDelayMs;
       }
