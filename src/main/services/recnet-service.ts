@@ -952,7 +952,7 @@ export class RecNetService extends EventEmitter {
             if (status === 'downloaded') {
               newDownloads++;
               // result attempts can be undefined and we don't want to increment successful attempts
-              retryAttempts += (result.attempts || 1 - 1);
+              retryAttempts += (result.attempts || 1) - 1;
               if (result.recoveredAfterRetry && result.recoveredAfterRetry === true) {
                 recoveredAfterRetry++;
               }
@@ -1124,7 +1124,7 @@ export class RecNetService extends EventEmitter {
             if (status === 'downloaded') {
               newDownloads++;
               // result attempts can be undefined and we don't want to increment successful attempts
-              retryAttempts += (result.attempts || 1 - 1);
+              retryAttempts += (result.attempts || 1) - 1;
               if (result.recoveredAfterRetry && result.recoveredAfterRetry === true) {
                 recoveredAfterRetry++;
               }
