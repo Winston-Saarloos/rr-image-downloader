@@ -935,7 +935,8 @@ export class RecNetService extends EventEmitter {
       const promises = [];
       const semaphore = new Semaphore(PHOTO_DOWNLOAD_MAX_CONCURRENT_REQUESTS);
       for (const photo of sortedPhotos) {
-        if (hasDownloadLimit && remainingDownloadSlots <= 0) { 
+        if (hasDownloadLimit && remainingDownloadSlots <= 0) {
+          skipped = totalPhotos - (alreadyDownloaded + newDownloads);
           break;
         } 
         else {
@@ -1102,6 +1103,7 @@ export class RecNetService extends EventEmitter {
       const semaphore = new Semaphore(PHOTO_DOWNLOAD_MAX_CONCURRENT_REQUESTS);
       for (const photo of sortedPhotos) {
         if (hasDownloadLimit && remainingDownloadSlots <= 0) { 
+          skipped = totalPhotos - (alreadyDownloaded + newDownloads);
           break;
         } 
         else {
