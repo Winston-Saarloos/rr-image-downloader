@@ -58,18 +58,32 @@ export class AccountsController {
     return results;
   }
 
-  async lookupAccount(
+  async lookupAccountById(
     accountId: string,
     token?: string
-  ): Promise<AccountInfo[]> {
-    const accounts = await this.http.requestOrThrow<PlayerResult[]>(
+  ): Promise<AccountInfo> {
+    const account = await this.http.requestOrThrow<PlayerResult>(
       {
-        url: `https://accounts.rec.net/account/bulk?id=${encodeURIComponent(accountId)}`,
+        url: `https://accounts.rec.net/account/${encodeURIComponent(accountId)}`,
         method: 'GET',
       },
       token
     );
-    return this.normalizeAccounts(accounts);
+    return this.normalizeAccount(account);
+  }
+
+  async lookupAccountByUsername(
+    username: string,
+    token?: string
+  ): Promise<AccountInfo> {
+    const account = await this.http.requestOrThrow<PlayerResult>(
+      {
+        url: `https://apim.rec.net/accounts/account/?username=${encodeURIComponent(username)}`,
+        method: 'GET',
+      },
+      token
+    );
+    return this.normalizeAccount(account);
   }
 
   async searchAccounts(
@@ -91,9 +105,13 @@ export class AccountsController {
   }
 
   private normalizeAccounts(accounts: PlayerResult[]): PlayerResult[] {
-    return accounts.map(account => ({
-      ...account,
-      accountId: String(account.accountId),
-    }));
+    return accounts.map(account => this.normalizeAccount(account));
+  }
+
+  private normalizeAccount(account: PlayerResult): PlayerResult {
+      return {
+        ...account,
+        accountId: String(account.accountId),
+      };
   }
 }

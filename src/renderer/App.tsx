@@ -289,19 +289,18 @@ function App() {
 
         // Search for account by username
         addLog(`Searching for account: ${username}`, 'info');
-        const searchResult = await window.electronAPI.searchAccounts(
+        const searchResult = await window.electronAPI.lookupAccountByUsername(
           username,
           token.trim() || undefined
         );
         if (
           !searchResult.success ||
-          !searchResult.data ||
-          searchResult.data.length === 0
+          !searchResult.data
         ) {
           throw new Error('Account not found');
         }
 
-        const account = searchResult.data[0];
+        const account = searchResult.data;
         const accountId = account.accountId.toString();
         setCurrentAccountId(accountId);
         addLog(

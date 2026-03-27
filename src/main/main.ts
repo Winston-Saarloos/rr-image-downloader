@@ -441,15 +441,31 @@ ipcMain.handle('cancel-operation', async (): Promise<boolean> => {
   return recNetService.cancelCurrentOperation();
 });
 
-// Lookup account information
+// Lookup account information by account ID
 ipcMain.handle(
-  'lookup-account',
+  'lookup-account-by-id',
   async (
     event: IpcMainInvokeEvent,
     accountId: string
-  ): Promise<ApiResponse<AccountInfo[]>> => {
+  ): Promise<ApiResponse<AccountInfo>> => {
     try {
-      const result = await recNetService.lookupAccount(accountId);
+      const result = await recNetService.lookupAccountById(accountId);
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+// Lookup account information by username
+ipcMain.handle(
+  'lookup-account-by-username',
+  async (
+    event: IpcMainInvokeEvent,
+    username: string
+  ): Promise<ApiResponse<AccountInfo>> => {
+    try {
+      const result = await recNetService.lookupAccountByUsername(username);
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -884,6 +900,19 @@ ipcMain.handle(
     if (errMsg) {
       return { success: false as const, error: errMsg };
     }
+    return { success: true as const };
+  }
+);
+
+ipcMain.handle(
+  'reveal-path-in-explorer',
+  async (_event: IpcMainInvokeEvent, targetPath: string) => {
+    const resolved = path.resolve(targetPath);
+    if (!(await fs.pathExists(resolved))) {
+      return { success: false as const, error: 'Path does not exist' };
+    }
+
+    shell.showItemInFolder(resolved);
     return { success: true as const };
   }
 );

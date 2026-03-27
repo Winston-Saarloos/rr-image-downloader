@@ -6,7 +6,15 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { MapPin, Users, Calendar, Heart, Ticket } from 'lucide-react';
+import {
+  MapPin,
+  Users,
+  Calendar,
+  Heart,
+  Ticket,
+  MessageCircle,
+  ThumbsUp,
+} from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Photo } from '../../shared/types';
@@ -20,7 +28,11 @@ interface PhotoGridProps {
   onPhotoClick: (photo: Photo) => void;
   groupBy?: 'none' | 'room' | 'user' | 'date' | 'event';
   searchQuery?: string;
-  sortBy?: 'oldest-to-newest' | 'newest-to-oldest' | 'most-popular';
+  sortBy?:
+    | 'oldest-to-newest'
+    | 'newest-to-oldest'
+    | 'most-cheered'
+    | 'most-comments';
   roomMap?: Map<string, string>;
   accountMap?: Map<string, string>;
   eventMap?: Map<string, string>;
@@ -59,6 +71,9 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   const getCheersCount = useCallback((photo: Photo): number => {
     return typeof photo.CheerCount === 'number' ? photo.CheerCount : 0;
   }, []);
+  const getCommentsCount = useCallback((photo: Photo): number => {
+    return typeof photo.CommentCount === 'number' ? photo.CommentCount : 0;
+  }, []);
 
   // Sort photos based on sortBy option
   const sortedPhotos = useMemo(() => {
@@ -77,16 +92,22 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
           const dateB = b.CreatedAt ? new Date(b.CreatedAt).getTime() : 0;
           return dateB - dateA;
         });
-      case 'most-popular':
+      case 'most-cheered':
         return photosCopy.sort((a, b) => {
           const cheersA = getCheersCount(a);
           const cheersB = getCheersCount(b);
           return cheersB - cheersA;
         });
+      case 'most-comments':
+        return photosCopy.sort((a, b) => {
+          const commentsA = getCommentsCount(a);
+          const commentsB = getCommentsCount(b);
+          return commentsB - commentsA;
+        });
       default:
         return photosCopy;
     }
-  }, [photos, sortBy, getCheersCount]);
+  }, [photos, sortBy, getCheersCount, getCommentsCount]);
 
   // Pre-compute searchable string per photo so filtering only re-runs when query changes
   const searchIndex = useMemo(
@@ -497,6 +518,9 @@ const PhotoCard: React.FC<PhotoCardProps> = React.memo(
     const { isFavorite, toggleFavorite } = useFavorites();
     const photoId = photo.Id.toString();
     const favorited = isFavorite(photoId);
+    const commentCount =
+      typeof photo.CommentCount === 'number' ? photo.CommentCount : 0;
+    const cheerCount = typeof photo.CheerCount === 'number' ? photo.CheerCount : 0;
 
     const handleFavoriteClick = React.useCallback(
       (e: React.MouseEvent) => {
@@ -539,6 +563,14 @@ const PhotoCard: React.FC<PhotoCardProps> = React.memo(
           >
             <Heart className={`h-4 w-4 ${favorited ? 'fill-current' : ''}`} />
           </Button>
+          <div className="pointer-events-none absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white">
+            <MessageCircle className="h-3.5 w-3.5" />
+            <span>{commentCount}</span>
+          </div>
+          <div className="pointer-events-none absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white">
+            <span>{cheerCount}</span>
+            <ThumbsUp className="h-3.5 w-3.5" />
+          </div>
         </div>
         <CardContent className="p-4 space-y-2">
           {!hideRoom && (

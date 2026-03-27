@@ -131,11 +131,11 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     setUsernameStatus('checking');
     try {
       if (electronAPI) {
-        const result = await electronAPI.searchAccounts(
+        const result = await electronAPI.lookupAccountByUsername(
           value,
           token.trim() || undefined
         );
-        if (result.success && result.data && result.data.length > 0) {
+        if (result.success && result.data) {
           setUsernameStatus('found');
         } else {
           setUsernameStatus('not-found');
