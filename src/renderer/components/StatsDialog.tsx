@@ -647,8 +647,8 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
 
     // Combine all years from both maps
     const allYears = new Set([
-      ...userPhotosYearMap.keys(),
-      ...feedPhotosYearMap.keys(),
+      ...Array.from(userPhotosYearMap.keys()),
+      ...Array.from(feedPhotosYearMap.keys()),
     ]);
     const photosPerYear = Array.from(allYears)
       .map(year => ({

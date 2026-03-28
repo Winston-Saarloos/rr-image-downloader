@@ -4,7 +4,7 @@ import {
 } from '../../../shared/cdnUrl';
 import { ImageDto } from '../../models/ImageDto';
 import { GenericResponse } from '../../models/GenericResponse';
-import { RecNetHttpClient } from './http-client';
+import { RecNetHttpClient, RecNetRequestOptions } from './http-client';
 
 export class PhotosController {
   constructor(private readonly http: RecNetHttpClient) {}
@@ -12,7 +12,8 @@ export class PhotosController {
   async fetchPlayerPhotos(
     accountId: string,
     params: { skip: number; take: number; sort: number; after?: string },
-    token?: string
+    token?: string,
+    options?: RecNetRequestOptions
   ): Promise<ImageDto[]> {
     const { skip, take, sort, after } = params;
     let url = `https://apim.rec.net/apis/api/images/v4/player/${encodeURIComponent(accountId)}?skip=${skip}&take=${take}&sort=${sort}`;
@@ -21,24 +22,34 @@ export class PhotosController {
       url += `&after=${encodeURIComponent(after)}`;
     }
 
-    return this.http.requestOrThrow<ImageDto[]>({ url, method: 'GET' }, token);
+    return this.http.requestOrThrow<ImageDto[]>(
+      { url, method: 'GET' },
+      token,
+      options
+    );
   }
 
   async fetchFeedPhotos(
     accountId: string,
     params: { skip: number; take: number; since: string },
-    token?: string
+    token?: string,
+    options?: RecNetRequestOptions
   ): Promise<ImageDto[]> {
     const { skip, take, since } = params;
     const url = `https://apim.rec.net/apis/api/images/v3/feed/player/${encodeURIComponent(accountId)}?skip=${skip}&take=${take}&since=${encodeURIComponent(since)}`;
 
-    return this.http.requestOrThrow<ImageDto[]>({ url, method: 'GET' }, token);
+    return this.http.requestOrThrow<ImageDto[]>(
+      { url, method: 'GET' },
+      token,
+      options
+    );
   }
 
   async downloadPhoto(
     imageName: string,
     cdnBase: string,
-    token?: string
+    token?: string,
+    options?: RecNetRequestOptions
   ): Promise<GenericResponse<ArrayBuffer>> {
     const url = buildCdnImageUrl(cdnBase, imageName);
     const tokenForRequest = shouldIncludeTokenForCdnBase(cdnBase)
@@ -50,7 +61,8 @@ export class PhotosController {
         method: 'GET',
         responseType: 'arraybuffer',
       },
-      tokenForRequest
+      tokenForRequest,
+      options
     );
   }
 }

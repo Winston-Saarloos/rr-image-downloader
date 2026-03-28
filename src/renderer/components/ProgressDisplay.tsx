@@ -7,7 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/card';
-import { DownloadStats, Progress as ProgressType } from '../../shared/types';
+import { Progress as ProgressType } from '../../shared/types';
 import {
   Loader2,
   CheckCircle2,
@@ -17,54 +17,24 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 
-const formatElapsedDuration = (durationMs: number): string => {
-  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${seconds}s`;
-  }
-
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-
-  return `${seconds}s`;
-};
-
 interface ProgressDisplayProps {
   progress: ProgressType;
-  startedAt?: number | null;
-  durationMs?: number | null;
   onClose?: () => void;
-  onCancel?: () => void | Promise<void>;
   onOpenOperationResults?: () => void;
   onOpenDownloadPanel?: () => void;
   onRetryDownload?: () => void | Promise<void>;
   canRetryDownload?: boolean;
   isRetrying?: boolean;
-  summary?: {
-    username: string;
-    accountId: string;
-    userPhotos?: DownloadStats;
-    feedPhotos?: DownloadStats;
-  } | null;
 }
 
 export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   progress,
-  startedAt = null,
-  durationMs = null,
   onClose,
-  onCancel,
   onOpenOperationResults,
   onOpenDownloadPanel,
   onRetryDownload,
   canRetryDownload = false,
   isRetrying = false,
-  summary = null,
 }) => {
   const percent = Math.min(
     Math.max(Math.round(progress.progress ?? 0), 0),
@@ -85,9 +55,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   const showErrorTone = hasFailures && !isRetryableCompletion;
   const showWarningTone = hasIssues || isRetryableCompletion;
   const [indeterminateValue, setIndeterminateValue] = useState(15);
-  const [elapsedMs, setElapsedMs] = useState<number>(() =>
-    startedAt ? Math.max(Date.now() - startedAt, 0) : (durationMs ?? 0)
-  );
   const directionRef = useRef<1 | -1>(1);
 
   useEffect(() => {
@@ -117,23 +84,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
 
     return () => clearInterval(interval);
   }, [progress.isRunning, hasTotals]);
-
-  useEffect(() => {
-    if (progress.isRunning && startedAt) {
-      setElapsedMs(Math.max(Date.now() - startedAt, 0));
-
-      const interval = setInterval(() => {
-        setElapsedMs(Math.max(Date.now() - startedAt, 0));
-      }, 1000);
-
-      return () => clearInterval(interval);
-    }
-
-    setElapsedMs(
-      durationMs ?? (startedAt ? Math.max(Date.now() - startedAt, 0) : 0)
-    );
-    return undefined;
-  }, [durationMs, progress.isRunning, startedAt]);
 
   const isIdle =
     !progress.isRunning &&
@@ -169,50 +119,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
     ? 'The download finished, but some images were missed. Retry the download now to grab any missed images.'
     : progress.lastIssue ||
       'Some files are retrying. The download is still moving, but it is not clean.';
-  const hasElapsed = startedAt !== null || durationMs !== null;
-  const elapsedLabel = hasElapsed ? formatElapsedDuration(elapsedMs) : null;
-  const totalNewDownloads =
-    (summary?.userPhotos?.newDownloads ?? 0) +
-    (summary?.feedPhotos?.newDownloads ?? 0);
-  const hasSummary =
-    !progress.isRunning &&
-    !!summary &&
-    (summary.userPhotos !== undefined || summary.feedPhotos !== undefined);
-
-  const renderDownloadSummary = (
-    label: string,
-    stats: DownloadStats | undefined
-  ) => {
-    if (!stats) {
-      return null;
-    }
-
-    return (
-      <div className="rounded-md border bg-background/70 p-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium">{label}</p>
-            <p className="text-xs text-muted-foreground">
-              {stats.totalPhotos} total checked
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-semibold text-green-600 dark:text-green-400">
-              {stats.newDownloads} downloaded
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {stats.alreadyDownloaded} skipped existing
-            </p>
-          </div>
-        </div>
-        {stats.failedDownloads > 0 && (
-          <p className="mt-2 text-xs text-yellow-600 dark:text-yellow-400">
-            {stats.failedDownloads} failed after retries
-          </p>
-        )}
-      </div>
-    );
-  };
 
   if (isIdle) {
     return null;
@@ -256,7 +162,7 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
             ? 'You cancelled this run. You can start a new download anytime.'
             : isRetryableCompletion
               ? 'Download complete. Retry the same download to grab any missed images.'
-              : progress.currentStep || (isComplete ? 'Complete' : 'Ready')}
+            : progress.currentStep || (isComplete ? 'Complete' : 'Ready')}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -315,7 +221,7 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
                   >
                     {issueMessage}
                   </p>
-                  {canOpenIssueDetails && onOpenOperationResults && (
+                  {canOpenIssueDetails && (
                     <p
                       className={
                         showErrorTone
@@ -413,40 +319,11 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
                     : showErrorTone
                       ? 'Complete with failures'
                       : showWarningTone
-                        ? 'Complete with warnings'
-                        : 'Complete'
+                      ? 'Complete with warnings'
+                      : 'Complete'
                   : 'Idle'}
           </span>
         </div>
-
-        {elapsedLabel && (
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">
-              Elapsed Time: {elapsedLabel}
-            </span>
-          </div>
-        )}
-
-        {hasSummary && (
-          <div className="rounded-md border bg-muted/40 p-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Last Download Summary
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              @{summary.username} ({summary.accountId})
-            </p>
-            {totalNewDownloads === 0 && (
-              <p className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-400">
-                No new photos were downloaded. Existing saved photos were
-                skipped.
-              </p>
-            )}
-            <div className="mt-3 space-y-2">
-              {renderDownloadSummary('User photos', summary.userPhotos)}
-              {renderDownloadSummary('Feed photos', summary.feedPhotos)}
-            </div>
-          </div>
-        )}
 
         {hasTotals && (
           <>
@@ -467,14 +344,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
               {progress.currentStep || 'Waiting to start'}
             </div>
           </>
-        )}
-
-        {progress.isRunning && onCancel && (
-          <div className="flex flex-wrap gap-2 border-t border-border/60 pt-3">
-            <Button variant="destructive" size="sm" onClick={() => void onCancel()}>
-              Cancel download
-            </Button>
-          </div>
         )}
 
         {isCancelled && !progress.isRunning && (

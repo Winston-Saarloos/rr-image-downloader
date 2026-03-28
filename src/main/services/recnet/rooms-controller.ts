@@ -1,10 +1,18 @@
 import { RoomDto } from '../../models/RoomDto';
-import { RecNetHttpClient, UNIVERSAL_BATCH_SIZE } from './http-client';
+import {
+  RecNetHttpClient,
+  RecNetRequestOptions,
+  UNIVERSAL_BATCH_SIZE,
+} from './http-client';
 
 export class RoomsController {
   constructor(private readonly http: RecNetHttpClient) {}
 
-  async fetchBulkRooms(roomIds: string[], token?: string): Promise<RoomDto[]> {
+  async fetchBulkRooms(
+    roomIds: string[],
+    token?: string,
+    options?: RecNetRequestOptions
+  ): Promise<RoomDto[]> {
     if (roomIds.length === 0) {
       return [];
     }
@@ -30,11 +38,12 @@ export class RoomsController {
               'Content-Type': 'application/x-www-form-urlencoded',
             },
           },
-          token
+          token,
+          options
         );
 
         if (response.success && Array.isArray(response.value)) {
-          console.log(`Rooms pulled: ${response.value.length}`);
+          console.log(`Rooms pulled: ${response.value.length}`)
           results.push(
             ...response.value.map(room => ({
               ...room,
@@ -49,23 +58,36 @@ export class RoomsController {
           );
         }
       } catch (error) {
-        if ((error as Error).message === 'Operation cancelled') {
-          throw error;
-        }
         console.log(
           `Failed to fetch batch of rooms: ${(error as Error).message}`
         );
       }
 
       if (i + batchSize < roomIds.length) {
-        await this.delayBetweenBatches();
+        await this.delayBetweenBatches(options?.signal);
       }
     }
 
     return results;
   }
 
-  private delayBetweenBatches(): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, 100));
+  private delayBetweenBatches(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+      return Promise.reject(new Error('Operation cancelled'));
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, 100);
+
+      const onAbort = () => {
+        clearTimeout(timeout);
+        reject(new Error('Operation cancelled'));
+      };
+
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 }

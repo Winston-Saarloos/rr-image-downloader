@@ -3,13 +3,16 @@ import { GenericResponse } from '../../models/GenericResponse';
 import { axiosRequest } from '../../utils/axiosRequest';
 
 export const UNIVERSAL_BATCH_SIZE = 100_000;
+export interface RecNetRequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
 
 export class RecNetHttpClient {
-  private activeAbortControllers = new Set<AbortController>();
-
   private buildRequestConfig(
     config: AxiosRequestConfig,
-    token?: string
+    token?: string,
+    options?: RecNetRequestOptions
   ): AxiosRequestConfig {
     const headers: Record<string, string> = {
       'User-Agent': 'RecNetPhotoDownloader/1.0',
@@ -21,40 +24,29 @@ export class RecNetHttpClient {
     }
 
     return {
-      timeout: 30000,
       ...config,
+      timeout: options?.timeoutMs ?? config.timeout ?? 30000,
+      signal: options?.signal ?? config.signal,
       headers,
     };
   }
 
   async request<T>(
     config: AxiosRequestConfig,
-    token?: string
+    token?: string,
+    options?: RecNetRequestOptions
   ): Promise<GenericResponse<T>> {
-    const controller = new AbortController();
-    this.activeAbortControllers.add(controller);
-
-    try {
-      return await axiosRequest<T>(
-        this.buildRequestConfig(
-          {
-            ...config,
-            signal: controller.signal,
-          },
-          token
-        )
-      );
-    } finally {
-      this.activeAbortControllers.delete(controller);
-    }
+    return axiosRequest<T>(this.buildRequestConfig(config, token, options));
   }
 
   async requestOrThrow<T>(
     config: AxiosRequestConfig,
-    token?: string
+    token?: string,
+    options?: RecNetRequestOptions
   ): Promise<T> {
-    const response = await this.request<T>(config, token);
+    const response = await this.request<T>(config, token, options);
     if (
+      options?.signal?.aborted ||
       response.error === 'ERR_CANCELED' ||
       response.message === 'Operation cancelled'
     ) {
@@ -73,12 +65,5 @@ export class RecNetHttpClient {
     }
 
     return response.value;
-  }
-
-  cancelActiveRequests(): void {
-    for (const controller of this.activeAbortControllers) {
-      controller.abort();
-    }
-    this.activeAbortControllers.clear();
   }
 }
