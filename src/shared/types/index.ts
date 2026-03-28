@@ -11,6 +11,7 @@ export interface RecNetSettings {
   cdnBase: string;
   interPageDelayMs?: number;
   maxPhotosToDownload?: number; // Limit for testing - undefined means no limit
+  maxConcurrentDownloads: number;
 }
 
 export interface BulkDataRefreshOptions {

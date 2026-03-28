@@ -72,6 +72,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
+  const handleMaxConcurrentChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.trim();
+    if (value === '') {
+      await onUpdateSettings({ maxConcurrentDownloads: 30 });
+    } else {
+      const numValue = parseInt(value);
+      if (!isNaN(numValue) && numValue > 0) {
+        await onUpdateSettings({ maxConcurrentDownloads: numValue });
+      }
+    }
+  };
+
   const handleMaxPhotosChange = async (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -170,6 +182,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           />
           <p className="text-sm text-muted-foreground">
             Milliseconds between requests. Leave empty for unlimited download speed.
+          </p>
+        </div>
+
+        {/* Delay Between Pages */}
+        <div className="space-y-2">
+          <Label htmlFor="request-delay">Max Concurrent Downloads</Label>
+          <Input
+            id="concurrent-downloads"
+            type="number"
+            value={settings.maxConcurrentDownloads}
+            onChange={handleMaxConcurrentChange}
+            min="1"
+            max="100"
+          />
+          <p className="text-sm text-muted-foreground">
+            Amount of images that can be downloaded concurrently. 
+            Lower this value if your downloads are consistently failing.
           </p>
         </div>
 

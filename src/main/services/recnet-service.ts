@@ -61,13 +61,13 @@ type FolderMetaV1 = {
 const DEFAULT_SETTINGS: RecNetSettings = {
   outputRoot: 'output',
   cdnBase: DEFAULT_CDN_BASE,
+  maxConcurrentDownloads: 30
 };
 
 const PHOTO_DOWNLOAD_RETRY_COUNT = 3;
 const PHOTO_DOWNLOAD_MAX_ATTEMPTS = PHOTO_DOWNLOAD_RETRY_COUNT + 1;
 const PHOTO_DOWNLOAD_RETRY_DELAY_MS = 750;
 const PHOTO_DOWNLOAD_TIMEOUT_MS = 15_000;
-const PHOTO_DOWNLOAD_MAX_CONCURRENT_REQUESTS = 30;
 const PHOTO_MAX_PAGE_SIZE = 1_000;
 
 function normalizeRecNetSettings(input: unknown): RecNetSettings {
@@ -81,6 +81,12 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
     typeof interRaw === 'number' && Number.isFinite(interRaw)
       ? interRaw
       : DEFAULT_SETTINGS.interPageDelayMs;
+
+  const maxConcurrentRaw = raw.maxConcurrentDownloads;
+  const maxConcurrentDownloads =
+    typeof maxConcurrentRaw === 'number' && Number.isFinite(maxConcurrentRaw)
+      ? maxConcurrentRaw
+      : DEFAULT_SETTINGS.maxConcurrentDownloads;
 
   const maxRaw = raw.maxPhotosToDownload;
   const maxPhotosToDownload =
@@ -99,6 +105,7 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
         : DEFAULT_SETTINGS.cdnBase,
     interPageDelayMs,
     maxPhotosToDownload,
+    maxConcurrentDownloads
   };
 }
 
@@ -979,7 +986,7 @@ export class RecNetService extends EventEmitter {
 
       let delay = 0;
       const promises = [];
-      const semaphore = new Semaphore(PHOTO_DOWNLOAD_MAX_CONCURRENT_REQUESTS);
+      const semaphore = new Semaphore(this.settings.maxConcurrentDownloads);
       let scheduledPhotoCount = 0;
       for (const photo of sortedPhotos) {
         if (hasDownloadLimit && remainingDownloadSlots <= 0) {
@@ -1198,7 +1205,7 @@ export class RecNetService extends EventEmitter {
 
       let delay = 0;
       const promises = [];
-      const semaphore = new Semaphore(PHOTO_DOWNLOAD_MAX_CONCURRENT_REQUESTS);
+      const semaphore = new Semaphore(this.settings.maxConcurrentDownloads);
       let scheduledPhotoCount = 0;
       for (const photo of sortedPhotos) {
         if (hasDownloadLimit && remainingDownloadSlots <= 0) {
