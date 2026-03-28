@@ -7,7 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/card';
-import { DownloadStats, Progress as ProgressType } from '../../shared/types';
+import { Progress as ProgressType } from '../../shared/types';
 import {
   Loader2,
   CheckCircle2,
@@ -45,12 +45,6 @@ interface ProgressDisplayProps {
   onRetryDownload?: () => void | Promise<void>;
   canRetryDownload?: boolean;
   isRetrying?: boolean;
-  summary?: {
-    username: string;
-    accountId: string;
-    userPhotos?: DownloadStats;
-    feedPhotos?: DownloadStats;
-  } | null;
 }
 
 export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
@@ -64,7 +58,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   onRetryDownload,
   canRetryDownload = false,
   isRetrying = false,
-  summary = null,
 }) => {
   const percent = Math.min(
     Math.max(Math.round(progress.progress ?? 0), 0),
@@ -171,48 +164,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
       'Some files are retrying. The download is still moving, but it is not clean.';
   const hasElapsed = startedAt !== null || durationMs !== null;
   const elapsedLabel = hasElapsed ? formatElapsedDuration(elapsedMs) : null;
-  const totalNewDownloads =
-    (summary?.userPhotos?.newDownloads ?? 0) +
-    (summary?.feedPhotos?.newDownloads ?? 0);
-  const hasSummary =
-    !progress.isRunning &&
-    !!summary &&
-    (summary.userPhotos !== undefined || summary.feedPhotos !== undefined);
-
-  const renderDownloadSummary = (
-    label: string,
-    stats: DownloadStats | undefined
-  ) => {
-    if (!stats) {
-      return null;
-    }
-
-    return (
-      <div className="rounded-md border bg-background/70 p-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium">{label}</p>
-            <p className="text-xs text-muted-foreground">
-              {stats.totalPhotos} total checked
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-semibold text-green-600 dark:text-green-400">
-              {stats.newDownloads} downloaded
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {stats.alreadyDownloaded} skipped existing
-            </p>
-          </div>
-        </div>
-        {stats.failedDownloads > 0 && (
-          <p className="mt-2 text-xs text-yellow-600 dark:text-yellow-400">
-            {stats.failedDownloads} failed after retries
-          </p>
-        )}
-      </div>
-    );
-  };
 
   if (isIdle) {
     return null;
@@ -424,27 +375,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
             <span className="text-muted-foreground">
               Elapsed Time: {elapsedLabel}
             </span>
-          </div>
-        )}
-
-        {hasSummary && (
-          <div className="rounded-md border bg-muted/40 p-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Last Download Summary
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              @{summary.username} ({summary.accountId})
-            </p>
-            {totalNewDownloads === 0 && (
-              <p className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-400">
-                No new photos were downloaded. Existing saved photos were
-                skipped.
-              </p>
-            )}
-            <div className="mt-3 space-y-2">
-              {renderDownloadSummary('User photos', summary.userPhotos)}
-              {renderDownloadSummary('Feed photos', summary.feedPhotos)}
-            </div>
           </div>
         )}
 

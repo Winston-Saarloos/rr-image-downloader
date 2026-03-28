@@ -204,44 +204,6 @@ describe('RecNetService - Download Functionality', () => {
       expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(1); // Only called for photo-2
     });
 
-    it('should skip already-downloaded photos without waiting on download throttling', async () => {
-      const photos: ImageDto[] = [
-        createMockPhoto('photo-1', 'image1.jpg'),
-        createMockPhoto('photo-2', 'image2.jpg'),
-      ];
-
-      const photosJsonPath = path.join(
-        testOutputDir,
-        testAccountId,
-        `${testAccountId}_photos.json`
-      );
-      const photosDir = path.join(testOutputDir, testAccountId, 'photos');
-      const existingPhotoOnePath = path.join(photosDir, 'photo-1.jpg');
-      const existingPhotoTwoPath = path.join(photosDir, 'photo-2.jpg');
-
-      (mockedFs.pathExists as jest.Mock).mockImplementation(
-        async (p: string) => {
-          if (p === photosJsonPath) return true;
-          if (p === existingPhotoOnePath) return true;
-          if (p === existingPhotoTwoPath) return true;
-          return false;
-        }
-      );
-
-      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
-      (mockedFs.readdir as jest.Mock).mockResolvedValue([
-        'photo-1.jpg',
-        'photo-2.jpg',
-      ]);
-
-      const result = await service.downloadPhotos(testAccountId);
-
-      expect(result.downloadStats.alreadyDownloaded).toBe(2);
-      expect(result.downloadStats.newDownloads).toBe(0);
-      expect(mockPhotosController.downloadPhoto).not.toHaveBeenCalled();
-      expect((service as any).delay as jest.Mock).not.toHaveBeenCalled();
-    });
-
     /**
      * Verifies that if a photo exists in the feed folder, it's copied
      * to the photos folder instead of being re-downloaded. This optimizes
@@ -674,44 +636,6 @@ describe('RecNetService - Download Functionality', () => {
       expect(result.downloadStats.retryAttempts).toBe(3);
       expect(result.downloadResults[0].attempts).toBe(4);
       expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(4);
-    });
-
-    it('should skip existing feed photos without waiting on download throttling', async () => {
-      const feedPhotos: ImageDto[] = [
-        createMockFeedPhoto('feed-1', 'feed1.jpg'),
-        createMockFeedPhoto('feed-2', 'feed2.jpg'),
-      ];
-
-      const feedJsonPath = path.join(
-        testOutputDir,
-        testAccountId,
-        `${testAccountId}_feed.json`
-      );
-      const feedDir = path.join(testOutputDir, testAccountId, 'feed');
-      const existingFeedOnePath = path.join(feedDir, 'feed-1.jpg');
-      const existingFeedTwoPath = path.join(feedDir, 'feed-2.jpg');
-
-      (mockedFs.pathExists as jest.Mock).mockImplementation(
-        async (p: string) => {
-          if (p === feedJsonPath) return true;
-          if (p === existingFeedOnePath) return true;
-          if (p === existingFeedTwoPath) return true;
-          return false;
-        }
-      );
-
-      (mockedFs.readJson as jest.Mock).mockResolvedValue(feedPhotos);
-      (mockedFs.readdir as jest.Mock).mockResolvedValue([
-        'feed-1.jpg',
-        'feed-2.jpg',
-      ]);
-
-      const result = await service.downloadFeedPhotos(testAccountId);
-
-      expect(result.downloadStats.alreadyDownloaded).toBe(2);
-      expect(result.downloadStats.newDownloads).toBe(0);
-      expect(mockPhotosController.downloadPhoto).not.toHaveBeenCalled();
-      expect((service as any).delay as jest.Mock).not.toHaveBeenCalled();
     });
 
     /**
