@@ -1,6 +1,6 @@
 import { AccountInfo } from '../../../shared/types';
 import { PlayerResult } from '../../models/PlayerDto';
-import { RecNetHttpClient } from './http-client';
+import { RecNetHttpClient, UNIVERSAL_BATCH_SIZE } from './http-client';
 
 export class AccountsController {
   constructor(private readonly http: RecNetHttpClient) {}
@@ -14,7 +14,7 @@ export class AccountsController {
     }
 
     const results: PlayerResult[] = [];
-    const batchSize = 100;
+    const batchSize = UNIVERSAL_BATCH_SIZE;
 
     for (let i = 0; i < accountIds.length; i += batchSize) {
       const batch = accountIds.slice(i, i + batchSize);
@@ -38,6 +38,7 @@ export class AccountsController {
         );
 
         if (response.success && Array.isArray(response.value)) {
+          console.log(`Accounts pulled: ${response.value.length}`)
           results.push(...this.normalizeAccounts(response.value));
         } else {
           console.log(

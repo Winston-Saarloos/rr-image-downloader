@@ -1,5 +1,5 @@
 import { EventDto } from '../../models/EventDto';
-import { RecNetHttpClient } from './http-client';
+import { RecNetHttpClient, UNIVERSAL_BATCH_SIZE } from './http-client';
 
 export class EventsController {
   constructor(private readonly http: RecNetHttpClient) {}
@@ -13,7 +13,7 @@ export class EventsController {
     }
 
     const results: EventDto[] = [];
-    const batchSize = 100;
+    const batchSize = UNIVERSAL_BATCH_SIZE;
 
     for (let i = 0; i < eventIds.length; i += batchSize) {
       const batch = eventIds.slice(i, i + batchSize);
@@ -32,6 +32,7 @@ export class EventsController {
         );
 
         if (response.success && Array.isArray(response.value)) {
+          console.log(`Events pulled: ${response.value.length}`)
           const transformedEvents = response.value.map((event: EventDto) => ({
             ...event,
             PlayerEventId: String(event.PlayerEventId),

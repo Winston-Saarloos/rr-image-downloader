@@ -50,6 +50,24 @@ function isGenericResponse(obj: any): obj is GenericResponse<any> {
   );
 }
 
+function isStatusOk(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
+function logApiCall(requestConfig: AxiosRequestConfig, status: number) {
+  console.groupCollapsed();
+  const logMessage = `[${status}] ${requestConfig.method} ${requestConfig.url}`;
+  if (isStatusOk(status)) {
+    console.log(logMessage);
+  } else {
+    console.error(logMessage);
+  }
+  if (requestConfig.data) {
+    console.log(requestConfig.data);
+  }
+  console.groupEnd();
+}
+
 export async function axiosRequest<T = unknown>(
   requestConfig: AxiosRequestConfig
 ): Promise<GenericResponse<T>> {
@@ -58,9 +76,9 @@ export async function axiosRequest<T = unknown>(
       await httpClient.request(requestConfig);
     const { status, statusText, data } = axiosResponse;
 
-    const isOk = status >= 200 && status < 300;
+    logApiCall(requestConfig, status);
 
-    console.log('Received response: ', isOk);
+    const isOk = isStatusOk(status);
 
     if (isOk) {
       if (isGenericResponse(data)) {

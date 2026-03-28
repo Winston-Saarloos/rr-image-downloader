@@ -107,6 +107,7 @@ export interface DownloadResultItem {
   imageName?: string;
   attempts?: number;
   retries?: number;
+  recoveredAfterRetry?: boolean;
 }
 
 export interface DownloadResult {

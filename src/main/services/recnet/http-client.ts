@@ -2,6 +2,8 @@ import { AxiosRequestConfig } from 'axios';
 import { GenericResponse } from '../../models/GenericResponse';
 import { axiosRequest } from '../../utils/axiosRequest';
 
+export const UNIVERSAL_BATCH_SIZE = 100_000;
+
 export class RecNetHttpClient {
   private buildRequestConfig(
     config: AxiosRequestConfig,

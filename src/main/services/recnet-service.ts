@@ -27,6 +27,7 @@ import { EventsController } from './recnet/events-controller';
 import { RecNetHttpClient } from './recnet/http-client';
 import { PhotosController } from './recnet/photos-controller';
 import { RoomsController } from './recnet/rooms-controller';
+import { Semaphore } from '../utils/semaphore';
 
 interface CurrentOperation {
   cancelled: boolean;
@@ -68,6 +69,8 @@ const DEFAULT_SETTINGS: RecNetSettings = {
 const PHOTO_DOWNLOAD_RETRY_COUNT = 3;
 const PHOTO_DOWNLOAD_MAX_ATTEMPTS = PHOTO_DOWNLOAD_RETRY_COUNT + 1;
 const PHOTO_DOWNLOAD_RETRY_DELAY_MS = 750;
+const PHOTO_DOWNLOAD_MAX_CONCURRENT_REQUESTS = 30;
+const PHOTO_MAX_PAGE_SIZE = 1_000;
 
 function normalizeRecNetSettings(input: unknown): RecNetSettings {
   const raw =
@@ -383,7 +386,7 @@ export class RecNetService extends EventEmitter {
 
         let url = `https://apim.rec.net/apis/api/images/v4/player/${encodeURIComponent(
           accountId
-        )}?skip=${skip}&take=${150}&sort=2`;
+        )}?skip=${skip}&take=${PHOTO_MAX_PAGE_SIZE}&sort=2`;
 
         if (lastSortValue) {
           url += `&after=${encodeURIComponent(lastSortValue)}`;
@@ -392,7 +395,7 @@ export class RecNetService extends EventEmitter {
         const photos = this.normalizePhotos(
           await this.photosController.fetchPlayerPhotos(
             accountId,
-            { skip, take: 150, sort: 2, after: lastSortValue },
+            { skip, take: PHOTO_MAX_PAGE_SIZE, sort: 2, after: lastSortValue },
             token
           )
         );
@@ -447,7 +450,7 @@ export class RecNetService extends EventEmitter {
           iteration: iteration + 1,
           url,
           skip,
-          take: 150,
+          take: PHOTO_MAX_PAGE_SIZE,
           itemsReceived: photos.length,
           newPhotosAdded,
           totalSoFar: totalFetched,
@@ -464,13 +467,13 @@ export class RecNetService extends EventEmitter {
           hasMorePhotos = false;
         }
 
-        if (photos.length < 150) {
+        if (photos.length < PHOTO_MAX_PAGE_SIZE) {
           // No more photos available
           hasMorePhotos = false;
         }
 
         if (hasMorePhotos) {
-          skip += 150;
+          skip += PHOTO_MAX_PAGE_SIZE;
           iteration++;
 
           if (this.settings.interPageDelayMs > 0) {
@@ -538,7 +541,7 @@ export class RecNetService extends EventEmitter {
         totalNewPhotosAdded,
         totalPhotos: normalizedAll.length,
         totalFetched,
-        pageSize: 150,
+        pageSize: PHOTO_MAX_PAGE_SIZE,
         delayMs: this.settings.interPageDelayMs,
         iterationsCompleted: iterationDetails.length,
         lastSortValue,
@@ -680,12 +683,12 @@ export class RecNetService extends EventEmitter {
         const sinceParam = sinceTime.toISOString();
         const url = `https://apim.rec.net/apis/api/images/v3/feed/player/${encodeURIComponent(
           accountId
-        )}?skip=${skip}&take=${150}&since=${encodeURIComponent(sinceParam)}`;
+        )}?skip=${skip}&take=${PHOTO_MAX_PAGE_SIZE}&since=${encodeURIComponent(sinceParam)}`;
 
         const photos = this.normalizePhotos(
           await this.photosController.fetchFeedPhotos(
             accountId,
-            { skip, take: 150, since: sinceParam },
+            { skip, take: PHOTO_MAX_PAGE_SIZE, since: sinceParam },
             token
           )
         );
@@ -732,7 +735,7 @@ export class RecNetService extends EventEmitter {
           iteration: iteration + 1,
           url,
           skip,
-          take: 150,
+          take: PHOTO_MAX_PAGE_SIZE,
           since: sinceParam,
           itemsReceived: photos.length,
           newPhotosAdded,
@@ -742,13 +745,13 @@ export class RecNetService extends EventEmitter {
           incrementalMode: existingPhotoCount > 0,
         });
 
-        if (photos.length < 150) {
+        if (photos.length < PHOTO_MAX_PAGE_SIZE) {
           // No more photos available
           hasMoreFeedPhotos = false;
         }
 
         if (hasMoreFeedPhotos) {
-          skip += 150;
+          skip += PHOTO_MAX_PAGE_SIZE;
           iteration++;
 
           if (this.settings.interPageDelayMs > 0) {
@@ -815,7 +818,7 @@ export class RecNetService extends EventEmitter {
         totalNewPhotosAdded,
         totalPhotos: normalizedFeed.length,
         totalFetched,
-        pageSize: 150,
+        pageSize: PHOTO_MAX_PAGE_SIZE,
         delayMs: this.settings.interPageDelayMs,
         iterationsCompleted: iterationDetails.length,
         sinceTime: sinceTime.toISOString(),
@@ -876,21 +879,14 @@ export class RecNetService extends EventEmitter {
 
       const totalPhotos = sortedPhotos.length;
       const maxPhotosToDownload = this.settings.maxPhotosToDownload;
-      const hasDownloadLimit =
-        typeof maxPhotosToDownload === 'number' && maxPhotosToDownload > 0;
+      const hasDownloadLimit = maxPhotosToDownload && maxPhotosToDownload > 0;
+
       const existingPhotoFiles = (await fs.readdir(photosDir)).filter(file =>
         file.toLowerCase().endsWith('.jpg')
       ).length;
-      let remainingDownloadSlots = hasDownloadLimit
-        ? Math.max(0, maxPhotosToDownload - existingPhotoFiles)
-        : undefined;
-      const decrementRemainingSlots = () => {
-        if (remainingDownloadSlots === undefined) return;
-        if (remainingDownloadSlots > 0) {
-          remainingDownloadSlots--;
-        }
-      };
-      if (hasDownloadLimit && remainingDownloadSlots === 0) {
+      let remainingDownloadSlots = (maxPhotosToDownload || 0) - existingPhotoFiles;
+
+      if (hasDownloadLimit && remainingDownloadSlots <= 0) {
         console.log(
           `Skipping photo downloads: limit ${maxPhotosToDownload} reached by existing files (${existingPhotoFiles})`
         );
@@ -932,147 +928,57 @@ export class RecNetService extends EventEmitter {
       let skipped = 0;
       let retryAttempts = 0;
       let recoveredAfterRetry = 0;
-      const downloadResults: DownloadResultItem[] = [];
       let processedCount = 0;
 
       this.updateProgress('Downloading user photos...', 0, totalPhotos, 0);
 
+      let delay = 0;
+      const promises = [];
+      const semaphore = new Semaphore(PHOTO_DOWNLOAD_MAX_CONCURRENT_REQUESTS);
       for (const photo of sortedPhotos) {
-        if (this.currentOperation.cancelled) {
-          throw new Error('Operation cancelled');
+        if (hasDownloadLimit && remainingDownloadSlots <= 0) {
+          skipped = totalPhotos - (alreadyDownloaded + newDownloads);
+          break;
+        } 
+        else {
+          remainingDownloadSlots--;
         }
 
-        const photoId = this.normalizeId(photo.Id);
-        const imageName = photo.ImageName;
-        const photoUrl = buildCdnImageUrl(this.settings.cdnBase, imageName);
-
-        if (!photoId || !imageName) {
-          downloadResults.push({
-            error: 'invalid_photo_data',
-            photoId,
-            imageName,
-            photo: JSON.stringify(photo),
-          });
-          processedCount++;
-          continue;
-        }
-
-        const photoPath = path.join(photosDir, `${photoId}.jpg`);
-
-        // Check if photo already exists
-        if (await fs.pathExists(photoPath)) {
-          alreadyDownloaded++;
-          downloadResults.push({
-            photoId,
-            status: 'already_exists_in_photos',
-            path: photoPath,
-          });
-          processedCount++;
-          continue;
-        }
-
-        // Check if photo exists in feed folder and copy it
-        const feedPhotoPath = path.join(feedDir, `${photoId}.jpg`);
-        if (await fs.pathExists(feedPhotoPath)) {
-          await fs.copy(feedPhotoPath, photoPath);
-          alreadyDownloaded++;
-          decrementRemainingSlots();
-          downloadResults.push({
-            photoId,
-            status: 'copied_from_feed',
-            sourcePath: feedPhotoPath,
-            destinationPath: photoPath,
-          });
-          processedCount++;
-          continue;
-        }
-
-        // If we've hit the limit (including existing photos), skip any further downloads
-        if (
-          remainingDownloadSlots !== undefined &&
-          remainingDownloadSlots <= 0
-        ) {
-          skipped++;
-          downloadResults.push({
-            photoId,
-            status: 'skipped_limit_reached',
-            url: photoUrl,
-          });
-          processedCount++;
-          continue;
-        }
-
-        // Check if we've reached the download limit (only for new downloads)
-        let attemptsUsed = 1;
-        try {
-          const attempt = await this.downloadPhotoWithRetry(imageName, token);
-          attemptsUsed = attempt.attempts;
-          retryAttempts += Math.max(0, attempt.attempts - 1);
-          if (
-            attempt.attempts > 1 &&
-            attempt.response?.success &&
-            attempt.response.value
-          ) {
-            recoveredAfterRetry++;
+        promises.push(new Promise<DownloadResultItem>(async (resolve) => {
+          if (delay) { await this.delay(delay); }
+          await semaphore.acquire();
+          try {
+            const result = await this.downloadImage(photo, photosDir, feedDir, false);
+            const status = result.status;
+            if (status === 'downloaded') {
+              newDownloads++;
+              // result attempts can be undefined and we don't want to increment successful attempts
+              retryAttempts += (result.attempts || 1) - 1;
+              if (result.recoveredAfterRetry && result.recoveredAfterRetry === true) {
+                recoveredAfterRetry++;
+              }
+            } else if (status && (status.startsWith('already_exists') || status.startsWith('copied_from'))) {
+              alreadyDownloaded++;
+            } else if (status && (status === 'error' || status === 'failed')) {
+              failedDownloads++;
+            } else if (status && status === 'cancelled') {
+              skipped++;
+            }
+            resolve(result);
           }
-
-          const response = attempt.response;
-          if (response?.success && response.value) {
-            const data = Buffer.from(response.value);
-            await fs.writeFile(photoPath, data);
-            newDownloads++;
-            decrementRemainingSlots();
-            downloadResults.push({
-              photoId,
-              status: 'downloaded',
-              size: data.length,
-              path: photoPath,
-              url: photoUrl,
-              attempts: attempt.attempts,
-              retries: Math.max(0, attempt.attempts - 1),
-            });
-          } else if (response) {
-            failedDownloads++;
-            downloadResults.push({
-              photoId,
-              status: 'failed',
-              statusCode: response.status,
-              reason: (response.message || response.error) ?? undefined,
-              url: photoUrl,
-              attempts: attempt.attempts,
-              retries: Math.max(0, attempt.attempts - 1),
-            });
-          } else {
-            throw attempt.error ?? new Error('Download failed after retries');
-          }
-        } catch (error) {
-          if (error instanceof Error && error.message === 'Operation cancelled') {
+          catch (error) {
+            // downloadImage already has error handling, if it throws, we'll assume it's fatal
             throw error;
           }
-
-          failedDownloads++;
-          downloadResults.push({
-            photoId,
-            status: 'error',
-            error: (error as Error).message,
-            url: photoUrl,
-            attempts: attemptsUsed,
-            retries: Math.max(0, attemptsUsed - 1),
-          });
-        }
-
-        // Rate limiting
-        if (this.settings.interPageDelayMs > 0) {
-          await this.delay(this.settings.interPageDelayMs);
-        }
-
-        processedCount++;
-        this.updateProgress(
-          'Downloading photos...',
-          processedCount,
-          totalPhotos
-        );
+          finally {
+            semaphore.release()
+            this.updateProgress('Downloading user photos...', processedCount, totalPhotos);
+            processedCount++;
+          };
+        }))
+        delay += this.settings.interPageDelayMs;
       }
+      const downloadResults: DownloadResultItem[] = await Promise.all<DownloadResultItem>(promises);
 
       this.setOperationComplete();
 
@@ -1108,7 +1014,6 @@ export class RecNetService extends EventEmitter {
     token?: string
   ): Promise<DownloadResult> {
     await this.ensureSettingsLoaded();
-    this.currentOperation = { cancelled: false };
 
     try {
       this.resetProgressIssueState();
@@ -1134,6 +1039,8 @@ export class RecNetService extends EventEmitter {
         throw new Error('No feed photos found in the JSON file.');
       }
 
+
+
       const sortedPhotos = [...photos].sort((a, b) => {
         const timeA = a.CreatedAt
           ? new Date(a.CreatedAt).getTime()
@@ -1147,20 +1054,33 @@ export class RecNetService extends EventEmitter {
 
       const totalPhotos = sortedPhotos.length;
       const maxPhotosToDownload = this.settings.maxPhotosToDownload;
-      const hasDownloadLimit =
-        typeof maxPhotosToDownload === 'number' && maxPhotosToDownload > 0;
+      const hasDownloadLimit = maxPhotosToDownload && maxPhotosToDownload > 0;
+
       const existingFeedFiles = (await fs.readdir(feedPhotosDir)).filter(file =>
         file.toLowerCase().endsWith('.jpg')
       ).length;
-      let remainingDownloadSlots = hasDownloadLimit
-        ? Math.max(0, maxPhotosToDownload - existingFeedFiles)
-        : undefined;
-      const decrementRemainingSlots = () => {
-        if (remainingDownloadSlots === undefined) return;
-        if (remainingDownloadSlots > 0) {
-          remainingDownloadSlots--;
-        }
-      };
+      let remainingDownloadSlots = (maxPhotosToDownload || 0) - existingFeedFiles;
+      
+      if (this.currentOperation && this.currentOperation.cancelled) {
+        this.setOperationComplete();
+        return {
+          accountId,
+          feedPhotosDirectory: feedPhotosDir,
+          processedCount: 0,
+          downloadStats: {
+            totalPhotos,
+            alreadyDownloaded: existingFeedFiles,
+            newDownloads: 0,
+            failedDownloads: 0,
+            skipped: totalPhotos,
+            retryAttempts: 0,
+            recoveredAfterRetry: 0,
+          },
+          downloadResults: [],
+          totalResults: 0,
+        };
+      }
+
       if (hasDownloadLimit && remainingDownloadSlots === 0) {
         console.log(
           `Skipping feed photo downloads: limit ${maxPhotosToDownload} reached by existing files (${existingFeedFiles})`
@@ -1203,146 +1123,58 @@ export class RecNetService extends EventEmitter {
       let skipped = 0;
       let retryAttempts = 0;
       let recoveredAfterRetry = 0;
-      const downloadResults: DownloadResultItem[] = [];
       let processedCount = 0;
 
       this.updateProgress('Downloading feed photos...', 0, totalPhotos, 0);
 
+      let delay = 0;
+      const promises = [];
+      const semaphore = new Semaphore(PHOTO_DOWNLOAD_MAX_CONCURRENT_REQUESTS);
       for (const photo of sortedPhotos) {
-        if (this.currentOperation.cancelled) {
-          throw new Error('Operation cancelled');
+        if (hasDownloadLimit && remainingDownloadSlots <= 0) { 
+          skipped = totalPhotos - (alreadyDownloaded + newDownloads);
+          break;
+        } 
+        else {
+          remainingDownloadSlots--;
         }
 
-        const photoId = this.normalizeId(photo.Id);
-        const imageName = photo.ImageName;
-        const photoUrl = buildCdnImageUrl(this.settings.cdnBase, imageName);
-
-        if (!photoId || !imageName) {
-          downloadResults.push({
-            error: 'invalid_photo_data',
-            photoId,
-            imageName,
-            photo: JSON.stringify(photo),
-          });
-          processedCount++;
-          continue;
-        }
-
-        const photoPath = path.join(feedPhotosDir, `${photoId}.jpg`);
-
-        // Check if photo already exists
-        if (await fs.pathExists(photoPath)) {
-          alreadyDownloaded++;
-          downloadResults.push({
-            photoId,
-            status: 'already_exists_in_feed',
-            path: photoPath,
-          });
-          processedCount++;
-          continue;
-        }
-
-        // Check if photo exists in photos folder and copy it
-        const regularPhotoPath = path.join(photosDir, `${photoId}.jpg`);
-        if (await fs.pathExists(regularPhotoPath)) {
-          await fs.copy(regularPhotoPath, photoPath);
-          alreadyDownloaded++;
-          decrementRemainingSlots();
-          downloadResults.push({
-            photoId,
-            status: 'copied_from_photos',
-            sourcePath: regularPhotoPath,
-            destinationPath: photoPath,
-          });
-          processedCount++;
-          continue;
-        }
-
-        if (
-          remainingDownloadSlots !== undefined &&
-          remainingDownloadSlots <= 0
-        ) {
-          skipped++;
-          downloadResults.push({
-            photoId,
-            status: 'skipped_limit_reached',
-            url: photoUrl,
-          });
-          processedCount++;
-          continue;
-        }
-
-        let attemptsUsed = 1;
-        try {
-          const attempt = await this.downloadPhotoWithRetry(imageName, token);
-          attemptsUsed = attempt.attempts;
-          retryAttempts += Math.max(0, attempt.attempts - 1);
-          if (
-            attempt.attempts > 1 &&
-            attempt.response?.success &&
-            attempt.response.value
-          ) {
-            recoveredAfterRetry++;
+        promises.push(new Promise<DownloadResultItem>(async (resolve) => {
+          if (delay) { await this.delay(delay); }
+          await semaphore.acquire();
+          try {
+            const result = await this.downloadImage(photo, photosDir, feedPhotosDir, true);
+            const status = result.status;
+            if (status === 'downloaded') {
+              newDownloads++;
+              // result attempts can be undefined and we don't want to increment successful attempts
+              retryAttempts += (result.attempts || 1) - 1;
+              if (result.recoveredAfterRetry && result.recoveredAfterRetry === true) {
+                recoveredAfterRetry++;
+              }
+            } else if (status && (status.startsWith('already_exists') || status.startsWith('copied_from'))) {
+              alreadyDownloaded++;
+            } else if (status && (status === 'error' || status === 'failed')) {
+              failedDownloads++;
+            } else if (status && status === 'cancelled') {
+              skipped++;
+            }
+            resolve(result);
           }
-
-          const response = attempt.response;
-          if (response?.success && response.value) {
-            const data = Buffer.from(response.value);
-            await fs.writeFile(photoPath, data);
-            newDownloads++;
-            decrementRemainingSlots();
-            downloadResults.push({
-              photoId,
-              status: 'downloaded',
-              size: data.length,
-              path: photoPath,
-              url: photoUrl,
-              attempts: attempt.attempts,
-              retries: Math.max(0, attempt.attempts - 1),
-            });
-          } else if (response) {
-            failedDownloads++;
-            downloadResults.push({
-              photoId,
-              status: 'failed',
-              statusCode: response.status,
-              reason: (response.message || response.error) ?? undefined,
-              url: photoUrl,
-              attempts: attempt.attempts,
-              retries: Math.max(0, attempt.attempts - 1),
-            });
-          } else {
-            throw attempt.error ?? new Error('Download failed after retries');
-          }
-        } catch (error) {
-          if (error instanceof Error && error.message === 'Operation cancelled') {
+          catch (error) {
+            // downloadImage already has error handling, if it throws, we'll assume it's fatal
             throw error;
           }
-
-          failedDownloads++;
-          downloadResults.push({
-            photoId,
-            status: 'error',
-            error: (error as Error).message,
-            url: photoUrl,
-            attempts: attemptsUsed,
-            retries: Math.max(0, attemptsUsed - 1),
-          });
-        }
-
-        // Rate limiting
-        if (this.settings.interPageDelayMs > 0) {
-          await this.delay(this.settings.interPageDelayMs);
-        }
-
-        processedCount++;
-        this.updateProgress(
-          'Downloading feed photos...',
-          processedCount,
-          totalPhotos
-        );
+          finally {
+            semaphore.release()
+            this.updateProgress('Downloading feed photos...', processedCount, totalPhotos);
+            processedCount++;
+          };
+        }))
+        delay += this.settings.interPageDelayMs;
       }
-
+      const downloadResults: DownloadResultItem[] = await Promise.all<DownloadResultItem>(promises);
+      
       this.setOperationComplete();
 
       const downloadStats: DownloadStats = {
@@ -1369,6 +1201,107 @@ export class RecNetService extends EventEmitter {
         this.setOperationFailed((error as Error).message);
       }
       throw error;
+    }
+  }
+
+  async downloadImage(photo: Photo, photosDir: string, feedPhotosDir: string, isFeed: boolean, token?: string): Promise<DownloadResultItem> {
+    const photoId = this.normalizeId(photo.Id);
+    const imageName = photo.ImageName;
+    const photoUrl = buildCdnImageUrl(this.settings.cdnBase, imageName);
+
+    if (!photoId || !imageName) {
+      return {
+        error: 'invalid_photo_data',
+        photoId,
+        imageName,
+        photo: JSON.stringify(photo),
+      };
+    }
+
+    if (this.currentOperation && this.currentOperation.cancelled) {
+      return {
+        photoId,
+        status: 'cancelled',
+      };
+    }
+
+    const photoDir = isFeed ? feedPhotosDir : photosDir;
+    const photoPath = path.join(photoDir, `${photoId}.jpg`);
+
+    // Check if photo already exists
+    if (await fs.pathExists(photoPath)) {
+      return {
+        photoId,
+        status: isFeed ? 'already_exists_in_feed' : 'already_exists_in_photos',
+        path: photoPath,
+      };
+    }
+
+    // Check if photo exists in photos folder and copy it
+    const otherPhotoPath = path.join(isFeed ? photosDir : feedPhotosDir, `${photoId}.jpg`);
+    if (await fs.pathExists(otherPhotoPath)) {
+      await fs.copy(otherPhotoPath, photoPath);
+      return {
+        photoId,
+        status: isFeed ? 'copied_from_photos' : 'copied_from_feed',
+        sourcePath: otherPhotoPath,
+        destinationPath: photoPath,
+      };
+    }
+
+    let attemptsUsed = 1;
+    try {
+      const attempt = await this.downloadPhotoWithRetry(imageName, token);
+      attemptsUsed = attempt.attempts;
+      let recoveredAfterRetry = false;
+      if (
+        attempt.attempts > 1 &&
+        attempt.response?.success &&
+        attempt.response.value
+      ) {
+        recoveredAfterRetry = true;
+      }
+
+      const response = attempt.response;
+      if (response?.success && response.value) {
+        const data = Buffer.from(response.value);
+        await fs.writeFile(photoPath, data);
+        return {
+          photoId,
+          status: 'downloaded',
+          size: data.length,
+          path: photoPath,
+          url: photoUrl,
+          attempts: attempt.attempts,
+          retries: Math.max(0, attempt.attempts - 1),
+          recoveredAfterRetry
+        };
+      } else if (response) {
+        return {
+          photoId,
+          status: 'failed',
+          statusCode: response.status,
+          reason: (response.message || response.error) ?? undefined,
+          url: photoUrl,
+          attempts: attempt.attempts,
+          retries: Math.max(0, attempt.attempts - 1),
+        };
+      } else {
+        throw attempt.error ?? new Error('Download failed after retries');
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Operation cancelled') {
+        throw error;
+      }
+
+      return {
+        photoId,
+        status: 'error',
+        error: (error as Error).message,
+        url: photoUrl,
+        attempts: attemptsUsed,
+        retries: Math.max(0, attemptsUsed - 1),
+      };
     }
   }
 
