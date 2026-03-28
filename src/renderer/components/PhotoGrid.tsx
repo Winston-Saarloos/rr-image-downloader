@@ -521,8 +521,6 @@ const PhotoCard: React.FC<PhotoCardProps> = React.memo(
     const commentCount =
       typeof photo.CommentCount === 'number' ? photo.CommentCount : 0;
     const cheerCount = typeof photo.CheerCount === 'number' ? photo.CheerCount : 0;
-    const formattedCommentCount = commentCount.toLocaleString();
-    const formattedCheerCount = cheerCount.toLocaleString();
 
     const handleFavoriteClick = React.useCallback(
       (e: React.MouseEvent) => {
@@ -565,18 +563,14 @@ const PhotoCard: React.FC<PhotoCardProps> = React.memo(
           >
             <Heart className={`h-4 w-4 ${favorited ? 'fill-current' : ''}`} />
           </Button>
-          {commentCount > 1 && (
-            <div className="pointer-events-none absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white">
-              <MessageCircle className="h-3.5 w-3.5" />
-              <span>{formattedCommentCount}</span>
-            </div>
-          )}
-          {cheerCount > 1 && (
-            <div className="pointer-events-none absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white">
-              <span>{formattedCheerCount}</span>
-              <ThumbsUp className="h-3.5 w-3.5" />
-            </div>
-          )}
+          <div className="pointer-events-none absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white">
+            <MessageCircle className="h-3.5 w-3.5" />
+            <span>{commentCount}</span>
+          </div>
+          <div className="pointer-events-none absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white">
+            <span>{cheerCount}</span>
+            <ThumbsUp className="h-3.5 w-3.5" />
+          </div>
         </div>
         <CardContent className="p-4 space-y-2">
           {!hideRoom && (

@@ -1,20 +1,8 @@
 import {
   buildCdnImageUrl,
   DEFAULT_CDN_BASE,
-  normalizeCdnBase,
   shouldIncludeTokenForCdnBase,
 } from '../cdnUrl';
-
-describe('normalizeCdnBase', () => {
-  it('always returns the canonical cdn.rec.net base', () => {
-    expect(normalizeCdnBase(DEFAULT_CDN_BASE)).toBe(DEFAULT_CDN_BASE);
-    expect(normalizeCdnBase('https://cdn.rec.net/img/{image_name}')).toBe(
-      DEFAULT_CDN_BASE
-    );
-    expect(normalizeCdnBase('https://img.rec.net/')).toBe(DEFAULT_CDN_BASE);
-    expect(normalizeCdnBase('img.rec.net')).toBe(DEFAULT_CDN_BASE);
-  });
-});
 
 describe('buildCdnImageUrl', () => {
   it('uses default cdn.rec.net/img base', () => {
@@ -23,12 +11,12 @@ describe('buildCdnImageUrl', () => {
     );
   });
 
-  it('rewrites legacy img.rec.net base to cdn.rec.net', () => {
+  it('supports legacy img.rec.net base (with or without trailing slash)', () => {
     expect(buildCdnImageUrl('https://img.rec.net/', 'foo.png')).toBe(
-      'https://cdn.rec.net/img/foo.png'
+      'https://img.rec.net/foo.png'
     );
     expect(buildCdnImageUrl('https://img.rec.net', 'foo.png')).toBe(
-      'https://cdn.rec.net/img/foo.png'
+      'https://img.rec.net/foo.png'
     );
   });
 
@@ -50,7 +38,7 @@ describe('shouldIncludeTokenForCdnBase', () => {
     expect(shouldIncludeTokenForCdnBase('cdn.rec.net/img')).toBe(false);
   });
 
-  it('returns false for img.rec.net because it is rewritten to cdn.rec.net', () => {
-    expect(shouldIncludeTokenForCdnBase('https://img.rec.net/')).toBe(false);
+  it('returns true for img.rec.net', () => {
+    expect(shouldIncludeTokenForCdnBase('https://img.rec.net/')).toBe(true);
   });
 });

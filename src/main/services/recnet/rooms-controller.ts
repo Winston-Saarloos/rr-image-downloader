@@ -34,7 +34,7 @@ export class RoomsController {
         );
 
         if (response.success && Array.isArray(response.value)) {
-          console.log(`Rooms pulled: ${response.value.length}`);
+          console.log(`Rooms pulled: ${response.value.length}`)
           results.push(
             ...response.value.map(room => ({
               ...room,
@@ -49,9 +49,6 @@ export class RoomsController {
           );
         }
       } catch (error) {
-        if ((error as Error).message === 'Operation cancelled') {
-          throw error;
-        }
         console.log(
           `Failed to fetch batch of rooms: ${(error as Error).message}`
         );

@@ -46,9 +46,6 @@ export class AccountsController {
           );
         }
       } catch (error) {
-        if ((error as Error).message === 'Operation cancelled') {
-          throw error;
-        }
         console.log(
           `Failed to fetch batch of accounts: ${(error as Error).message}`
         );
