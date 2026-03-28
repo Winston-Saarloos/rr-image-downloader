@@ -13,6 +13,7 @@ import {
   Progress,
   BulkDataRefreshOptions,
   UserFacingIncident,
+  DownloadStats,
 } from '../shared/types';
 import { FavoritesProvider } from './contexts/FavoritesContext';
 import {
@@ -27,6 +28,13 @@ interface DownloadRequestState {
   token: string;
   filePath: string;
   refreshOptions: BulkDataRefreshOptions;
+}
+
+interface DownloadPanelSummary {
+  username: string;
+  accountId: string;
+  userPhotos?: DownloadStats;
+  feedPhotos?: DownloadStats;
 }
 
 function App() {
@@ -90,6 +98,8 @@ function App() {
     useState<DownloadRequestState | null>(null);
   const [activeIncident, setActiveIncident] =
     useState<UserFacingIncident | null>(null);
+  const [downloadPanelSummary, setDownloadPanelSummary] =
+    useState<DownloadPanelSummary | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -264,6 +274,7 @@ function App() {
     };
 
     setLastDownloadRequest(requestState);
+    setDownloadPanelSummary(null);
 
     setIsDownloading(true);
     setDownloadStartedAt(downloadStartedAtMs);
@@ -377,6 +388,11 @@ function App() {
 
         const downloadStats = downloadResult.data?.downloadStats;
         if (downloadStats) {
+          setDownloadPanelSummary({
+            username,
+            accountId,
+            userPhotos: downloadStats,
+          });
           addLog(
             downloadStats.failedDownloads > 0
               ? `Download complete with warnings: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} missed after retries`
@@ -418,6 +434,12 @@ function App() {
 
         const downloadFeedStats = downloadFeedResult.data?.downloadStats;
         if (downloadFeedStats) {
+          setDownloadPanelSummary(prev => ({
+            username,
+            accountId,
+            userPhotos: prev?.userPhotos ?? downloadStats,
+            feedPhotos: downloadFeedStats,
+          }));
           addLog(
             downloadFeedStats.failedDownloads > 0
               ? `Feed download complete with warnings: ${downloadFeedStats.newDownloads} new, ${downloadFeedStats.alreadyDownloaded} existing, ${downloadFeedStats.failedDownloads} missed after retries`
@@ -671,6 +693,7 @@ function App() {
                 onRetryDownload={handleRetryDownload}
                 canRetryDownload={canRetryDownload}
                 isRetrying={isDownloading}
+                summary={downloadPanelSummary}
               />
             </div>
           )}
