@@ -9,8 +9,9 @@ export interface RecNetSettings {
   outputRoot: string;
   /** Image CDN base URL (image name is appended automatically). */
   cdnBase: string;
-  interPageDelayMs: number;
+  interPageDelayMs?: number;
   maxPhotosToDownload?: number; // Limit for testing - undefined means no limit
+  maxConcurrentDownloads: number;
 }
 
 export interface BulkDataRefreshOptions {

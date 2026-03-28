@@ -37,7 +37,6 @@ function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
     outputRoot: 'output',
     cdnBase: DEFAULT_CDN_BASE,
-    interPageDelayMs: 500,
   });
 
   const [progress, setProgress] = useState<Progress>({
