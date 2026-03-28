@@ -948,60 +948,65 @@ export class RecNetService extends EventEmitter {
 
         scheduledPhotoCount++;
         promises.push(
-          new Promise<DownloadResultItem>(async resolve => {
-            if (delay) {
-              await this.delay(delay);
-            }
-            await semaphore.acquire();
-            try {
-              const result = await this.downloadImage(
-                photo,
-                photosDir,
-                feedDir,
-                false
-              );
-              const status = result.status;
-              if (status === 'downloaded') {
-                newDownloads++;
-                // result attempts can be undefined and we don't want to increment successful attempts
-                retryAttempts += (result.attempts || 1) - 1;
-                if (
-                  result.recoveredAfterRetry &&
-                  result.recoveredAfterRetry === true
-                ) {
-                  recoveredAfterRetry++;
+          new Promise<DownloadResultItem>((resolve, reject) => {
+            void (async () => {
+              try {
+                if (delay) {
+                  await this.delay(delay);
                 }
-              } else if (
-                status &&
-                (status.startsWith('already_exists') ||
-                  status.startsWith('copied_from'))
-              ) {
-                alreadyDownloaded++;
-              } else if (
-                status &&
-                (status === 'error' || status === 'failed')
-              ) {
-                failedDownloads++;
-                retryAttempts += (result.attempts || 1) - 1;
-              } else if (status && status === 'cancelled') {
-                skipped++;
+                await semaphore.acquire();
+                try {
+                  const result = await this.downloadImage(
+                    photo,
+                    photosDir,
+                    feedDir,
+                    false
+                  );
+                  const status = result.status;
+                  if (status === 'downloaded') {
+                    newDownloads++;
+                    // result attempts can be undefined and we don't want to increment successful attempts
+                    retryAttempts += (result.attempts || 1) - 1;
+                    if (
+                      result.recoveredAfterRetry &&
+                      result.recoveredAfterRetry === true
+                    ) {
+                      recoveredAfterRetry++;
+                    }
+                  } else if (
+                    status &&
+                    (status.startsWith('already_exists') ||
+                      status.startsWith('copied_from'))
+                  ) {
+                    alreadyDownloaded++;
+                  } else if (
+                    status &&
+                    (status === 'error' || status === 'failed')
+                  ) {
+                    failedDownloads++;
+                    retryAttempts += (result.attempts || 1) - 1;
+                  } else if (status && status === 'cancelled') {
+                    skipped++;
+                  }
+                  resolve(result);
+                } catch (error) {
+                  // downloadImage already has error handling, if it throws, we'll assume it's fatal
+                  reject(error);
+                } finally {
+                  semaphore.release();
+                  if (this.currentOperation === operation) {
+                    this.updateProgress(
+                      'Downloading user photos...',
+                      processedCount,
+                      totalPhotos
+                    );
+                    processedCount++;
+                  }
+                }
+              } catch (error) {
+                reject(error);
               }
-              resolve(result);
-            } catch (error) {
-              // downloadImage already has error handling, if it throws, we'll assume it's fatal
-              throw error;
-            } finally {
-              semaphore.release();
-              if (this.currentOperation !== operation) {
-                return;
-              }
-              this.updateProgress(
-                'Downloading user photos...',
-                processedCount,
-                totalPhotos
-              );
-              processedCount++;
-            }
+            })();
           })
         );
         delay += this.settings.interPageDelayMs;
@@ -1159,60 +1164,65 @@ export class RecNetService extends EventEmitter {
 
         scheduledPhotoCount++;
         promises.push(
-          new Promise<DownloadResultItem>(async resolve => {
-            if (delay) {
-              await this.delay(delay);
-            }
-            await semaphore.acquire();
-            try {
-              const result = await this.downloadImage(
-                photo,
-                photosDir,
-                feedPhotosDir,
-                true
-              );
-              const status = result.status;
-              if (status === 'downloaded') {
-                newDownloads++;
-                // result attempts can be undefined and we don't want to increment successful attempts
-                retryAttempts += (result.attempts || 1) - 1;
-                if (
-                  result.recoveredAfterRetry &&
-                  result.recoveredAfterRetry === true
-                ) {
-                  recoveredAfterRetry++;
+          new Promise<DownloadResultItem>((resolve, reject) => {
+            void (async () => {
+              try {
+                if (delay) {
+                  await this.delay(delay);
                 }
-              } else if (
-                status &&
-                (status.startsWith('already_exists') ||
-                  status.startsWith('copied_from'))
-              ) {
-                alreadyDownloaded++;
-              } else if (
-                status &&
-                (status === 'error' || status === 'failed')
-              ) {
-                failedDownloads++;
-                retryAttempts += (result.attempts || 1) - 1;
-              } else if (status && status === 'cancelled') {
-                skipped++;
+                await semaphore.acquire();
+                try {
+                  const result = await this.downloadImage(
+                    photo,
+                    photosDir,
+                    feedPhotosDir,
+                    true
+                  );
+                  const status = result.status;
+                  if (status === 'downloaded') {
+                    newDownloads++;
+                    // result attempts can be undefined and we don't want to increment successful attempts
+                    retryAttempts += (result.attempts || 1) - 1;
+                    if (
+                      result.recoveredAfterRetry &&
+                      result.recoveredAfterRetry === true
+                    ) {
+                      recoveredAfterRetry++;
+                    }
+                  } else if (
+                    status &&
+                    (status.startsWith('already_exists') ||
+                      status.startsWith('copied_from'))
+                  ) {
+                    alreadyDownloaded++;
+                  } else if (
+                    status &&
+                    (status === 'error' || status === 'failed')
+                  ) {
+                    failedDownloads++;
+                    retryAttempts += (result.attempts || 1) - 1;
+                  } else if (status && status === 'cancelled') {
+                    skipped++;
+                  }
+                  resolve(result);
+                } catch (error) {
+                  // downloadImage already has error handling, if it throws, we'll assume it's fatal
+                  reject(error);
+                } finally {
+                  semaphore.release();
+                  if (this.currentOperation === operation) {
+                    this.updateProgress(
+                      'Downloading feed photos...',
+                      processedCount,
+                      totalPhotos
+                    );
+                    processedCount++;
+                  }
+                }
+              } catch (error) {
+                reject(error);
               }
-              resolve(result);
-            } catch (error) {
-              // downloadImage already has error handling, if it throws, we'll assume it's fatal
-              throw error;
-            } finally {
-              semaphore.release();
-              if (this.currentOperation !== operation) {
-                return;
-              }
-              this.updateProgress(
-                'Downloading feed photos...',
-                processedCount,
-                totalPhotos
-              );
-              processedCount++;
-            }
+            })();
           })
         );
         delay += this.settings.interPageDelayMs;
