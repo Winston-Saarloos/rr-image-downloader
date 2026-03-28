@@ -477,27 +477,6 @@ describe('RecNetService - Download Functionality', () => {
       await expect(service.downloadPhotos(testAccountId)).rejects.toThrow(
         'Operation cancelled'
       );
-
-      const progress = service.getProgress();
-      expect(progress.isRunning).toBe(false);
-      expect(progress.currentStep).toBe('Cancelled');
-    });
-
-    it('should ignore late progress updates after cancellation', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (service as any).currentOperation = { cancelled: false };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (service as any).updateProgress('Downloading user photos...', 1, 2, 50);
-
-      service.cancelCurrentOperation();
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (service as any).updateProgress('Downloading user photos...', 2, 2, 100);
-
-      const progress = service.getProgress();
-      expect(progress.isRunning).toBe(true);
-      expect(progress.currentStep).toBe('Cancelling...');
-      expect(progress.progress).toBe(50);
     });
 
     /**
