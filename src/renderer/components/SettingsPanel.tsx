@@ -78,8 +78,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       await onUpdateSettings({ maxConcurrentDownloads: 30 });
     } else {
       const numValue = parseInt(value);
-      if (!isNaN(numValue) && numValue > 0) {
-        await onUpdateSettings({ maxConcurrentDownloads: numValue });
+      if (!isNaN(numValue)) {
+        const clampedValue = Math.min(30, Math.max(1, numValue));
+        await onUpdateSettings({ maxConcurrentDownloads: clampedValue });
       }
     }
   };
@@ -194,7 +195,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             value={settings.maxConcurrentDownloads}
             onChange={handleMaxConcurrentChange}
             min="1"
-            max="100"
+            max="30"
           />
           <p className="text-sm text-muted-foreground">
             Amount of images that can be downloaded concurrently. 
