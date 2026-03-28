@@ -22,6 +22,7 @@ export interface ElectronAPI {
     token?: string;
     forceAccountsRefresh?: boolean;
     forceRoomsRefresh?: boolean;
+    forceEventsRefresh?: boolean;
   }) => Promise<ApiResponse<CollectionResult>>;
 
   collectFeedPhotos: (params: {
@@ -30,6 +31,7 @@ export interface ElectronAPI {
     incremental?: boolean;
     forceAccountsRefresh?: boolean;
     forceRoomsRefresh?: boolean;
+    forceEventsRefresh?: boolean;
   }) => Promise<ApiResponse<CollectionResult>>;
 
   downloadPhotos: (params: { accountId: string; token?: string }) => Promise<ApiResponse<DownloadResult>>;
@@ -44,7 +46,10 @@ export interface ElectronAPI {
   removeProgressListener: (callback: (event: unknown, progress: Progress) => void) => void;
 
   lookupAccountById: (accountId: string) => Promise<ApiResponse<AccountInfo>>;
-  lookupAccountByUsername: (username: string, token?: string) => Promise<AccountInfo>;
+  lookupAccountByUsername: (
+    username: string,
+    token?: string
+  ) => Promise<ApiResponse<AccountInfo>>;
   searchAccounts: (username: string, token?: string) => Promise<ApiResponse<AccountInfo[]>>;
   clearAccountData: (accountId: string) => Promise<ApiResponse<{ filesRemoved: number }>>;
   loadPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;

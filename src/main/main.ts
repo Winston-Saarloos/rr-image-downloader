@@ -374,10 +374,7 @@ ipcMain.handle(
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
-      const result = await recNetService.downloadPhotos(
-        params.accountId,
-        params.token
-      );
+      const result = await recNetService.downloadPhotos(params.accountId);
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -392,10 +389,7 @@ ipcMain.handle(
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
-      const result = await recNetService.downloadFeedPhotos(
-        params.accountId,
-        params.token
-      );
+      const result = await recNetService.downloadFeedPhotos(params.accountId);
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };

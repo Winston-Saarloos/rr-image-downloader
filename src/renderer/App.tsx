@@ -21,6 +21,10 @@ import {
   toOperationErrorData,
 } from './utils/errorPresentation';
 import { ErrorRecoveryBanner } from './components/ErrorRecoveryBanner';
+import {
+  buildDownloadProgressIncident,
+  getDownloadProgressLogEntries,
+} from './utils/downloadProgressFeedback';
 
 interface DownloadRequestState {
   username: string;
@@ -63,6 +67,7 @@ function App() {
   const [hasScrolledPhotos, setHasScrolledPhotos] = useState(false);
   const scrollPositionRef = useRef(0);
   const photoScrollRef = useRef<HTMLDivElement | null>(null);
+  const previousProgressRef = useRef<Progress | null>(null);
   const [logs, setLogs] = useState<
     Array<{
       message: string;
@@ -160,13 +165,16 @@ function App() {
     }
   };
 
-  const addLog = (
-    message: string,
-    type: 'info' | 'success' | 'error' | 'warning' = 'info'
-  ) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setLogs(prev => [...prev.slice(-99), { message, type, timestamp }]);
-  };
+  const addLog = useCallback(
+    (
+      message: string,
+      type: 'info' | 'success' | 'error' | 'warning' = 'info'
+    ) => {
+      const timestamp = new Date().toLocaleTimeString();
+      setLogs(prev => [...prev.slice(-99), { message, type, timestamp }]);
+    },
+    []
+  );
 
   const dismissIncident = useCallback(() => setActiveIncident(null), []);
 
@@ -195,17 +203,16 @@ function App() {
     []
   );
 
-  const addResult = (
-    operation: string,
-    data: unknown,
-    type: 'success' | 'error'
-  ) => {
-    const timestamp = new Date().toLocaleString();
-    setResults(prev => [
-      { operation, data, type, timestamp },
-      ...prev.slice(0, 9),
-    ]);
-  };
+  const addResult = useCallback(
+    (operation: string, data: unknown, type: 'success' | 'error') => {
+      const timestamp = new Date().toLocaleString();
+      setResults(prev => [
+        { operation, data, type, timestamp },
+        ...prev.slice(0, 9),
+      ]);
+    },
+    []
+  );
 
   const clearLogs = () => {
     setLogs([]);
@@ -234,6 +241,39 @@ function App() {
     !progress.isRunning &&
     Math.min(Math.max(Math.round(progress.progress ?? 0), 0), 100) === 0 &&
     (!progress.currentStep || progress.currentStep === 'Ready');
+
+  useEffect(() => {
+    const previousProgress = previousProgressRef.current;
+
+    if (previousProgress) {
+      getDownloadProgressLogEntries(previousProgress, progress).forEach(entry => {
+        addLog(entry.message, entry.type);
+      });
+
+      const progressChanged =
+        progress.issueCount !== previousProgress.issueCount ||
+        progress.retryAttempts !== previousProgress.retryAttempts ||
+        progress.failedItems !== previousProgress.failedItems ||
+        progress.recoveredAfterRetry !== previousProgress.recoveredAfterRetry ||
+        progress.lastIssue !== previousProgress.lastIssue ||
+        progress.isRunning !== previousProgress.isRunning ||
+        progress.currentStep !== previousProgress.currentStep;
+      const hasRetryDrivenState =
+        progress.retryAttempts > 0 ||
+        progress.recoveredAfterRetry > 0 ||
+        previousProgress.retryAttempts > 0 ||
+        previousProgress.recoveredAfterRetry > 0;
+
+      if (progressChanged && hasRetryDrivenState) {
+        const incident = buildDownloadProgressIncident(progress);
+        if (incident) {
+          setActiveIncident(incident);
+        }
+      }
+    }
+
+    previousProgressRef.current = progress;
+  }, [addLog, progress]);
 
   const handleDownload = async (
     username: string,
@@ -554,7 +594,6 @@ function App() {
         const cancelled = await window.electronAPI.cancelOperation();
         if (cancelled) {
           addLog('Download cancelled', 'warning');
-          setIsDownloading(false);
           setProgress(prev => ({
             ...prev,
             isRunning: false,

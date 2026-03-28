@@ -44,7 +44,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Toggle favorite status
-  const toggleFavorite = useCallback(async (photoId: string) => {
+  const toggleFavorite = useCallback(async (photoId: string): Promise<boolean> => {
     try {
       if (window.electronAPI) {
         const result = await window.electronAPI.toggleFavorite(photoId);
@@ -59,7 +59,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
             }
             return newFavorites;
           });
-          return result.data; // Returns true if now favorited, false if unfavorited
+          return result.data ?? false; // Returns true if now favorited, false if unfavorited
         }
       }
     } catch (error) {

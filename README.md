@@ -10,6 +10,34 @@ In the event Rec Room doesn't exist. This application will allow you to download
 
 **\*\*Use this application at your own risk. While Rec Room likely won't come after you it is in violation of their Terms of Service (ToS) to use. This application is deliberatly designed to be data efficient and relies on heavy caching and deduplication to make sure only neccessary data is downloaded. The requests made to Rec Room's services are throttled (configurable defaults to 0.5 seconds) so it should not raise any red flags or result in an IP ban for your account.**\*\*
 
+## Using the app (downloadable executable .exe)
+
+1. Go to [releases](https://github.com/Winston-Saarloos/rr-image-downloader/releases) and download the executable for your OS.
+2. Run the executable
+3. Download images
+4. Enjoy forever
+
+## Data locations
+
+- Downloads live under your chosen output folder (default `output`):
+  - `<output>/<accountId>/images/` - downloaded profile images
+  - `<output>/<accountId>/feed/` - downloaded feed images
+  - `<output>/<accountId>/<accountId>_images.json` and `<accountId>_feed.json` - cached metadata
+- App settings persist at `~/.recnet-photo-downloader/settings.json` (output path, delays, limits).
+
+## Troubleshooting
+
+- Validation errors or 401s: fetch a fresh token and ensure it matches the account you searched.
+- Missing images: confirm the output path matches what the app is using and that the account is selected in the viewer.
+- Rate limits or slow responses: increase the request delay in Debug > Settings.
+- Stuck progress: cancel, reopen the Download dialog, and retry (cached metadata will speed things up unless you force refresh).
+
+## Problems & Solutions:
+
+Error: Error invoking remote method 'update-settings': Error: EPERM: operation not permitted, mkdir 'output'
+
+Solution: Right click and run the Photo Downloader as an administrator. The program is unable to save the downloaded data and photos to your hard drive because it does not have permission to do so.
+
 ## Features
 
 - Download and view images offline
@@ -82,34 +110,6 @@ In the event Rec Room doesn't exist. This application will allow you to download
    - Open a image for details and metadata.
 9. Open **Stats** to see charts and summary metrics for the selected account.
 10. Use the **Debug** menu (gear icon) to change the output path, adjust request delay, set a max download count for testing, and view logs/results.
-
-## Using the app (downloadable executable)
-
-1. Go to releases and download the executable for your OS.
-2. Run the executable
-3. Download images
-4. Enjoy forever
-
-## Data locations
-
-- Downloads live under your chosen output folder (default `output`):
-  - `<output>/<accountId>/images/` - downloaded profile images
-  - `<output>/<accountId>/feed/` - downloaded feed images
-  - `<output>/<accountId>/<accountId>_images.json` and `<accountId>_feed.json` - cached metadata
-- App settings persist at `~/.recnet-photo-downloader/settings.json` (output path, delays, limits).
-
-## Troubleshooting
-
-- Validation errors or 401s: fetch a fresh token and ensure it matches the account you searched.
-- Missing images: confirm the output path matches what the app is using and that the account is selected in the viewer.
-- Rate limits or slow responses: increase the request delay in Debug > Settings.
-- Stuck progress: cancel, reopen the Download dialog, and retry (cached metadata will speed things up unless you force refresh).
-
-## Problems & Solutions:
-
-Error: Error invoking remote method 'update-settings': Error: EPERM: operation not permitted, mkdir 'output'
-
-Solution: Right click and run the program as an administrator. The program is unable to save the downloaded data and photos to your hard drive.
 
 ## License
 
