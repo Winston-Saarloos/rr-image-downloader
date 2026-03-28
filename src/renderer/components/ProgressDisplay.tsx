@@ -221,7 +221,7 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
                   >
                     {issueMessage}
                   </p>
-                  {canOpenIssueDetails && onOpenOperationResults && (
+                  {canOpenIssueDetails && (
                     <p
                       className={
                         showErrorTone

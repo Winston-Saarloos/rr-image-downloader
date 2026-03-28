@@ -240,6 +240,7 @@ describe('RecNetService - Caching Functionality', () => {
       expect(result.accountsFetched).toBe(1);
       expect(mockAccountsController.fetchBulkAccounts).toHaveBeenCalledWith(
         ['account-2'],
+        undefined,
         undefined
       );
       expect(mockedFs.writeJson).toHaveBeenCalled();
@@ -292,6 +293,7 @@ describe('RecNetService - Caching Functionality', () => {
       expect(result.accountsFetched).toBe(2);
       expect(mockAccountsController.fetchBulkAccounts).toHaveBeenCalledWith(
         ['account-1', 'account-2'],
+        undefined,
         undefined
       );
     });
@@ -362,6 +364,7 @@ describe('RecNetService - Caching Functionality', () => {
       expect(result.accountsFetched).toBe(1);
       expect(mockAccountsController.fetchBulkAccounts).toHaveBeenCalledWith(
         ['account-1'],
+        undefined,
         undefined
       );
       expect(mockedFs.writeJson).toHaveBeenCalled();
@@ -525,6 +528,7 @@ describe('RecNetService - Caching Functionality', () => {
       expect(result.roomsFetched).toBe(1);
       expect(mockRoomsController.fetchBulkRooms).toHaveBeenCalledWith(
         ['room-2'],
+        undefined,
         undefined
       );
     });
@@ -569,6 +573,7 @@ describe('RecNetService - Caching Functionality', () => {
       expect(result.roomsFetched).toBe(2);
       expect(mockRoomsController.fetchBulkRooms).toHaveBeenCalledWith(
         ['room-1', 'room-2'],
+        undefined,
         undefined
       );
     });
@@ -605,6 +610,7 @@ describe('RecNetService - Caching Functionality', () => {
       expect(result.roomsFetched).toBe(1);
       expect(mockRoomsController.fetchBulkRooms).toHaveBeenCalledWith(
         ['room-1'],
+        undefined,
         undefined
       );
       expect(mockedFs.writeJson).toHaveBeenCalled();
@@ -735,6 +741,7 @@ describe('RecNetService - Caching Functionality', () => {
       expect(result.eventsFetched).toBe(1);
       expect(mockEventsController.fetchBulkEvents).toHaveBeenCalledWith(
         ['event-2'],
+        undefined,
         undefined
       );
     });
@@ -779,6 +786,7 @@ describe('RecNetService - Caching Functionality', () => {
       expect(result.eventsFetched).toBe(2);
       expect(mockEventsController.fetchBulkEvents).toHaveBeenCalledWith(
         ['event-1', 'event-2'],
+        undefined,
         undefined
       );
     });

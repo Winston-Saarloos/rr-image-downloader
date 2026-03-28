@@ -78,7 +78,7 @@ export const ErrorRecoveryBanner: React.FC<ErrorRecoveryBannerProps> = ({
 
   return (
     <div
-      className={`border-b px-3 py-2.5 ${borderTone}`}
+      className={`px-3 py-2.5 ${borderTone} mb-4 rounded-lg`}
       role="alert"
       aria-live="polite"
     >
@@ -129,11 +129,7 @@ export const ErrorRecoveryBanner: React.FC<ErrorRecoveryBannerProps> = ({
               </Button>
             )}
             {onOpenDownloadPanel && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onOpenDownloadPanel}
-              >
+              <Button size="sm" variant="outline" onClick={onOpenDownloadPanel}>
                 Open download
               </Button>
             )}

@@ -103,12 +103,15 @@ export async function axiosRequest<T = unknown>(
   } catch (unknownError) {
     if (axios.isAxiosError(unknownError)) {
       const axiosError = unknownError as AxiosError;
+      const isAborted =
+        axiosError.code === 'ERR_CANCELED' ||
+        (requestConfig.signal?.aborted ?? false);
       return {
         success: false,
         value: null,
         status: axiosError.response?.status,
         error: axiosError.code ?? 'NETWORK_ERROR',
-        message: axiosError.message,
+        message: isAborted ? 'Operation cancelled' : axiosError.message,
       };
     }
 

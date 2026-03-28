@@ -480,6 +480,103 @@ describe('RecNetService - Download Functionality', () => {
       );
     });
 
+    it('should abort an in-flight photo request when cancelled', async () => {
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 'image1.jpg')];
+
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+      const photosDir = path.join(testOutputDir, testAccountId, 'photos');
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === photosJsonPath) return true;
+        if (p.startsWith(path.join(photosDir, 'photo-'))) return false;
+        return false;
+      });
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      let resolveStarted!: () => void;
+      const started = new Promise<void>(resolve => {
+        resolveStarted = resolve;
+      });
+
+      mockPhotosController.downloadPhoto.mockImplementation(
+        async (_imageName, _cdnBase, _token, options) =>
+          await new Promise<GenericResponse<ArrayBuffer>>((_, reject) => {
+            resolveStarted();
+            options?.signal?.addEventListener(
+              'abort',
+              () => reject(new Error('Operation cancelled')),
+              { once: true }
+            );
+          })
+      );
+
+      const done = service.downloadPhotos(testAccountId);
+      await started;
+
+      expect(service.cancelCurrentOperation()).toBe(true);
+      await expect(done).rejects.toThrow('Operation cancelled');
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(1);
+    });
+
+    it('should stop waiting for retry delay when cancelled', async () => {
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 'image1.jpg')];
+
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === photosJsonPath) return true;
+        return false;
+      });
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+      (service as any).delay.mockImplementation(function (
+        this: RecNetService,
+        ms: number,
+        operation: unknown
+      ) {
+        return (RecNetService.prototype as unknown as { delay: Function }).delay.call(
+          this,
+          ms,
+          operation
+        );
+      });
+
+      mockPhotosController.downloadPhoto
+        .mockResolvedValueOnce({
+          success: false,
+          value: null,
+          status: 503,
+          error: 'Temporary outage',
+        } as GenericResponse<ArrayBuffer>)
+        .mockResolvedValue({
+          success: true,
+          value: new ArrayBuffer(1024),
+          status: 200,
+        } as GenericResponse<ArrayBuffer>);
+
+      const done = service.downloadPhotos(testAccountId);
+
+      for (let i = 0; i < 20 && mockPhotosController.downloadPhoto.mock.calls.length < 1; i++) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(1);
+      expect(service.cancelCurrentOperation()).toBe(true);
+      await expect(done).rejects.toThrow('Operation cancelled');
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(1);
+    });
+
     /**
      * When every parallel worker returns { status: 'cancelled' } (no rejection),
      * downloadPhotos must still reject so the UI pipeline stops instead of showing Complete.
@@ -555,6 +652,63 @@ describe('RecNetService - Download Functionality', () => {
       expect(runningAfterCancelled.length).toBe(0);
     });
 
+    it('should emit progress issues and recovery details for transient network failures', async () => {
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 'image1.jpg')];
+
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === photosJsonPath) return true;
+        return false;
+      });
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      mockPhotosController.downloadPhoto
+        .mockResolvedValueOnce({
+          success: false,
+          value: null,
+          status: 503,
+          error: 'Temporary outage',
+        } as GenericResponse<ArrayBuffer>)
+        .mockResolvedValueOnce({
+          success: true,
+          value: new ArrayBuffer(1024),
+          status: 200,
+        } as GenericResponse<ArrayBuffer>);
+
+      const progressEvents: Progress[] = [];
+      const onProgress = (progress: Progress) => progressEvents.push({ ...progress });
+      service.on('progress-update', onProgress);
+
+      const result = await service.downloadPhotos(testAccountId);
+
+      service.off('progress-update', onProgress);
+
+      expect(result.downloadStats.retryAttempts).toBe(1);
+      expect(result.downloadStats.recoveredAfterRetry).toBe(1);
+      expect(
+        progressEvents.some(
+          progress =>
+            progress.issueCount > 0 &&
+            progress.retryAttempts > 0 &&
+            progress.lastIssue?.includes('Retry 1/3 will start now.')
+        )
+      ).toBe(true);
+      expect(
+        progressEvents.some(
+          progress =>
+            progress.recoveredAfterRetry > 0 &&
+            progress.lastIssue?.includes('Recovered image1.jpg after 1 retry.')
+        )
+      ).toBe(true);
+    });
+
     /**
      * When currentOperation is replaced (simulating a new download run) while a worker
      * from the previous run is still finishing, that worker's finally must not call
@@ -613,10 +767,11 @@ describe('RecNetService - Download Functionality', () => {
       }
       expect(releaseDownload).toBeDefined();
 
-      service.cancelCurrentOperation();
       replaced = true;
-      (service as unknown as { currentOperation: { cancelled: boolean } }).currentOperation =
-        { cancelled: false };
+      (service as any).currentOperation = {
+        cancelled: false,
+        controller: new AbortController(),
+      };
 
       releaseDownload!();
 
@@ -625,6 +780,75 @@ describe('RecNetService - Download Functionality', () => {
 
       service.off('progress-update', onProgress);
       expect(userPhotoProgressAfterReplace.length).toBe(0);
+    });
+
+    it('should resume after cancellation and only download missing files', async () => {
+      const photos: ImageDto[] = [
+        createMockPhoto('photo-1', 'image1.jpg'),
+        createMockPhoto('photo-2', 'image2.jpg'),
+      ];
+
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+      const photosDir = path.join(testOutputDir, testAccountId, 'photos');
+      const existingPhotoFiles = new Set<string>();
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === photosJsonPath) return true;
+        return existingPhotoFiles.has(p);
+      });
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockImplementation(async (dir: string) => {
+        if (dir !== photosDir) {
+          return [];
+        }
+
+        return Array.from(existingPhotoFiles)
+          .filter(file => path.dirname(file) === photosDir)
+          .map(file => path.basename(file));
+      });
+      (mockedFs.writeFile as jest.Mock).mockImplementation(async (p: string) => {
+        existingPhotoFiles.add(p);
+      });
+
+      let firstRun = true;
+      mockPhotosController.downloadPhoto.mockImplementation(async (_imageName) => {
+        if (firstRun) {
+          firstRun = false;
+          service.cancelCurrentOperation();
+        }
+
+        return {
+          success: true,
+          value: new ArrayBuffer(1024),
+          status: 200,
+        } as GenericResponse<ArrayBuffer>;
+      });
+
+      await expect(service.downloadPhotos(testAccountId)).rejects.toThrow(
+        'Operation cancelled'
+      );
+
+      expect(existingPhotoFiles.has(path.join(photosDir, 'photo-1.jpg'))).toBe(true);
+      expect(existingPhotoFiles.has(path.join(photosDir, 'photo-2.jpg'))).toBe(false);
+
+      mockPhotosController.downloadPhoto.mockClear();
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: true,
+        value: new ArrayBuffer(1024),
+        status: 200,
+      } as GenericResponse<ArrayBuffer>);
+
+      const resumed = await service.downloadPhotos(testAccountId);
+
+      expect(resumed.downloadStats.alreadyDownloaded).toBe(1);
+      expect(resumed.downloadStats.newDownloads).toBe(1);
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(1);
+      expect(existingPhotoFiles.has(path.join(photosDir, 'photo-2.jpg'))).toBe(true);
     });
 
     /**

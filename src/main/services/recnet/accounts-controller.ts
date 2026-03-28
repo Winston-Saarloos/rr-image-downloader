@@ -1,13 +1,18 @@
 import { AccountInfo } from '../../../shared/types';
 import { PlayerResult } from '../../models/PlayerDto';
-import { RecNetHttpClient, UNIVERSAL_BATCH_SIZE } from './http-client';
+import {
+  RecNetHttpClient,
+  RecNetRequestOptions,
+  UNIVERSAL_BATCH_SIZE,
+} from './http-client';
 
 export class AccountsController {
   constructor(private readonly http: RecNetHttpClient) {}
 
   async fetchBulkAccounts(
     accountIds: string[],
-    token?: string
+    token?: string,
+    options?: RecNetRequestOptions
   ): Promise<PlayerResult[]> {
     if (accountIds.length === 0) {
       return [];
@@ -34,7 +39,8 @@ export class AccountsController {
               'Content-Type': 'application/x-www-form-urlencoded',
             },
           },
-          token
+          token,
+          options
         );
 
         if (response.success && Array.isArray(response.value)) {
@@ -52,7 +58,7 @@ export class AccountsController {
       }
 
       if (i + batchSize < accountIds.length) {
-        await this.delayBetweenBatches();
+        await this.delayBetweenBatches(options?.signal);
       }
     }
 
@@ -61,48 +67,70 @@ export class AccountsController {
 
   async lookupAccountById(
     accountId: string,
-    token?: string
+    token?: string,
+    options?: RecNetRequestOptions
   ): Promise<AccountInfo> {
     const account = await this.http.requestOrThrow<PlayerResult>(
       {
         url: `https://accounts.rec.net/account/${encodeURIComponent(accountId)}`,
         method: 'GET',
       },
-      token
+      token,
+      options
     );
     return this.normalizeAccount(account);
   }
 
   async lookupAccountByUsername(
     username: string,
-    token?: string
+    token?: string,
+    options?: RecNetRequestOptions
   ): Promise<AccountInfo> {
     const account = await this.http.requestOrThrow<PlayerResult>(
       {
         url: `https://apim.rec.net/accounts/account/?username=${encodeURIComponent(username)}`,
         method: 'GET',
       },
-      token
+      token,
+      options
     );
     return this.normalizeAccount(account);
   }
 
   async searchAccounts(
     username: string,
-    token?: string
+    token?: string,
+    options?: RecNetRequestOptions
   ): Promise<AccountInfo[]> {
     const accounts = await this.http.requestOrThrow<PlayerResult[]>(
       {
         url: `https://apim.rec.net/accounts/account/search?name=${encodeURIComponent(username)}`,
         method: 'GET',
       },
-      token
+      token,
+      options
     );
     return this.normalizeAccounts(accounts);
   }
 
-  private delayBetweenBatches(): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, 100));
+  private delayBetweenBatches(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+      return Promise.reject(new Error('Operation cancelled'));
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, 100);
+
+      const onAbort = () => {
+        clearTimeout(timeout);
+        reject(new Error('Operation cancelled'));
+      };
+
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 
   private normalizeAccounts(accounts: PlayerResult[]): PlayerResult[] {
