@@ -554,7 +554,6 @@ function App() {
         const cancelled = await window.electronAPI.cancelOperation();
         if (cancelled) {
           addLog('Download cancelled', 'warning');
-          setIsDownloading(false);
           setProgress(prev => ({
             ...prev,
             isRunning: false,

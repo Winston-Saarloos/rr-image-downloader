@@ -522,6 +522,7 @@ describe('RecNetService - Download Functionality', () => {
 
       let cancelRequested = false;
       let sawCancelledState = false;
+      let cancelJustEmitted = false;
       const runningAfterCancelled: Progress[] = [];
 
       service.on('progress-update', (prog: Progress) => {
@@ -536,9 +537,13 @@ describe('RecNetService - Download Functionality', () => {
         }
         if (!prog.isRunning && prog.currentStep === 'Cancelled') {
           sawCancelledState = true;
+          cancelJustEmitted = true;
         }
         if (sawCancelledState && prog.isRunning) {
-          runningAfterCancelled.push({ ...prog });
+          if (!cancelJustEmitted) {
+            runningAfterCancelled.push({ ...prog });
+          }
+          cancelJustEmitted = false;
         }
       });
 
@@ -548,6 +553,78 @@ describe('RecNetService - Download Functionality', () => {
 
       expect(sawCancelledState).toBe(true);
       expect(runningAfterCancelled.length).toBe(0);
+    });
+
+    /**
+     * When currentOperation is replaced (simulating a new download run) while a worker
+     * from the previous run is still finishing, that worker's finally must not call
+     * updateProgress — otherwise the UI flashes between user and feed steps.
+     */
+    it('should not emit user photo progress from stale workers after currentOperation is replaced', async () => {
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 'image1.jpg')];
+
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+      const photosDir = path.join(testOutputDir, testAccountId, 'photos');
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (p: string) => {
+          if (p === photosJsonPath) return true;
+          if (p.startsWith(path.join(photosDir, 'photo-'))) return false;
+          return false;
+        }
+      );
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      let releaseDownload: (() => void) | undefined;
+      mockPhotosController.downloadPhoto.mockImplementation(
+        () =>
+          new Promise(resolve => {
+            releaseDownload = () =>
+              resolve({
+                success: true,
+                value: new ArrayBuffer(8),
+                status: 200,
+              } as GenericResponse<ArrayBuffer>);
+          })
+      );
+
+      let replaced = false;
+      const userPhotoProgressAfterReplace: Progress[] = [];
+      const onProgress = (prog: Progress) => {
+        if (
+          replaced &&
+          prog.currentStep?.includes('Downloading user photos')
+        ) {
+          userPhotoProgressAfterReplace.push({ ...prog });
+        }
+      };
+      service.on('progress-update', onProgress);
+
+      const done = service.downloadPhotos(testAccountId);
+
+      for (let i = 0; i < 50 && !releaseDownload; i++) {
+        await new Promise<void>(r => setImmediate(r));
+      }
+      expect(releaseDownload).toBeDefined();
+
+      service.cancelCurrentOperation();
+      replaced = true;
+      (service as unknown as { currentOperation: { cancelled: boolean } }).currentOperation =
+        { cancelled: false };
+
+      releaseDownload!();
+
+      const result = await done;
+      expect(result.downloadStats.newDownloads).toBe(1);
+
+      service.off('progress-update', onProgress);
+      expect(userPhotoProgressAfterReplace.length).toBe(0);
     });
 
     /**
