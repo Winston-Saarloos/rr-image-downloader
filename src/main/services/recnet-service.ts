@@ -58,6 +58,16 @@ type FolderMetaV1 = {
   cache?: Record<string, unknown>;
 };
 
+type DownloadBatchTrace = {
+  label: string;
+  startedAt: number;
+  totalPhotos: number;
+  maxConcurrentDownloads: number;
+  interPageDelayMs: number;
+  inFlight: number;
+  completed: number;
+};
+
 const DEFAULT_SETTINGS: RecNetSettings = {
   outputRoot: 'output',
   cdnBase: DEFAULT_CDN_BASE,
@@ -969,6 +979,10 @@ export class RecNetService extends EventEmitter {
       console.log(
         `Starting download of ${totalPhotos} photos from ${jsonPath}`
       );
+      const trace = this.createDownloadBatchTrace(
+        'user-photo-downloads',
+        totalPhotos
+      );
       if (hasDownloadLimit && remainingDownloadSlots !== undefined) {
         console.log(
           `Limiting downloads to ${remainingDownloadSlots} photos for testing`
@@ -985,7 +999,7 @@ export class RecNetService extends EventEmitter {
       this.updateProgress('Downloading user photos...', 0, totalPhotos, 0);
 
       let delay = 0;
-      const promises = [];
+      const promises: Array<Promise<DownloadResultItem>> = [];
       const semaphore = new Semaphore(this.settings.maxConcurrentDownloads);
       let scheduledPhotoCount = 0;
       for (const photo of sortedPhotos) {
@@ -997,16 +1011,32 @@ export class RecNetService extends EventEmitter {
         }
 
         scheduledPhotoCount++;
+        const scheduledIndex = scheduledPhotoCount;
+        const scheduledDelayMs = delay;
         promises.push(
           new Promise<DownloadResultItem>((resolve, reject) => {
             void (async () => {
+              const photoId = this.normalizeId(photo.Id);
+              const imageName = photo.ImageName;
+              const runStartedAt = Date.now();
+              let result: DownloadResultItem | undefined;
               try {
-                if (delay) {
-                  await this.delay(delay, operation);
+                if (scheduledDelayMs) {
+                  await this.delay(scheduledDelayMs, operation);
                 }
+                const slotWaitStartedAt = Date.now();
                 await semaphore.acquire();
+                const slotWaitMs = Date.now() - slotWaitStartedAt;
+                trace.inFlight++;
+                this.logDownloadWorkerStart(trace, {
+                  scheduledIndex,
+                  photoId,
+                  imageName,
+                  scheduledDelayMs,
+                  slotWaitMs,
+                });
                 try {
-                  const result = await this.downloadImage(
+                  result = await this.downloadImage(
                     photo,
                     photosDir,
                     feedDir,
@@ -1045,6 +1075,15 @@ export class RecNetService extends EventEmitter {
                   // downloadImage already has error handling, if it throws, we'll assume it's fatal
                   reject(error);
                 } finally {
+                  trace.inFlight = Math.max(0, trace.inFlight - 1);
+                  trace.completed++;
+                  this.logDownloadWorkerFinish(trace, {
+                    scheduledIndex,
+                    photoId,
+                    imageName,
+                    result,
+                    runDurationMs: Date.now() - runStartedAt,
+                  });
                   semaphore.release();
                   if (this.currentOperation === operation) {
                     this.updateProgress(
@@ -1081,6 +1120,7 @@ export class RecNetService extends EventEmitter {
         retryAttempts,
         recoveredAfterRetry,
       };
+      this.logDownloadBatchSummary(trace, downloadStats);
 
       return {
         accountId,
@@ -1188,6 +1228,10 @@ export class RecNetService extends EventEmitter {
       console.log(
         `Starting download of ${totalPhotos} feed photos from ${feedJsonPath}`
       );
+      const trace = this.createDownloadBatchTrace(
+        'feed-photo-downloads',
+        totalPhotos
+      );
       if (hasDownloadLimit && remainingDownloadSlots !== undefined) {
         console.log(
           `Limiting downloads to ${remainingDownloadSlots} photos for testing`
@@ -1204,7 +1248,7 @@ export class RecNetService extends EventEmitter {
       this.updateProgress('Downloading feed photos...', 0, totalPhotos, 0);
 
       let delay = 0;
-      const promises = [];
+      const promises: Array<Promise<DownloadResultItem>> = [];
       const semaphore = new Semaphore(this.settings.maxConcurrentDownloads);
       let scheduledPhotoCount = 0;
       for (const photo of sortedPhotos) {
@@ -1216,16 +1260,32 @@ export class RecNetService extends EventEmitter {
         }
 
         scheduledPhotoCount++;
+        const scheduledIndex = scheduledPhotoCount;
+        const scheduledDelayMs = delay;
         promises.push(
           new Promise<DownloadResultItem>((resolve, reject) => {
             void (async () => {
+              const photoId = this.normalizeId(photo.Id);
+              const imageName = photo.ImageName;
+              const runStartedAt = Date.now();
+              let result: DownloadResultItem | undefined;
               try {
-                if (delay) {
-                  await this.delay(delay, operation);
+                if (scheduledDelayMs) {
+                  await this.delay(scheduledDelayMs, operation);
                 }
+                const slotWaitStartedAt = Date.now();
                 await semaphore.acquire();
+                const slotWaitMs = Date.now() - slotWaitStartedAt;
+                trace.inFlight++;
+                this.logDownloadWorkerStart(trace, {
+                  scheduledIndex,
+                  photoId,
+                  imageName,
+                  scheduledDelayMs,
+                  slotWaitMs,
+                });
                 try {
-                  const result = await this.downloadImage(
+                  result = await this.downloadImage(
                     photo,
                     photosDir,
                     feedPhotosDir,
@@ -1264,6 +1324,15 @@ export class RecNetService extends EventEmitter {
                   // downloadImage already has error handling, if it throws, we'll assume it's fatal
                   reject(error);
                 } finally {
+                  trace.inFlight = Math.max(0, trace.inFlight - 1);
+                  trace.completed++;
+                  this.logDownloadWorkerFinish(trace, {
+                    scheduledIndex,
+                    photoId,
+                    imageName,
+                    result,
+                    runDurationMs: Date.now() - runStartedAt,
+                  });
                   semaphore.release();
                   if (this.currentOperation === operation) {
                     this.updateProgress(
@@ -1300,6 +1369,7 @@ export class RecNetService extends EventEmitter {
         retryAttempts,
         recoveredAfterRetry,
       };
+      this.logDownloadBatchSummary(trace, downloadStats);
 
       return {
         accountId,
@@ -1663,6 +1733,64 @@ export class RecNetService extends EventEmitter {
         once: true,
       });
     });
+  }
+
+  private createDownloadBatchTrace(
+    label: string,
+    totalPhotos: number
+  ): DownloadBatchTrace {
+    const trace: DownloadBatchTrace = {
+      label,
+      startedAt: Date.now(),
+      totalPhotos,
+      maxConcurrentDownloads: this.settings.maxConcurrentDownloads,
+      interPageDelayMs: this.settings.interPageDelayMs || 0,
+      inFlight: 0,
+      completed: 0,
+    };
+    console.log(
+      `[${trace.label}] batch-start total=${trace.totalPhotos} maxConcurrentDownloads=${trace.maxConcurrentDownloads} interPageDelayMs=${trace.interPageDelayMs}`
+    );
+    return trace;
+  }
+
+  private logDownloadWorkerStart(
+    trace: DownloadBatchTrace,
+    details: {
+      scheduledIndex: number;
+      photoId: string;
+      imageName?: string;
+      scheduledDelayMs: number;
+      slotWaitMs: number;
+    }
+  ): void {
+    console.log(
+      `[${trace.label}] start ${details.scheduledIndex}/${trace.totalPhotos} photoId=${details.photoId} image=${details.imageName || 'unknown'} launchOffsetMs=${Date.now() - trace.startedAt} scheduledDelayMs=${details.scheduledDelayMs} slotWaitMs=${details.slotWaitMs} inFlight=${trace.inFlight}/${trace.maxConcurrentDownloads}`
+    );
+  }
+
+  private logDownloadWorkerFinish(
+    trace: DownloadBatchTrace,
+    details: {
+      scheduledIndex: number;
+      photoId: string;
+      imageName?: string;
+      result?: DownloadResultItem;
+      runDurationMs: number;
+    }
+  ): void {
+    console.log(
+      `[${trace.label}] finish ${details.scheduledIndex}/${trace.totalPhotos} photoId=${details.photoId} image=${details.imageName || 'unknown'} status=${details.result?.status || details.result?.error || 'unknown'} durationMs=${details.runDurationMs} completed=${trace.completed}/${trace.totalPhotos} remainingInFlight=${trace.inFlight}/${trace.maxConcurrentDownloads}`
+    );
+  }
+
+  private logDownloadBatchSummary(
+    trace: DownloadBatchTrace,
+    stats: DownloadStats
+  ): void {
+    console.log(
+      `[${trace.label}] batch-complete elapsedMs=${Date.now() - trace.startedAt} total=${stats.totalPhotos} downloaded=${stats.newDownloads} alreadyHadFile=${stats.alreadyDownloaded} failed=${stats.failedDownloads} skipped=${stats.skipped} retryAttempts=${stats.retryAttempts} recoveredAfterRetry=${stats.recoveredAfterRetry}`
+    );
   }
 
   private createProgressState(overrides: Partial<Progress>): Progress {
