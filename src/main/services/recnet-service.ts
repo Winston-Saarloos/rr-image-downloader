@@ -996,16 +996,15 @@ export class RecNetService extends EventEmitter {
         promises.push(
           new Promise<DownloadResultItem>((resolve, reject) => {
             void (async () => {
-              if (delay) {
-                await this.delay(delay);
-              }
               await semaphore.acquire();
               try {
                 const result = await this.downloadImage(
                   photo,
                   photosDir,
                   feedDir,
-                  false
+                  false,
+                  token,
+                  delay
                 );
                 const status = result.status;
                 if (status === 'downloaded') {
@@ -1039,12 +1038,12 @@ export class RecNetService extends EventEmitter {
                 reject(error as Error);
               } finally {
                 semaphore.release();
+                processedCount++;
                 this.updateProgress(
                   'Downloading user photos...',
                   processedCount,
                   totalPhotos
                 );
-                processedCount++;
               }
             })();
           })
@@ -1205,16 +1204,15 @@ export class RecNetService extends EventEmitter {
         promises.push(
           new Promise<DownloadResultItem>((resolve, reject) => {
             void (async () => {
-              if (delay) {
-                await this.delay(delay);
-              }
               await semaphore.acquire();
               try {
                 const result = await this.downloadImage(
                   photo,
                   photosDir,
                   feedPhotosDir,
-                  true
+                  true,
+                  token,
+                  delay
                 );
                 const status = result.status;
                 if (status === 'downloaded') {
@@ -1248,12 +1246,12 @@ export class RecNetService extends EventEmitter {
                 reject(error as Error);
               } finally {
                 semaphore.release();
+                processedCount++;
                 this.updateProgress(
                   'Downloading feed photos...',
                   processedCount,
                   totalPhotos
                 );
-                processedCount++;
               }
             })();
           })
@@ -1303,7 +1301,8 @@ export class RecNetService extends EventEmitter {
     photosDir: string,
     feedPhotosDir: string,
     isFeed: boolean,
-    token?: string
+    token?: string,
+    delayBeforeDownloadMs = 0
   ): Promise<DownloadResultItem> {
     const photoId = this.normalizeId(photo.Id);
     const imageName = photo.ImageName;
@@ -1350,6 +1349,13 @@ export class RecNetService extends EventEmitter {
         sourcePath: otherPhotoPath,
         destinationPath: photoPath,
       };
+    }
+
+    if (delayBeforeDownloadMs > 0) {
+      await this.delay(delayBeforeDownloadMs);
+      if (this.isOperationCancelled()) {
+        throw new Error('Operation cancelled');
+      }
     }
 
     let attemptsUsed = 1;
