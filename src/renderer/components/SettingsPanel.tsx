@@ -48,9 +48,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const handleDelayChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(e.target.value);
-    if (!isNaN(value)) {
-      await onUpdateSettings({ interPageDelayMs: value });
+    const value = e.target.value.trim();
+    if (value === '') {
+      await onUpdateSettings({ interPageDelayMs: undefined });
+    } else {
+      const numValue = parseInt(value);
+      if (!isNaN(numValue) && numValue > 0) {
+        await onUpdateSettings({ interPageDelayMs: numValue });
+      }
     }
   };
 
@@ -119,13 +124,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <Input
             id="request-delay"
             type="number"
-            value={settings.interPageDelayMs}
+            value={settings.interPageDelayMs || ''}
             onChange={handleDelayChange}
-            min="0"
+            min="1"
             max="1000"
+            placeholder="No delay"
           />
           <p className="text-sm text-muted-foreground">
-            Milliseconds between requests.
+            Milliseconds between requests. Leave empty for unlimited download speed.
           </p>
         </div>
 

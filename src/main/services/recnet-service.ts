@@ -514,7 +514,7 @@ export class RecNetService extends EventEmitter {
           skip += PHOTO_MAX_PAGE_SIZE;
           iteration++;
 
-          if (this.settings.interPageDelayMs > 0) {
+          if (this.settings.interPageDelayMs) {
             await this.delay(this.settings.interPageDelayMs);
           }
         }
@@ -583,7 +583,7 @@ export class RecNetService extends EventEmitter {
         totalPhotos: normalizedAll.length,
         totalFetched,
         pageSize: PHOTO_MAX_PAGE_SIZE,
-        delayMs: this.settings.interPageDelayMs,
+        delayMs: this.settings.interPageDelayMs || 0,
         iterationsCompleted: iterationDetails.length,
         lastSortValue,
         incrementalMode: !!lastSortValue,
@@ -797,7 +797,7 @@ export class RecNetService extends EventEmitter {
           skip += PHOTO_MAX_PAGE_SIZE;
           iteration++;
 
-          if (this.settings.interPageDelayMs > 0) {
+          if (this.settings.interPageDelayMs) {
             await this.delay(this.settings.interPageDelayMs);
           }
         }
@@ -865,7 +865,7 @@ export class RecNetService extends EventEmitter {
         totalPhotos: normalizedFeed.length,
         totalFetched,
         pageSize: PHOTO_MAX_PAGE_SIZE,
-        delayMs: this.settings.interPageDelayMs,
+        delayMs: this.settings.interPageDelayMs || 0,
         iterationsCompleted: iterationDetails.length,
         sinceTime: sinceTime.toISOString(),
         incrementalMode: existingPhotoCount > 0,
@@ -1050,7 +1050,7 @@ export class RecNetService extends EventEmitter {
             })();
           })
         );
-        delay += this.settings.interPageDelayMs;
+        delay += this.settings.interPageDelayMs || 0;
       }
       const downloadResults: DownloadResultItem[] =
         await Promise.all<DownloadResultItem>(promises);
@@ -1260,7 +1260,7 @@ export class RecNetService extends EventEmitter {
             })();
           })
         );
-        delay += this.settings.interPageDelayMs;
+        delay += this.settings.interPageDelayMs || 0;
       }
       const downloadResults: DownloadResultItem[] =
         await Promise.all<DownloadResultItem>(promises);
