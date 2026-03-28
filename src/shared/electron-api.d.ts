@@ -8,6 +8,7 @@ import type {
   AvailableAccount,
   CollectionResult,
   DownloadResult,
+  CombinedUserAndFeedDownloadResult,
   EventDto,
   Photo,
   PlayerResult,
@@ -34,6 +35,10 @@ export interface ElectronAPI {
 
   downloadPhotos: (params: { accountId: string; token?: string }) => Promise<ApiResponse<DownloadResult>>;
   downloadFeedPhotos: (params: { accountId: string; token?: string }) => Promise<ApiResponse<DownloadResult>>;
+  downloadUserAndFeedPhotos: (params: {
+    accountId: string;
+    token?: string;
+  }) => Promise<ApiResponse<CombinedUserAndFeedDownloadResult>>;
 
   selectOutputFolder: () => Promise<string | null>;
   getSettings: () => Promise<RecNetSettings>;

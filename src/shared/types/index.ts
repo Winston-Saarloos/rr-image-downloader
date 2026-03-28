@@ -19,12 +19,16 @@ export interface BulkDataRefreshOptions {
   forceEventsRefresh?: boolean;
 }
 
+export type ProgressPhase = 'metadata' | 'files';
+
 export interface Progress {
   isRunning: boolean;
   currentStep: string;
   progress: number;
   total: number;
   current: number;
+  /** metadata = collecting JSON + bulk data (spinner + text only); files = saving images (linear bar). */
+  progressPhase: ProgressPhase;
   statusLevel: 'info' | 'warning' | 'error';
   issueCount: number;
   retryAttempts: number;
@@ -119,6 +123,12 @@ export interface DownloadResult {
   downloadResults: DownloadResultItem[];
   totalResults: number;
   guidance?: string[];
+}
+
+/** Result of downloading user photos then feed photos in one operation with unified progress. */
+export interface CombinedUserAndFeedDownloadResult {
+  user: DownloadResult;
+  feed: DownloadResult;
 }
 
 export interface ApiResponse<T> {

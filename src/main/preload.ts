@@ -7,6 +7,8 @@ const electronAPI: ElectronAPI = {
 
   downloadPhotos: (params) => ipcRenderer.invoke('download-photos', params),
   downloadFeedPhotos: (params) => ipcRenderer.invoke('download-feed-photos', params),
+  downloadUserAndFeedPhotos: (params) =>
+    ipcRenderer.invoke('download-user-and-feed-photos', params),
 
   selectOutputFolder: () => ipcRenderer.invoke('select-output-folder'),
 

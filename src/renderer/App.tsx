@@ -50,6 +50,7 @@ function App() {
     progress: 0,
     total: 0,
     current: 0,
+    progressPhase: 'metadata',
     statusLevel: 'info',
     issueCount: 0,
     retryAttempts: 0,
@@ -286,6 +287,7 @@ function App() {
       progress: 0,
       total: 0,
       current: 0,
+      progressPhase: 'metadata',
       statusLevel: 'info',
       issueCount: 0,
       retryAttempts: 0,
@@ -375,28 +377,37 @@ function App() {
         // Reload photos immediately after collection so they're visible
         loadPhotosForAccount(accountId);
 
-        // Step 2: Download photos
-        addLog('Step 2: Downloading photos...', 'info');
-        const downloadResult = await window.electronAPI.downloadPhotos({
-          accountId,
-          token: token.trim() || undefined,
-        });
+        // Step 2: Download user + feed photos (single progress stream)
+        addLog('Step 2: Downloading user and feed photos...', 'info');
+        const combinedDownload = await window.electronAPI.downloadUserAndFeedPhotos(
+          {
+            accountId,
+            token: token.trim() || undefined,
+          }
+        );
 
-        if (!downloadResult.success) {
-          throw new Error(downloadResult.error || 'Failed to download photos');
+        if (!combinedDownload.success) {
+          throw new Error(
+            combinedDownload.error || 'Failed to download photos'
+          );
         }
 
-        const downloadStats = downloadResult.data?.downloadStats;
-        if (downloadStats) {
+        const userDownload = combinedDownload.data?.user;
+        const feedDownload = combinedDownload.data?.feed;
+        const downloadStats = userDownload?.downloadStats;
+        const downloadFeedStats = feedDownload?.downloadStats;
+
+        if (downloadStats && downloadFeedStats) {
           setDownloadPanelSummary({
             username,
             accountId,
             userPhotos: downloadStats,
+            feedPhotos: downloadFeedStats,
           });
           addLog(
             downloadStats.failedDownloads > 0
-              ? `Download complete with warnings: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} missed after retries`
-              : `Download complete: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} failed`,
+              ? `User photos complete with warnings: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} missed after retries`
+              : `User photos complete: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} failed`,
             downloadStats.failedDownloads > 0 ? 'warning' : 'success'
           );
           if (downloadStats.retryAttempts > 0) {
@@ -407,39 +418,17 @@ function App() {
               downloadStats.failedDownloads > 0 ? 'warning' : 'info'
             );
           }
-          if (downloadResult.data?.photosDirectory) {
+          if (userDownload?.photosDirectory) {
             addLog(
-              `User photos saved to: ${downloadResult.data.photosDirectory}`,
+              `User photos saved to: ${userDownload.photosDirectory}`,
               'info'
             );
           }
-          downloadResult.data?.guidance?.forEach(message =>
+          userDownload?.guidance?.forEach(message =>
             addLog(message, 'warning')
           );
-          addResult('Download', downloadResult.data, 'success');
-        }
+          addResult('Download', userDownload, 'success');
 
-        // Step 3: Download feed photos
-        addLog('Step 3: Downloading feed photos...', 'info');
-        const downloadFeedResult = await window.electronAPI.downloadFeedPhotos({
-          accountId,
-          token: token.trim() || undefined,
-        });
-
-        if (!downloadFeedResult.success) {
-          throw new Error(
-            downloadFeedResult.error || 'Failed to download feed photos'
-          );
-        }
-
-        const downloadFeedStats = downloadFeedResult.data?.downloadStats;
-        if (downloadFeedStats) {
-          setDownloadPanelSummary(prev => ({
-            username,
-            accountId,
-            userPhotos: prev?.userPhotos ?? downloadStats,
-            feedPhotos: downloadFeedStats,
-          }));
           addLog(
             downloadFeedStats.failedDownloads > 0
               ? `Feed download complete with warnings: ${downloadFeedStats.newDownloads} new, ${downloadFeedStats.alreadyDownloaded} existing, ${downloadFeedStats.failedDownloads} missed after retries`
@@ -454,16 +443,16 @@ function App() {
               downloadFeedStats.failedDownloads > 0 ? 'warning' : 'info'
             );
           }
-          if (downloadFeedResult.data?.feedPhotosDirectory) {
+          if (feedDownload?.feedPhotosDirectory) {
             addLog(
-              `Feed photos saved to: ${downloadFeedResult.data.feedPhotosDirectory}`,
+              `Feed photos saved to: ${feedDownload.feedPhotosDirectory}`,
               'info'
             );
           }
-          downloadFeedResult.data?.guidance?.forEach(message =>
+          feedDownload?.guidance?.forEach(message =>
             addLog(message, 'warning')
           );
-          addResult('Feed Download', downloadFeedResult.data, 'success');
+          addResult('Feed Download', feedDownload, 'success');
         }
 
         // Reload photos after download completes
@@ -476,17 +465,18 @@ function App() {
 
       if (errorMessage === 'Operation cancelled') {
         addLog('Download cancelled by user.', 'warning');
-        setProgress(prev => ({
-          ...prev,
-          isRunning: false,
-          currentStep: 'Cancelled',
-          total: 0,
-          current: 0,
-          statusLevel: 'info',
-          issueCount: 0,
-          failedItems: 0,
-          lastIssue: undefined,
-        }));
+      setProgress(prev => ({
+        ...prev,
+        isRunning: false,
+        currentStep: 'Cancelled',
+        total: 0,
+        current: 0,
+        progressPhase: 'metadata',
+        statusLevel: 'info',
+        issueCount: 0,
+        failedItems: 0,
+        lastIssue: undefined,
+      }));
         setActiveIncident(
           createUserIncident('download', errorMessage, { severity: 'warning' })
         );
@@ -503,6 +493,7 @@ function App() {
           progress: 100,
           total: 0,
           current: 0,
+          progressPhase: 'metadata',
           statusLevel: 'error',
           issueCount: Math.max(prev.issueCount, 1),
           failedItems: Math.max(prev.failedItems, 1),
@@ -531,6 +522,7 @@ function App() {
         progress: prev.currentStep === 'Cancelled' ? prev.progress : 100,
         total: 0,
         current: 0,
+        progressPhase: 'metadata',
       }));
     }
   };

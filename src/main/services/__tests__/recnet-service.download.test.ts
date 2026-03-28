@@ -159,6 +159,50 @@ describe('RecNetService - Download Functionality', () => {
       expect(mockedFs.writeFile).toHaveBeenCalledTimes(2);
     });
 
+    it('should emit progressPhase files while downloading', async () => {
+      const phases: string[] = [];
+      service.on('progress-update', p => {
+        if (p.total > 0) {
+          phases.push(p.progressPhase);
+        }
+      });
+
+      const photos: ImageDto[] = [
+        createMockPhoto('photo-1', 'image1.jpg'),
+        createMockPhoto('photo-2', 'image2.jpg'),
+      ];
+
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+      const photosDir = path.join(testOutputDir, testAccountId, 'photos');
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (p: string) => {
+          if (p === photosJsonPath) return true;
+          if (p === photosDir) return true;
+          if (p.startsWith(path.join(photosDir, 'photo-'))) return false;
+          return false;
+        }
+      );
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: true,
+        value: new ArrayBuffer(1024),
+        status: 200,
+      } as GenericResponse<ArrayBuffer>);
+
+      await service.downloadPhotos(testAccountId);
+
+      expect(phases.length).toBeGreaterThan(0);
+      expect(phases.every(x => x === 'files')).toBe(true);
+    });
+
     it('should preserve staggered delays per photo instead of reusing the final delay', async () => {
       const photos: ImageDto[] = [
         createMockPhoto('photo-1', 'image1.jpg'),
@@ -854,6 +898,100 @@ describe('RecNetService - Download Functionality', () => {
       await expect(service.downloadFeedPhotos(testAccountId)).rejects.toThrow(
         'Feed photos not collected. Run collect feed photos first.'
       );
+    });
+  });
+
+  describe('downloadUserAndFeedPhotos', () => {
+    const createMockPhoto = (id: string, imageName: string): ImageDto => ({
+      Id: id,
+      Type: 1,
+      Accessibility: 0,
+      AccessibilityLocked: false,
+      ImageName: imageName,
+      Description: '',
+      PlayerId: 'player-123',
+      TaggedPlayerIds: [],
+      RoomId: 'room-123',
+      PlayerEventId: 'event-123',
+      CreatedAt: new Date().toISOString(),
+      CheerCount: 0,
+      CommentCount: 0,
+    });
+
+    it('should download user and feed with unified progress total and files phase', async () => {
+      const userPhotos: ImageDto[] = [
+        createMockPhoto('photo-1', 'image1.jpg'),
+        createMockPhoto('photo-2', 'image2.jpg'),
+      ];
+      const feedPhotos: ImageDto[] = [
+        createMockPhoto('feed-1', 'feed1.jpg'),
+        createMockPhoto('feed-2', 'feed2.jpg'),
+      ];
+
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+      const feedJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_feed.json`
+      );
+      const photosDir = path.join(testOutputDir, testAccountId, 'photos');
+      const feedDir = path.join(testOutputDir, testAccountId, 'feed');
+
+      const fileProgress: Array<{ current: number; total: number; phase: string }> =
+        [];
+      service.on('progress-update', p => {
+        if (p.progressPhase === 'files' && p.total > 0) {
+          fileProgress.push({
+            current: p.current,
+            total: p.total,
+            phase: p.progressPhase,
+          });
+        }
+      });
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (p: string) => {
+          if (p === photosJsonPath || p === feedJsonPath) return true;
+          if (p === photosDir || p === feedDir) return true;
+          if (p.startsWith(path.join(photosDir, 'photo-'))) return false;
+          if (p.startsWith(path.join(feedDir, 'feed-'))) return false;
+          return false;
+        }
+      );
+
+      (mockedFs.readJson as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === photosJsonPath) return userPhotos;
+        if (p === feedJsonPath) return feedPhotos;
+        return [];
+      });
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: true,
+        value: new ArrayBuffer(1024),
+        status: 200,
+      } as GenericResponse<ArrayBuffer>);
+
+      const result = await service.downloadUserAndFeedPhotos(testAccountId);
+
+      expect(result.user.downloadStats.newDownloads).toBe(2);
+      expect(result.feed.downloadStats.newDownloads).toBe(2);
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(4);
+
+      expect(fileProgress.length).toBeGreaterThan(0);
+      expect(fileProgress.every(e => e.total === 4 && e.phase === 'files')).toBe(
+        true
+      );
+      for (let i = 1; i < fileProgress.length; i++) {
+        expect(fileProgress[i].current).toBeGreaterThanOrEqual(
+          fileProgress[i - 1].current
+        );
+      }
+      expect(fileProgress[fileProgress.length - 1].current).toBe(4);
     });
   });
 });

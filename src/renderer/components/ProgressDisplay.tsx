@@ -66,11 +66,14 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   isRetrying = false,
   summary = null,
 }) => {
-  const percent = Math.min(
-    Math.max(Math.round(progress.progress ?? 0), 0),
+  const phase = progress.progressPhase ?? 'metadata';
+  const fileTargetPercent = Math.min(
+    Math.max(progress.progress ?? 0, 0),
     100
   );
-  const hasTotals = progress.total > 0;
+  const percent = Math.round(fileTargetPercent);
+  const showLinearBar = phase === 'files' && progress.total > 0;
+  const isMetadataRunning = progress.isRunning && phase === 'metadata';
   const isComplete = !progress.isRunning && percent >= 100;
   const isCancelled =
     !progress.isRunning && progress.currentStep === 'Cancelled';
@@ -84,39 +87,45 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
     progress.failedItems > 0;
   const showErrorTone = hasFailures && !isRetryableCompletion;
   const showWarningTone = hasIssues || isRetryableCompletion;
-  const [indeterminateValue, setIndeterminateValue] = useState(15);
+  const smoothRef = useRef(fileTargetPercent);
+  const [smoothPercent, setSmoothPercent] = useState(fileTargetPercent);
+  const progressRef = useRef(progress);
+  progressRef.current = progress;
   const [elapsedMs, setElapsedMs] = useState<number>(() =>
     startedAt ? Math.max(Date.now() - startedAt, 0) : (durationMs ?? 0)
   );
-  const directionRef = useRef<1 | -1>(1);
 
   useEffect(() => {
-    if (!progress.isRunning || hasTotals) {
-      setIndeterminateValue(15);
-      directionRef.current = 1;
+    if (!showLinearBar) {
+      smoothRef.current = fileTargetPercent;
+      setSmoothPercent(fileTargetPercent);
       return;
     }
 
-    const interval = setInterval(() => {
-      setIndeterminateValue(prev => {
-        const next = prev + directionRef.current * 6;
-
-        if (next >= 85) {
-          directionRef.current = -1;
-          return 85;
-        }
-
-        if (next <= 15) {
-          directionRef.current = 1;
-          return 15;
-        }
-
-        return next;
-      });
-    }, 120);
-
-    return () => clearInterval(interval);
-  }, [progress.isRunning, hasTotals]);
+    let frame = 0;
+    const tick = () => {
+      const target = Math.min(
+        100,
+        Math.max(0, progressRef.current.progress ?? 0)
+      );
+      const prev = smoothRef.current;
+      const next =
+        Math.abs(target - prev) < 0.25 ? target : prev + (target - prev) * 0.22;
+      smoothRef.current = next;
+      setSmoothPercent(next);
+      if (Math.abs(target - next) > 0.15) {
+        frame = requestAnimationFrame(tick);
+      }
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [
+    showLinearBar,
+    fileTargetPercent,
+    progress.progress,
+    progress.current,
+    progress.total,
+  ]);
 
   useEffect(() => {
     if (progress.isRunning && startedAt) {
@@ -139,11 +148,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
     !progress.isRunning &&
     percent === 0 &&
     (!progress.currentStep || progress.currentStep === 'Ready');
-  const barValue = hasTotals
-    ? percent
-    : progress.isRunning
-      ? indeterminateValue
-      : percent;
   const cardToneClass = isCancelled
     ? 'border-muted-foreground/30 bg-muted/30'
     : showErrorTone
@@ -256,7 +260,9 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
             ? 'You cancelled this run. You can start a new download anytime.'
             : isRetryableCompletion
               ? 'Download complete. Retry the same download to grab any missed images.'
-              : progress.currentStep || (isComplete ? 'Complete' : 'Ready')}
+              : isMetadataRunning
+                ? 'Gathering metadata and related data'
+                : progress.currentStep || (isComplete ? 'Complete' : 'Ready')}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -448,7 +454,15 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
           </div>
         )}
 
-        {hasTotals && (
+        {isMetadataRunning && (
+          <div className="rounded-md border border-border/60 bg-muted/20 p-3">
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {progress.currentStep || 'Working…'}
+            </p>
+          </div>
+        )}
+
+        {showLinearBar && (
           <>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Progress</span>
@@ -456,16 +470,15 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
                 {progress.current} / {progress.total} ({percent}%)
               </span>
             </div>
-            <Progress value={barValue} className={`h-2 ${progressToneClass}`} />
-          </>
-        )}
-
-        {!hasTotals && (
-          <>
-            <Progress value={barValue} className={`h-2 ${progressToneClass}`} />
-            <div className="text-sm text-muted-foreground">
-              {progress.currentStep || 'Waiting to start'}
-            </div>
+            <Progress
+              value={smoothPercent}
+              className={`h-2 ${progressToneClass}`}
+            />
+            {progress.currentStep ? (
+              <div className="text-sm text-muted-foreground">
+                {progress.currentStep}
+              </div>
+            ) : null}
           </>
         )}
 

@@ -14,6 +14,7 @@ import { RecNetService } from './services/recnet-service';
 import {
   CollectionResult,
   DownloadResult,
+  CombinedUserAndFeedDownloadResult,
   RecNetSettings,
   Progress,
   AccountInfo,
@@ -393,6 +394,24 @@ ipcMain.handle(
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
       const result = await recNetService.downloadFeedPhotos(
+        params.accountId,
+        params.token
+      );
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'download-user-and-feed-photos',
+  async (
+    event: IpcMainInvokeEvent,
+    params: DownloadPhotosParams
+  ): Promise<ApiResponse<CombinedUserAndFeedDownloadResult>> => {
+    try {
+      const result = await recNetService.downloadUserAndFeedPhotos(
         params.accountId,
         params.token
       );
