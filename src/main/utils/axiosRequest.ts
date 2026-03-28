@@ -103,6 +103,14 @@ export async function axiosRequest<T = unknown>(
   } catch (unknownError) {
     if (axios.isAxiosError(unknownError)) {
       const axiosError = unknownError as AxiosError;
+      if (axiosError.code === 'ERR_CANCELED') {
+        return {
+          success: false,
+          value: null,
+          error: 'ERR_CANCELED',
+          message: 'Operation cancelled',
+        };
+      }
       return {
         success: false,
         value: null,
