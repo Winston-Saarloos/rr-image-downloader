@@ -17,8 +17,27 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 
+const formatElapsedDuration = (durationMs: number): string => {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+
+  return `${seconds}s`;
+};
+
 interface ProgressDisplayProps {
   progress: ProgressType;
+  startedAt?: number | null;
+  durationMs?: number | null;
   onClose?: () => void;
   onOpenOperationResults?: () => void;
   onOpenDownloadPanel?: () => void;
@@ -29,6 +48,8 @@ interface ProgressDisplayProps {
 
 export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   progress,
+  startedAt = null,
+  durationMs = null,
   onClose,
   onOpenOperationResults,
   onOpenDownloadPanel,
@@ -55,6 +76,9 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   const showErrorTone = hasFailures && !isRetryableCompletion;
   const showWarningTone = hasIssues || isRetryableCompletion;
   const [indeterminateValue, setIndeterminateValue] = useState(15);
+  const [elapsedMs, setElapsedMs] = useState<number>(() =>
+    startedAt ? Math.max(Date.now() - startedAt, 0) : (durationMs ?? 0)
+  );
   const directionRef = useRef<1 | -1>(1);
 
   useEffect(() => {
@@ -84,6 +108,23 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
 
     return () => clearInterval(interval);
   }, [progress.isRunning, hasTotals]);
+
+  useEffect(() => {
+    if (progress.isRunning && startedAt) {
+      setElapsedMs(Math.max(Date.now() - startedAt, 0));
+
+      const interval = setInterval(() => {
+        setElapsedMs(Math.max(Date.now() - startedAt, 0));
+      }, 1000);
+
+      return () => clearInterval(interval);
+    }
+
+    setElapsedMs(
+      durationMs ?? (startedAt ? Math.max(Date.now() - startedAt, 0) : 0)
+    );
+    return undefined;
+  }, [durationMs, progress.isRunning, startedAt]);
 
   const isIdle =
     !progress.isRunning &&
@@ -119,6 +160,8 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
     ? 'The download finished, but some images were missed. Retry the download now to grab any missed images.'
     : progress.lastIssue ||
       'Some files are retrying. The download is still moving, but it is not clean.';
+  const hasElapsed = startedAt !== null || durationMs !== null;
+  const elapsedLabel = hasElapsed ? formatElapsedDuration(elapsedMs) : null;
 
   if (isIdle) {
     return null;
@@ -162,7 +205,7 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
             ? 'You cancelled this run. You can start a new download anytime.'
             : isRetryableCompletion
               ? 'Download complete. Retry the same download to grab any missed images.'
-            : progress.currentStep || (isComplete ? 'Complete' : 'Ready')}
+              : progress.currentStep || (isComplete ? 'Complete' : 'Ready')}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -319,11 +362,19 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
                     : showErrorTone
                       ? 'Complete with failures'
                       : showWarningTone
-                      ? 'Complete with warnings'
-                      : 'Complete'
+                        ? 'Complete with warnings'
+                        : 'Complete'
                   : 'Idle'}
           </span>
         </div>
+
+        {elapsedLabel && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">
+              Elapsed Time: {elapsedLabel}
+            </span>
+          </div>
+        )}
 
         {hasTotals && (
           <>

@@ -55,6 +55,12 @@ function App() {
   const [debugMenuOpen, setDebugMenuOpen] = useState(false);
   const [resultsScrollRequestId, setResultsScrollRequestId] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadStartedAt, setDownloadStartedAt] = useState<number | null>(
+    null
+  );
+  const [lastDownloadDurationMs, setLastDownloadDurationMs] = useState<
+    number | null
+  >(null);
   const [headerMode, setHeaderMode] = useState<'full' | 'compact' | 'hidden'>(
     'full'
   );
@@ -245,6 +251,7 @@ function App() {
       return;
     }
 
+    const downloadStartedAtMs = Date.now();
     setActiveIncident(null);
 
     const {
@@ -266,6 +273,8 @@ function App() {
     setLastDownloadRequest(requestState);
 
     setIsDownloading(true);
+    setDownloadStartedAt(downloadStartedAtMs);
+    setLastDownloadDurationMs(null);
     addLog(`Starting download for username: ${username}`, 'info');
     setProgress({
       isRunning: true,
@@ -496,6 +505,8 @@ function App() {
       }
     } finally {
       setIsDownloading(false);
+      setDownloadStartedAt(null);
+      setLastDownloadDurationMs(Date.now() - downloadStartedAtMs);
       setProgress(prev => ({
         ...prev,
         isRunning: false,
@@ -671,6 +682,8 @@ function App() {
             <div className="mb-4">
               <ProgressDisplay
                 progress={progress}
+                startedAt={downloadStartedAt}
+                durationMs={lastDownloadDurationMs}
                 onClose={() => setShowProgressPanel(false)}
                 onOpenOperationResults={openOperationResults}
                 onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
