@@ -159,6 +159,46 @@ describe('RecNetService - Download Functionality', () => {
       expect(mockedFs.writeFile).toHaveBeenCalledTimes(2);
     });
 
+    it('should preserve staggered delays per photo instead of reusing the final delay', async () => {
+      const photos: ImageDto[] = [
+        createMockPhoto('photo-1', 'image1.jpg'),
+        createMockPhoto('photo-2', 'image2.jpg'),
+        createMockPhoto('photo-3', 'image3.jpg'),
+      ];
+
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+      const photosDir = path.join(testOutputDir, testAccountId, 'photos');
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (p: string) => {
+          if (p === photosJsonPath) return true;
+          if (p === photosDir) return true;
+          if (p.startsWith(path.join(photosDir, 'photo-'))) return false;
+          return false;
+        }
+      );
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      const mockImageData = new ArrayBuffer(1024);
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: true,
+        value: mockImageData,
+        status: 200,
+      } as GenericResponse<ArrayBuffer>);
+
+      await service.downloadPhotos(testAccountId);
+
+      expect((service as any).delay as jest.Mock).toHaveBeenCalledWith(500);
+      expect((service as any).delay as jest.Mock).toHaveBeenCalledWith(1000);
+      expect((service as any).delay as jest.Mock).not.toHaveBeenCalledWith(1500);
+    });
+
     /**
      * Verifies that photos already present on disk are not re-downloaded.
      * This prevents wasting bandwidth and time on duplicate downloads.
@@ -521,6 +561,57 @@ describe('RecNetService - Download Functionality', () => {
       expect(progress.currentStep).toBe('Cancelled');
     });
 
+    it('should not retry or warn when a request is cancelled', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const operation = { cancelled: false };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (service as any).currentOperation = operation;
+
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: false,
+        value: null,
+        error: 'ERR_CANCELED',
+        message: 'Operation cancelled',
+      } as GenericResponse<ArrayBuffer>);
+
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (service as any).downloadPhotoWithRetry('image1.jpg', undefined, operation)
+      ).rejects.toThrow('Operation cancelled');
+
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(1);
+      expect(warnSpy).not.toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+    });
+
+    it('should not continue a stale queued download after cancellation cleanup', async () => {
+      const photo = createMockPhoto('photo-1', 'image1.jpg');
+      const operation = { cancelled: false };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (service as any).currentOperation = operation;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (service as any).setOperationCancelled();
+
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (service as any).downloadImage(
+          photo,
+          path.join(testOutputDir, testAccountId, 'photos'),
+          path.join(testOutputDir, testAccountId, 'feed'),
+          false,
+          undefined,
+          0,
+          operation
+        )
+      ).resolves.toMatchObject({
+        photoId: 'photo-1',
+        status: 'cancelled',
+      });
+
+      expect(mockPhotosController.downloadPhoto).not.toHaveBeenCalled();
+    });
+
     it('should ignore late progress updates after cancellation', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (service as any).currentOperation = { cancelled: false };
@@ -643,6 +734,45 @@ describe('RecNetService - Download Functionality', () => {
       expect(result.accountId).toBe(testAccountId);
       expect(result.downloadStats.newDownloads).toBe(2);
       expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(2);
+    });
+
+    it('should preserve staggered delays per feed photo instead of reusing the final delay', async () => {
+      const feedPhotos: ImageDto[] = [
+        createMockFeedPhoto('feed-1', 'feed1.jpg'),
+        createMockFeedPhoto('feed-2', 'feed2.jpg'),
+        createMockFeedPhoto('feed-3', 'feed3.jpg'),
+      ];
+
+      const feedJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_feed.json`
+      );
+      const feedDir = path.join(testOutputDir, testAccountId, 'feed');
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (p: string) => {
+          if (p === feedJsonPath) return true;
+          if (p.startsWith(path.join(feedDir, 'feed-'))) return false;
+          return false;
+        }
+      );
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(feedPhotos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      const mockImageData = new ArrayBuffer(1024);
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: true,
+        value: mockImageData,
+        status: 200,
+      } as GenericResponse<ArrayBuffer>);
+
+      await service.downloadFeedPhotos(testAccountId);
+
+      expect((service as any).delay as jest.Mock).toHaveBeenCalledWith(500);
+      expect((service as any).delay as jest.Mock).toHaveBeenCalledWith(1000);
+      expect((service as any).delay as jest.Mock).not.toHaveBeenCalledWith(1500);
     });
 
     it('should retry feed photo downloads before failing', async () => {
