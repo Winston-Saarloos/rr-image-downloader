@@ -14,7 +14,11 @@ import {
   AccountInfo,
   BulkDataRefreshOptions,
 } from '../../shared/types';
-import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
+import {
+  buildCdnImageUrl,
+  DEFAULT_CDN_BASE,
+  normalizeCdnBase,
+} from '../../shared/cdnUrl';
 import { EventDto } from '../models/EventDto';
 import { ImageDto } from '../models/ImageDto';
 import { PlayerResult } from '../models/PlayerDto';
@@ -92,10 +96,9 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
       typeof raw.outputRoot === 'string' && raw.outputRoot.length > 0
         ? raw.outputRoot
         : DEFAULT_SETTINGS.outputRoot,
-    cdnBase:
-      typeof raw.cdnBase === 'string' && raw.cdnBase.length > 0
-        ? raw.cdnBase
-        : DEFAULT_SETTINGS.cdnBase,
+    cdnBase: normalizeCdnBase(
+      typeof raw.cdnBase === 'string' ? raw.cdnBase : DEFAULT_SETTINGS.cdnBase
+    ),
     interPageDelayMs,
     maxPhotosToDownload,
   };

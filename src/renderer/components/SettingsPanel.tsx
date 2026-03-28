@@ -10,11 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/card';
-import {
-  CDN_BASE_OPTIONS,
-  DEFAULT_CDN_BASE,
-  LEGACY_CDN_BASE,
-} from '../../shared/cdnUrl';
+import { DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import { RecNetSettings } from '../../shared/types';
 
 interface SettingsPanelProps {
@@ -51,15 +47,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  const handleCdnChoice = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ): Promise<void> => {
-    const selected = e.target.value;
-    if (CDN_BASE_OPTIONS.includes(selected as (typeof CDN_BASE_OPTIONS)[number])) {
-      await onUpdateSettings({ cdnBase: selected });
-    }
-  };
-
   const handleDelayChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(e.target.value);
     if (!isNaN(value)) {
@@ -89,7 +76,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           Settings
         </CardTitle>
         <CardDescription>
-          Configure output path, image CDN, and request delays
+          Configure output path and request delays. Images always use
+          cdn.rec.net.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -117,37 +105,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
         <div className="space-y-2">
           <Label>Image CDN</Label>
-          <div className="space-y-2">
-            <label className="flex items-start gap-2">
-              <input
-                type="radio"
-                name="cdnBase"
-                value={DEFAULT_CDN_BASE}
-                checked={settings.cdnBase === DEFAULT_CDN_BASE}
-                onChange={handleCdnChoice}
-              />
-              <span className="leading-5">
-                <span className="block text-sm font-medium">cdn.rec.net (recommended)</span>
-                <code className="block text-xs text-muted-foreground break-all">
-                  {DEFAULT_CDN_BASE}
-                </code>
-              </span>
-            </label>
-            <label className="flex items-start gap-2">
-              <input
-                type="radio"
-                name="cdnBase"
-                value={LEGACY_CDN_BASE}
-                checked={settings.cdnBase === LEGACY_CDN_BASE}
-                onChange={handleCdnChoice}
-              />
-              <span className="leading-5">
-                <span className="block text-sm font-medium">img.rec.net (legacy)</span>
-                <code className="block text-xs text-muted-foreground break-all">
-                  {LEGACY_CDN_BASE}
-                </code>
-              </span>
-            </label>
+          <div className="rounded-md border bg-muted/30 px-3 py-2">
+            <span className="block text-sm font-medium">cdn.rec.net</span>
+            <code className="block text-xs text-muted-foreground break-all">
+              {DEFAULT_CDN_BASE}
+            </code>
           </div>
         </div>
 
