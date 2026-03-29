@@ -45,6 +45,7 @@ function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
     outputRoot: 'output',
     cdnBase: DEFAULT_CDN_BASE,
+    interPageDelayMs: 0,
     maxConcurrentDownloads: 30,
   });
 

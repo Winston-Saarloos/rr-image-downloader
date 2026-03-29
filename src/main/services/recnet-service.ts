@@ -78,6 +78,7 @@ type DownloadBatchTrace = {
 const DEFAULT_SETTINGS: RecNetSettings = {
   outputRoot: 'output',
   cdnBase: DEFAULT_CDN_BASE,
+  interPageDelayMs: 0,
   maxConcurrentDownloads: 30
 };
 
@@ -96,13 +97,13 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
   const interRaw = raw.interPageDelayMs;
   const interPageDelayMs =
     typeof interRaw === 'number' && Number.isFinite(interRaw)
-      ? interRaw
+      ? Math.min(1000, Math.max(0, Math.floor(interRaw)))
       : DEFAULT_SETTINGS.interPageDelayMs;
 
   const maxConcurrentRaw = raw.maxConcurrentDownloads;
   const maxConcurrentDownloads =
     typeof maxConcurrentRaw === 'number' && Number.isFinite(maxConcurrentRaw)
-      ? maxConcurrentRaw
+      ? Math.min(30, Math.max(1, Math.floor(maxConcurrentRaw)))
       : DEFAULT_SETTINGS.maxConcurrentDownloads;
 
   const maxRaw = raw.maxPhotosToDownload;
@@ -116,10 +117,7 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
       typeof raw.outputRoot === 'string' && raw.outputRoot.length > 0
         ? raw.outputRoot
         : DEFAULT_SETTINGS.outputRoot,
-    cdnBase:
-      typeof raw.cdnBase === 'string' && raw.cdnBase.length > 0
-        ? raw.cdnBase
-        : DEFAULT_SETTINGS.cdnBase,
+    cdnBase: DEFAULT_SETTINGS.cdnBase,
     interPageDelayMs,
     maxPhotosToDownload,
     maxConcurrentDownloads

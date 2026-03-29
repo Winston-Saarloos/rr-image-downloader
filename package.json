@@ -1,6 +1,6 @@
 {
   "name": "rr-image-downloader",
-  "version": "3.9.5-beta.2",
+  "version": "3.9.6-beta.1",
   "description": "RR Image Downloader - Download Rec Room user images.",
   "main": "dist/main/main/main.js",
   "homepage": "./",

@@ -10,11 +10,6 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/card';
-import {
-  CDN_BASE_OPTIONS,
-  DEFAULT_CDN_BASE,
-  LEGACY_CDN_BASE,
-} from '../../shared/cdnUrl';
 import { RecNetSettings } from '../../shared/types';
 
 interface SettingsPanelProps {
@@ -51,23 +46,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  const handleCdnChoice = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ): Promise<void> => {
-    const selected = e.target.value;
-    if (CDN_BASE_OPTIONS.includes(selected as (typeof CDN_BASE_OPTIONS)[number])) {
-      await onUpdateSettings({ cdnBase: selected });
-    }
-  };
-
   const handleDelayChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.trim();
     if (value === '') {
-      await onUpdateSettings({ interPageDelayMs: undefined });
+      await onUpdateSettings({ interPageDelayMs: 0 });
     } else {
       const numValue = parseInt(value);
-      if (!isNaN(numValue) && numValue > 0) {
-        await onUpdateSettings({ interPageDelayMs: numValue });
+      if (!isNaN(numValue)) {
+        const clampedValue = Math.min(1000, Math.max(0, numValue));
+        await onUpdateSettings({ interPageDelayMs: clampedValue });
       }
     }
   };
@@ -107,7 +94,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           Settings
         </CardTitle>
         <CardDescription>
-          Configure output path, image CDN, and request delays
+          Configure output path and download behavior
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -133,62 +120,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label>Image CDN</Label>
-          <div className="space-y-2">
-            <label className="flex items-start gap-2">
-              <input
-                type="radio"
-                name="cdnBase"
-                value={DEFAULT_CDN_BASE}
-                checked={settings.cdnBase === DEFAULT_CDN_BASE}
-                onChange={handleCdnChoice}
-              />
-              <span className="leading-5">
-                <span className="block text-sm font-medium">cdn.rec.net (recommended)</span>
-                <code className="block text-xs text-muted-foreground break-all">
-                  {DEFAULT_CDN_BASE}
-                </code>
-              </span>
-            </label>
-            <label className="flex items-start gap-2">
-              <input
-                type="radio"
-                name="cdnBase"
-                value={LEGACY_CDN_BASE}
-                checked={settings.cdnBase === LEGACY_CDN_BASE}
-                onChange={handleCdnChoice}
-              />
-              <span className="leading-5">
-                <span className="block text-sm font-medium">img.rec.net (legacy)</span>
-                <code className="block text-xs text-muted-foreground break-all">
-                  {LEGACY_CDN_BASE}
-                </code>
-              </span>
-            </label>
-          </div>
-        </div>
-
         {/* Delay Between Pages */}
         <div className="space-y-2">
           <Label htmlFor="request-delay">Request Delay (ms)</Label>
           <Input
             id="request-delay"
             type="number"
-            value={settings.interPageDelayMs || ''}
+            value={settings.interPageDelayMs ?? 0}
             onChange={handleDelayChange}
-            min="1"
+            min="0"
             max="1000"
-            placeholder="No delay"
           />
           <p className="text-sm text-muted-foreground">
-            Milliseconds between requests. Leave empty for unlimited download speed.
+            Milliseconds between requests. Set to 0 for unlimited download speed.
           </p>
         </div>
 
-        {/* Delay Between Pages */}
+        {/* Concurrent Downloads */}
         <div className="space-y-2">
-          <Label htmlFor="request-delay">Max Concurrent Downloads</Label>
+          <Label htmlFor="concurrent-downloads">Max Concurrent Downloads</Label>
           <Input
             id="concurrent-downloads"
             type="number"
