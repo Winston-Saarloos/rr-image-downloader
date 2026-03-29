@@ -69,7 +69,8 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
         isDownloadOp &&
         canRetryDownload &&
         onRetryDownload &&
-        errorData.category !== 'cancelled';
+        errorData.category !== 'cancelled' &&
+        errorData.category !== 'empty';
 
       return (
         <div className="flex flex-col gap-3">

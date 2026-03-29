@@ -42,7 +42,8 @@ export const ErrorRecoveryBanner: React.FC<ErrorRecoveryBannerProps> = ({
     incident.source === 'download' &&
     canRetryDownload &&
     onRetryDownload &&
-    incident.category !== 'cancelled';
+    incident.category !== 'cancelled' &&
+    incident.category !== 'empty';
 
   const showRetryAfterCancel =
     incident.source === 'download' &&

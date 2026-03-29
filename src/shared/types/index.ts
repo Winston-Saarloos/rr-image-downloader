@@ -144,6 +144,7 @@ export type ErrorContext =
   | 'updateSettings';
 
 export type UserErrorCategory =
+  | 'empty'
   | 'auth'
   | 'network'
   | 'account'

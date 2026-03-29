@@ -39,6 +39,8 @@ interface DownloadRequestState {
   refreshOptions: BulkDataRefreshOptions;
 }
 
+const EMPTY_DOWNLOAD_STEP = 'Nothing to download';
+
 function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
     outputRoot: 'output',
@@ -372,6 +374,8 @@ function App() {
     });
 
     try {
+      let encounteredEmptySource = false;
+
       // Update settings with new file path
       if (window.electronAPI) {
         await window.electronAPI.updateSettings({ outputRoot: filePath });
@@ -441,6 +445,34 @@ function App() {
             }
 
             const totalFeedPhotos = collectFeedResult.data?.totalPhotos || 0;
+            if (totalFeedPhotos === 0) {
+              const emptyMessage =
+                'This account does not have any feed photos to download.';
+              addLog(emptyMessage, 'warning');
+              setShowProgressPanel(true);
+              setProgress(prev => ({
+                ...prev,
+                isRunning: false,
+                currentStep: EMPTY_DOWNLOAD_STEP,
+                progress: 100,
+                total: 0,
+                current: 0,
+                statusLevel: 'warning',
+                issueCount: 0,
+                retryAttempts: 0,
+                failedItems: 0,
+                recoveredAfterRetry: 0,
+                lastIssue: emptyMessage,
+              }));
+              setActiveIncident(
+                createUserIncident('download', emptyMessage, {
+                  severity: 'warning',
+                })
+              );
+              encounteredEmptySource = true;
+              continue;
+            }
+
             addLog(`Collected ${totalFeedPhotos} feed photos metadata`, 'success');
 
             addLog('Downloading feed photos...', 'info');
@@ -484,6 +516,34 @@ function App() {
             }
 
             const totalPhotos = collectPhotosResult.data?.totalPhotos || 0;
+            if (totalPhotos === 0) {
+              const emptyMessage =
+                'This account does not have any user photos to download.';
+              addLog(emptyMessage, 'warning');
+              setShowProgressPanel(true);
+              setProgress(prev => ({
+                ...prev,
+                isRunning: false,
+                currentStep: EMPTY_DOWNLOAD_STEP,
+                progress: 100,
+                total: 0,
+                current: 0,
+                statusLevel: 'warning',
+                issueCount: 0,
+                retryAttempts: 0,
+                failedItems: 0,
+                recoveredAfterRetry: 0,
+                lastIssue: emptyMessage,
+              }));
+              setActiveIncident(
+                createUserIncident('download', emptyMessage, {
+                  severity: 'warning',
+                })
+              );
+              encounteredEmptySource = true;
+              continue;
+            }
+
             addLog(`Collected ${totalPhotos} photos metadata`, 'success');
 
             addLog('Downloading user photos...', 'info');
@@ -552,11 +612,14 @@ function App() {
         ) {
           loadPhotosForAccount(accountId);
         }
-        setActiveIncident(null);
+        if (!encounteredEmptySource) {
+          setActiveIncident(null);
+        }
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Download failed';
+      const classifiedError = classifyError(errorMessage, 'download');
 
       if (errorMessage === 'Operation cancelled') {
         addLog('Download cancelled by user.', 'warning');
@@ -574,9 +637,27 @@ function App() {
         setActiveIncident(
           createUserIncident('download', errorMessage, { severity: 'warning' })
         );
+      } else if (classifiedError.category === 'empty') {
+        addLog(classifiedError.detail, 'warning');
+        setShowProgressPanel(true);
+        setProgress(prev => ({
+          ...prev,
+          isRunning: false,
+          currentStep: EMPTY_DOWNLOAD_STEP,
+          progress: 100,
+          total: 0,
+          current: 0,
+          statusLevel: 'warning',
+          issueCount: 0,
+          failedItems: 0,
+          lastIssue: classifiedError.detail,
+        }));
+        setActiveIncident(
+          createUserIncident('download', errorMessage, { severity: 'warning' })
+        );
       } else {
         addLog(`Download failed: ${errorMessage}`, 'error');
-        classifyError(errorMessage, 'download').guidance.forEach(message =>
+        classifiedError.guidance.forEach(message =>
           addLog(message, 'warning')
         );
         setShowProgressPanel(true);
@@ -609,6 +690,8 @@ function App() {
             ? 'Cancelled'
             : prev.currentStep === 'Failed'
               ? 'Failed'
+              : prev.currentStep === EMPTY_DOWNLOAD_STEP
+                ? EMPTY_DOWNLOAD_STEP
               : 'Complete',
         progress:
           prev.currentStep === 'Cancelled' ? prev.progress : 100,

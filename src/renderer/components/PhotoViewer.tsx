@@ -123,6 +123,11 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       : photoSource === 'profile-history'
         ? 'profile picture history'
         : 'photos';
+  const hasUserPhotos = photos.length > 0;
+  const hasFeedPhotos = feedPhotos.length > 0;
+  const hasProfileHistoryPhotos = profileHistoryPhotos.length > 0;
+  const hasPhotoSections =
+    hasUserPhotos || hasFeedPhotos || hasProfileHistoryPhotos;
 
   const loadAvailableAccounts = useCallback(async () => {
     setLoadingAccounts(true);
@@ -465,43 +470,55 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
             )}
 
             <div className="flex flex-wrap items-center gap-3 md:justify-end">
-              <span className="text-sm text-muted-foreground">Viewing</span>
-              <Button
-                size="sm"
-                variant={photoSource === 'photos' ? 'default' : 'outline'}
-                onClick={() => setPhotoSource('photos')}
-              >
-                My Photos ({photos.length})
-              </Button>
-              <Button
-                size="sm"
-                variant={photoSource === 'feed' ? 'default' : 'outline'}
-                onClick={() => setPhotoSource('feed')}
-              >
-                Feed ({feedPhotos.length})
-              </Button>
-              <Button
-                size="sm"
-                variant={
-                  photoSource === 'profile-history' ? 'default' : 'outline'
-                }
-                onClick={() => setPhotoSource('profile-history')}
-              >
-                Profile History ({profileHistoryPhotos.length})
-              </Button>
-              <Button
-                size="sm"
-                variant={showFavoritesOnly ? 'default' : 'outline'}
-                onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
-                className={
-                  showFavoritesOnly ? 'bg-red-500 text-white hover:bg-red-600' : ''
-                }
-              >
-                <Heart
-                  className={`mr-2 h-4 w-4 ${showFavoritesOnly ? 'fill-current' : ''}`}
-                />
-                Favorites
-              </Button>
+              {hasPhotoSections && (
+                <>
+                  <span className="text-sm text-muted-foreground">Viewing</span>
+                  {hasUserPhotos && (
+                    <Button
+                      size="sm"
+                      variant={photoSource === 'photos' ? 'default' : 'outline'}
+                      onClick={() => setPhotoSource('photos')}
+                    >
+                      My Photos ({photos.length})
+                    </Button>
+                  )}
+                  {hasFeedPhotos && (
+                    <Button
+                      size="sm"
+                      variant={photoSource === 'feed' ? 'default' : 'outline'}
+                      onClick={() => setPhotoSource('feed')}
+                    >
+                      Feed ({feedPhotos.length})
+                    </Button>
+                  )}
+                  {hasProfileHistoryPhotos && (
+                    <Button
+                      size="sm"
+                      variant={
+                        photoSource === 'profile-history' ? 'default' : 'outline'
+                      }
+                      onClick={() => setPhotoSource('profile-history')}
+                    >
+                      Profile History ({profileHistoryPhotos.length})
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant={showFavoritesOnly ? 'default' : 'outline'}
+                    onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+                    className={
+                      showFavoritesOnly
+                        ? 'bg-red-500 text-white hover:bg-red-600'
+                        : ''
+                    }
+                  >
+                    <Heart
+                      className={`mr-2 h-4 w-4 ${showFavoritesOnly ? 'fill-current' : ''}`}
+                    />
+                    Favorites
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         )}

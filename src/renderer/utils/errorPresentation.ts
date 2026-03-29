@@ -11,6 +11,28 @@ const DOWNLOAD_RESUME = [
   'You do not need to delete the output folder to resume.',
 ] as const;
 
+/** Collapses whitespace so minor formatting differences still match known copy. */
+function normalizeEmptyDownloadMessage(message: string): string {
+  return message
+    .trim()
+    .replace(/\.$/, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+/** Canonical empty-download messages; value is which variant to show in the UI. */
+const EMPTY_DOWNLOAD_KIND = new Map<string, 'feed' | 'user'>([
+  ['this account does not have any user photos to download', 'user'],
+  ['this account does not have any feed photos to download', 'feed'],
+  ['this account does not have any photos to download', 'user'],
+  ['no photos found in the json file', 'user'],
+  ['no feed photos found in the json file', 'feed'],
+]);
+
+function emptyDownloadKind(message: string): 'feed' | 'user' | null {
+  return EMPTY_DOWNLOAD_KIND.get(normalizeEmptyDownloadMessage(message)) ?? null;
+}
+
 function truncateDetail(s: string, max = 220): string {
   const t = s.trim();
   if (t.length <= max) return t;
@@ -42,6 +64,7 @@ function pickTitle(context: ErrorContext, category: UserErrorCategory): string {
   if (category === 'cancelled') return 'Download cancelled';
 
   if (context === 'download') {
+    if (category === 'empty') return 'No photos found';
     if (category === 'account') return 'We could not find that account';
     if (category === 'auth') return 'Access was denied';
     if (category === 'network') return 'Could not reach RecNet';
@@ -62,6 +85,13 @@ function buildGuidance(
   const g: string[] = [];
 
   if (context === 'download') {
+    if (category === 'empty') {
+      g.push('You can still download other sections for this account.');
+      g.push(
+        'Try another account if you expected photos to be available here.'
+      );
+      return g;
+    }
     if (category !== 'cancelled') {
       g.push(...DOWNLOAD_RESUME);
     }
@@ -152,6 +182,20 @@ export function classifyError(
     };
   }
 
+  const emptyKind = context === 'download' ? emptyDownloadKind(message) : null;
+  if (emptyKind !== null) {
+    return {
+      category: 'empty',
+      title:
+        emptyKind === 'feed' ? 'No feed photos found' : 'No user photos found',
+      detail:
+        emptyKind === 'feed'
+          ? 'This account does not have any feed photos to download.'
+          : 'This account does not have any user photos to download.',
+      guidance: buildGuidance(context, 'empty', message),
+    };
+  }
+
   const category = detectCategory(message);
   const title = pickTitle(context, category);
   const detail = truncateDetail(message);
@@ -180,7 +224,10 @@ export function createUserIncident(
 ): UserFacingIncident {
   const c = classifyError(rawMessage, source);
   const severity =
-    options?.severity ?? (c.category === 'cancelled' ? 'warning' : 'error');
+    options?.severity ??
+    (c.category === 'cancelled' || c.category === 'empty'
+      ? 'warning'
+      : 'error');
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     source,
