@@ -90,14 +90,18 @@ export const PhotoCard: React.FC<PhotoCardProps> = React.memo(
           >
             <Heart className={`h-4 w-4 ${favorited ? 'fill-current' : ''}`} />
           </Button>
-          <div className="pointer-events-none absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white">
-            <MessageCircle className="h-3.5 w-3.5" />
-            <span>{commentCount}</span>
-          </div>
-          <div className="pointer-events-none absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white">
-            <span>{cheerCount}</span>
-            <ThumbsUp className="h-3.5 w-3.5" />
-          </div>
+          {commentCount > 0 && (
+            <div className="pointer-events-none absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white">
+              <MessageCircle className="h-3.5 w-3.5" />
+              <span>{commentCount}</span>
+            </div>
+          )}
+          {cheerCount > 0 && (
+            <div className="pointer-events-none absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white">
+              <span>{cheerCount}</span>
+              <ThumbsUp className="h-3.5 w-3.5" />
+            </div>
+          )}
         </div>
         <CardContent className="p-4 space-y-2">
           {!hideRoom && (
