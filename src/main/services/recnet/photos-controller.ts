@@ -3,6 +3,7 @@ import {
   shouldIncludeTokenForCdnBase,
 } from '../../../shared/cdnUrl';
 import { ImageDto } from '../../models/ImageDto';
+import { ProfileHistoryImageDto } from '../../models/ProfileHistoryImageDto';
 import { GenericResponse } from '../../models/GenericResponse';
 import { RecNetHttpClient, RecNetRequestOptions } from './http-client';
 
@@ -40,6 +41,22 @@ export class PhotosController {
 
     return this.http.requestOrThrow<ImageDto[]>(
       { url, method: 'GET' },
+      token,
+      options
+    );
+  }
+
+  // I am suspicious of this endpoint. It returns old photos from 2018 but stops at Dec 2021.
+  // It should have more recent entries.
+  async fetchProfilePhotoHistory(
+    token: string,
+    options?: RecNetRequestOptions
+  ): Promise<ProfileHistoryImageDto[]> {
+    return this.http.requestOrThrow<ProfileHistoryImageDto[]>(
+      {
+        url: 'https://api.rec.net/api/images/v3/profile/all',
+        method: 'GET',
+      },
       token,
       options
     );

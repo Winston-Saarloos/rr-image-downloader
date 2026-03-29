@@ -7,6 +7,10 @@ const electronAPI: ElectronAPI = {
 
   downloadPhotos: (params) => ipcRenderer.invoke('download-photos', params),
   downloadFeedPhotos: (params) => ipcRenderer.invoke('download-feed-photos', params),
+  downloadProfileHistory: (params) =>
+    ipcRenderer.invoke('download-profile-history', params),
+  validateProfileHistoryAccess: (params) =>
+    ipcRenderer.invoke('validate-profile-history-access', params),
 
   selectOutputFolder: () => ipcRenderer.invoke('select-output-folder'),
 
@@ -24,14 +28,16 @@ const electronAPI: ElectronAPI = {
   },
 
   lookupAccountById: (accountId) => ipcRenderer.invoke('lookup-account-by-id', accountId),
-  lookupAccountByUsername: (username: string) =>
-    ipcRenderer.invoke('lookup-account-by-username', username),
+  lookupAccountByUsername: (username: string, token?: string) =>
+    ipcRenderer.invoke('lookup-account-by-username', username, token),
   searchAccounts: (username: string, token?: string) =>
     ipcRenderer.invoke('search-accounts', username, token),
   clearAccountData: (accountId) => ipcRenderer.invoke('clear-account-data', accountId),
 
   loadPhotos: (accountId) => ipcRenderer.invoke('load-photos', accountId),
   loadFeedPhotos: (accountId) => ipcRenderer.invoke('load-feed-photos', accountId),
+  loadProfileHistoryPhotos: (accountId) =>
+    ipcRenderer.invoke('load-profile-history-photos', accountId),
   listAvailableAccounts: () => ipcRenderer.invoke('list-available-accounts'),
   loadAccountsData: (accountId) => ipcRenderer.invoke('load-accounts-data', accountId),
   loadRoomsData: (accountId) => ipcRenderer.invoke('load-rooms-data', accountId),

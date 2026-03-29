@@ -7,6 +7,7 @@ import {
   Progress,
   CollectionResult,
   DownloadResult,
+  ProfileHistoryAccessResult,
   Photo,
   IterationDetail,
   DownloadResultItem,
@@ -18,6 +19,7 @@ import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import { EventDto } from '../models/EventDto';
 import { ImageDto } from '../models/ImageDto';
 import { PlayerResult } from '../models/PlayerDto';
+import { ProfileHistoryImageDto } from '../models/ProfileHistoryImageDto';
 import { RoomDto } from '../models/RoomDto';
 import { AccountsController } from './recnet/accounts-controller';
 import { EventsController } from './recnet/events-controller';
@@ -42,6 +44,11 @@ interface PhotoDownloadAttempt {
   error?: Error;
   attempts: number;
 }
+
+type JwtPayload = {
+  sub?: string;
+  exp?: number;
+};
 
 type FolderMetaOwner = {
   accountId: string;
@@ -898,7 +905,7 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async downloadPhotos(accountId: string): Promise<DownloadResult> {
+  async downloadPhotos(accountId: string, token?: string): Promise<DownloadResult> {
     await this.ensureSettingsLoaded();
     const operation = this.startOperation();
 
@@ -1041,7 +1048,7 @@ export class RecNetService extends EventEmitter {
                     photosDir,
                     feedDir,
                     false,
-                    undefined,
+                    token,
                     operation
                   );
                   const status = result.status;
@@ -1141,7 +1148,10 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async downloadFeedPhotos(accountId: string): Promise<DownloadResult> {
+  async downloadFeedPhotos(
+    accountId: string,
+    token?: string
+  ): Promise<DownloadResult> {
     await this.ensureSettingsLoaded();
     if (this.currentOperation?.cancelled) {
       throw this.createOperationCancelledError();
@@ -1290,7 +1300,7 @@ export class RecNetService extends EventEmitter {
                     photosDir,
                     feedPhotosDir,
                     true,
-                    undefined,
+                    token,
                     operation
                   );
                   const status = result.status;
@@ -1379,6 +1389,327 @@ export class RecNetService extends EventEmitter {
         downloadResults,
         totalResults: downloadResults.length,
         guidance: this.buildDownloadGuidance('feed photos', downloadStats),
+      };
+    } catch (error) {
+      if (!this.isOperationCancelledError(error)) {
+        this.setOperationFailed((error as Error).message);
+      }
+      throw error;
+    } finally {
+      this.finishOperation(operation);
+    }
+  }
+
+  async validateProfileHistoryAccess(
+    username: string,
+    token: string
+  ): Promise<ProfileHistoryAccessResult> {
+    const cleanedUsername = username.trim();
+    const cleanedToken = token.trim();
+
+    if (!cleanedUsername) {
+      throw new Error('Username is required.');
+    }
+    if (!cleanedToken) {
+      throw new Error('Access token is required for profile picture history.');
+    }
+
+    const payload = this.decodeJwtPayload(cleanedToken);
+    if (!payload) {
+      throw new Error('Token is invalid or could not be parsed.');
+    }
+    if (!payload.sub) {
+      throw new Error('Token is missing an account id.');
+    }
+    if (payload.exp && payload.exp * 1000 <= Date.now()) {
+      throw new Error('Token has expired.');
+    }
+
+    const account = await this.lookupAccountByUsername(cleanedUsername);
+    const accountId = this.normalizeId(account.accountId);
+    const tokenAccountId = this.normalizeId(payload.sub);
+
+    if (!accountId) {
+      throw new Error('Could not resolve an account id for this username.');
+    }
+    if (tokenAccountId !== accountId) {
+      throw new Error('Token does not belong to this user.');
+    }
+
+    try {
+      await this.photosController.fetchProfilePhotoHistory(cleanedToken);
+    } catch (error) {
+      const message = (error as Error).message ?? String(error);
+      if (/HTTP\s+(401|403)\b/.test(message)) {
+        throw new Error(
+          'Token is not authorized to access profile picture history.'
+        );
+      }
+      throw error;
+    }
+
+    return {
+      accountId,
+      username: (account.username || cleanedUsername).trim(),
+      tokenAccountId,
+    };
+  }
+
+  async downloadProfileHistory(
+    accountId: string,
+    token: string
+  ): Promise<DownloadResult> {
+    await this.ensureSettingsLoaded();
+    if (this.currentOperation?.cancelled) {
+      throw this.createOperationCancelledError();
+    }
+    const operation = this.startOperation();
+
+    try {
+      this.resetProgressIssueState();
+      this.updateProgress('Downloading profile picture history...', 0, 0, 0);
+
+      const cleanedToken = token.trim();
+      if (!cleanedToken) {
+        throw new Error(
+          'Profile picture history requires a valid access token.'
+        );
+      }
+
+      const requestOptions = { signal: operation.controller.signal };
+      const historyPayload = await this.photosController.fetchProfilePhotoHistory(
+        cleanedToken,
+        requestOptions
+      );
+
+      if (operation.cancelled) {
+        throw this.createOperationCancelledError();
+      }
+
+      const accountDir = path.join(this.settings.outputRoot, accountId);
+      await fs.ensureDir(accountDir);
+
+      const manifestPath = path.join(
+        accountDir,
+        `${accountId}_profile_history.json`
+      );
+      await fs.writeJson(manifestPath, historyPayload, { spaces: 2 });
+
+      const profileHistoryDir = path.join(accountDir, 'profile-history');
+      await fs.ensureDir(profileHistoryDir);
+
+      const profilePhotos = this.normalizeProfileHistoryPhotos(
+        historyPayload,
+        accountId
+      );
+      const totalPhotos = profilePhotos.length;
+      const maxPhotosToDownload = this.settings.maxPhotosToDownload;
+      const hasDownloadLimit = maxPhotosToDownload && maxPhotosToDownload > 0;
+
+      const existingFiles = (await fs.readdir(profileHistoryDir)).filter(file =>
+        file.toLowerCase().endsWith('.jpg')
+      ).length;
+      let remainingDownloadSlots =
+        (maxPhotosToDownload || 0) - existingFiles;
+
+      if (hasDownloadLimit && remainingDownloadSlots <= 0) {
+        this.updateProgress(
+          'Download limit reached for profile picture history',
+          totalPhotos,
+          totalPhotos,
+          100
+        );
+        this.setOperationComplete();
+        return {
+          accountId,
+          profileHistoryDirectory: profileHistoryDir,
+          profileHistoryManifestPath: manifestPath,
+          processedCount: 0,
+          downloadStats: {
+            totalPhotos,
+            alreadyDownloaded: existingFiles,
+            newDownloads: 0,
+            failedDownloads: 0,
+            skipped: totalPhotos,
+            retryAttempts: 0,
+            recoveredAfterRetry: 0,
+          },
+          downloadResults: [],
+          totalResults: 0,
+        };
+      }
+
+      if (totalPhotos === 0) {
+        this.setOperationComplete();
+        return {
+          accountId,
+          profileHistoryDirectory: profileHistoryDir,
+          profileHistoryManifestPath: manifestPath,
+          processedCount: 0,
+          downloadStats: {
+            totalPhotos: 0,
+            alreadyDownloaded: 0,
+            newDownloads: 0,
+            failedDownloads: 0,
+            skipped: 0,
+            retryAttempts: 0,
+            recoveredAfterRetry: 0,
+          },
+          downloadResults: [],
+          totalResults: 0,
+        };
+      }
+
+      const trace = this.createDownloadBatchTrace(
+        'profile-history-downloads',
+        totalPhotos
+      );
+      let alreadyDownloaded = 0;
+      let newDownloads = 0;
+      let failedDownloads = 0;
+      let skipped = 0;
+      let retryAttempts = 0;
+      let recoveredAfterRetry = 0;
+      let processedCount = 0;
+
+      this.updateProgress(
+        'Downloading profile picture history...',
+        0,
+        totalPhotos,
+        0
+      );
+
+      let delay = 0;
+      const promises: Array<Promise<DownloadResultItem>> = [];
+      const semaphore = new Semaphore(this.settings.maxConcurrentDownloads);
+      let scheduledPhotoCount = 0;
+
+      for (const photo of profilePhotos) {
+        if (hasDownloadLimit && remainingDownloadSlots <= 0) {
+          skipped = profilePhotos.length - scheduledPhotoCount;
+          break;
+        } else {
+          remainingDownloadSlots--;
+        }
+
+        scheduledPhotoCount++;
+        const scheduledIndex = scheduledPhotoCount;
+        const scheduledDelayMs = delay;
+        promises.push(
+          new Promise<DownloadResultItem>((resolve, reject) => {
+            void (async () => {
+              const photoId = this.normalizeId(photo.Id);
+              const imageName = photo.ImageName;
+              const runStartedAt = Date.now();
+              let result: DownloadResultItem | undefined;
+
+              try {
+                if (scheduledDelayMs) {
+                  await this.delay(scheduledDelayMs, operation);
+                }
+
+                const slotWaitStartedAt = Date.now();
+                await semaphore.acquire();
+                const slotWaitMs = Date.now() - slotWaitStartedAt;
+                trace.inFlight++;
+                this.logDownloadWorkerStart(trace, {
+                  scheduledIndex,
+                  photoId,
+                  imageName,
+                  scheduledDelayMs,
+                  slotWaitMs,
+                });
+
+                try {
+                  result = await this.downloadProfileHistoryImage(
+                    photo,
+                    profileHistoryDir,
+                    cleanedToken,
+                    operation
+                  );
+                  const status = result.status;
+
+                  if (status === 'downloaded') {
+                    newDownloads++;
+                    retryAttempts += (result.attempts || 1) - 1;
+                    if (result.recoveredAfterRetry) {
+                      recoveredAfterRetry++;
+                    }
+                  } else if (status && status.startsWith('already_exists')) {
+                    alreadyDownloaded++;
+                  } else if (
+                    status &&
+                    (status === 'error' || status === 'failed')
+                  ) {
+                    failedDownloads++;
+                    retryAttempts += (result.attempts || 1) - 1;
+                  } else if (status === 'cancelled') {
+                    skipped++;
+                  }
+
+                  resolve(result);
+                } catch (error) {
+                  reject(error);
+                } finally {
+                  trace.inFlight = Math.max(0, trace.inFlight - 1);
+                  trace.completed++;
+                  this.logDownloadWorkerFinish(trace, {
+                    scheduledIndex,
+                    photoId,
+                    imageName,
+                    result,
+                    runDurationMs: Date.now() - runStartedAt,
+                  });
+                  semaphore.release();
+                  if (this.currentOperation === operation) {
+                    this.updateProgress(
+                      'Downloading profile picture history...',
+                      processedCount,
+                      totalPhotos
+                    );
+                    processedCount++;
+                  }
+                }
+              } catch (error) {
+                reject(error);
+              }
+            })();
+          })
+        );
+        delay += this.settings.interPageDelayMs || 0;
+      }
+
+      const downloadResults = await Promise.all<DownloadResultItem>(promises);
+
+      if (operation.cancelled) {
+        throw this.createOperationCancelledError();
+      }
+
+      this.setOperationComplete();
+
+      const downloadStats: DownloadStats = {
+        totalPhotos,
+        alreadyDownloaded,
+        newDownloads,
+        failedDownloads,
+        skipped,
+        retryAttempts,
+        recoveredAfterRetry,
+      };
+      this.logDownloadBatchSummary(trace, downloadStats);
+
+      return {
+        accountId,
+        profileHistoryDirectory: profileHistoryDir,
+        profileHistoryManifestPath: manifestPath,
+        processedCount,
+        downloadStats,
+        downloadResults,
+        totalResults: downloadResults.length,
+        guidance: this.buildDownloadGuidance(
+          'profile picture history images',
+          downloadStats
+        ),
       };
     } catch (error) {
       if (!this.isOperationCancelledError(error)) {
@@ -1506,6 +1837,155 @@ export class RecNetService extends EventEmitter {
         retries: Math.max(0, attemptsUsed - 1),
       };
     }
+  }
+
+  private async downloadProfileHistoryImage(
+    photo: Photo,
+    profileHistoryDir: string,
+    token: string,
+    operation?: CurrentOperation
+  ): Promise<DownloadResultItem> {
+    const photoId = this.sanitizeFileStem(this.normalizeId(photo.Id));
+    const imageName = photo.ImageName;
+    const photoUrl = buildCdnImageUrl(this.settings.cdnBase, imageName);
+
+    if (!photoId || !imageName) {
+      return {
+        error: 'invalid_profile_history_entry',
+        photoId,
+        imageName,
+        photo: JSON.stringify(photo),
+      };
+    }
+
+    if (operation?.cancelled || this.currentOperation?.cancelled) {
+      return {
+        photoId,
+        status: 'cancelled',
+      };
+    }
+
+    const photoPath = path.join(profileHistoryDir, `${photoId}.jpg`);
+    if (await fs.pathExists(photoPath)) {
+      return {
+        photoId,
+        status: 'already_exists_in_profile_history',
+        path: photoPath,
+      };
+    }
+
+    let attemptsUsed = 1;
+    try {
+      const attempt = await this.downloadPhotoWithRetry(
+        imageName,
+        token,
+        operation
+      );
+      attemptsUsed = attempt.attempts;
+      const response = attempt.response;
+      const recoveredAfterRetry =
+        attempt.attempts > 1 && !!response?.success && !!response.value;
+
+      if (response?.success && response.value) {
+        const data = Buffer.from(response.value);
+        await fs.writeFile(photoPath, data);
+        return {
+          photoId,
+          status: 'downloaded',
+          size: data.length,
+          path: photoPath,
+          url: photoUrl,
+          attempts: attempt.attempts,
+          retries: Math.max(0, attempt.attempts - 1),
+          recoveredAfterRetry,
+        };
+      }
+
+      if (response) {
+        return {
+          photoId,
+          status: 'failed',
+          statusCode: response.status,
+          reason: (response.message || response.error) ?? undefined,
+          url: photoUrl,
+          attempts: attempt.attempts,
+          retries: Math.max(0, attempt.attempts - 1),
+        };
+      }
+
+      throw attempt.error ?? new Error('Download failed after retries');
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Operation cancelled') {
+        return {
+          photoId,
+          status: 'cancelled',
+        };
+      }
+
+      return {
+        photoId,
+        status: 'error',
+        error: (error as Error).message,
+        url: photoUrl,
+        attempts: attemptsUsed,
+        retries: Math.max(0, attemptsUsed - 1),
+      };
+    }
+  }
+
+  private decodeJwtPayload(token: string): JwtPayload | null {
+    try {
+      const parts = token.trim().split('.');
+      if (parts.length !== 3) {
+        return null;
+      }
+
+      const payload = parts[1]
+        .replace(/-/g, '+')
+        .replace(/_/g, '/')
+        .padEnd(Math.ceil(parts[1].length / 4) * 4, '=');
+      const decoded = Buffer.from(payload, 'base64').toString('utf8');
+      return JSON.parse(decoded) as JwtPayload;
+    } catch {
+      return null;
+    }
+  }
+
+  private normalizeProfileHistoryPhotos(
+    payload: ProfileHistoryImageDto[],
+    accountId: string
+  ): Photo[] {
+    const normalizedAccountId = this.normalizeId(accountId);
+
+    return payload
+      .map<Photo>(photo => ({
+        ...photo,
+        Id: this.sanitizeFileStem(this.normalizeId(photo.Id)),
+        Description: photo.Description ?? '',
+        PlayerId: this.normalizeId(photo.PlayerId) || normalizedAccountId,
+        TaggedPlayerIds: Array.isArray(photo.TaggedPlayerIds)
+          ? photo.TaggedPlayerIds.map(id => this.normalizeId(id)).filter(Boolean)
+          : [],
+        RoomId: this.normalizeId(photo.RoomId),
+        PlayerEventId: this.normalizeId(photo.PlayerEventId) || undefined,
+      }))
+      .filter(photo => !!photo.Id && !!photo.ImageName)
+      .sort((a, b) => {
+        const timeA = a.CreatedAt
+          ? new Date(a.CreatedAt).getTime()
+          : Number.MAX_SAFE_INTEGER;
+        const timeB = b.CreatedAt
+          ? new Date(b.CreatedAt).getTime()
+          : Number.MAX_SAFE_INTEGER;
+        if (timeA !== timeB) {
+          return timeA - timeB;
+        }
+        return this.compareIds(a.Id, b.Id);
+      });
+  }
+
+  private sanitizeFileStem(value: string): string {
+    return value.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_');
   }
 
   private normalizeId(value: unknown): string {
@@ -2369,9 +2849,15 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async lookupAccountByUsername(username: string): Promise<AccountInfo> {
+  async lookupAccountByUsername(
+    username: string,
+    token?: string
+  ): Promise<AccountInfo> {
     try {
-      return await this.accountsController.lookupAccountByUsername(username);
+      return await this.accountsController.lookupAccountByUsername(
+        username,
+        token
+      );
     } catch (error) {
       throw new Error(
         `Failed to lookup account by username: ${(error as Error).message}`
@@ -2412,6 +2898,7 @@ export class RecNetService extends EventEmitter {
             const metadataFiles = [
               `${entry.name}_photos.json`,
               `${entry.name}_feed.json`,
+              `${entry.name}_profile_history.json`,
               `${entry.name}_accounts.json`,
               `${entry.name}_rooms.json`,
               `${entry.name}_events.json`,
@@ -2431,7 +2918,9 @@ export class RecNetService extends EventEmitter {
             }
           } else if (entry.isFile()) {
             const isLegacyMetadata =
-              /.+_(photos|feed|accounts|rooms|events)\.json$/i.test(entry.name);
+              /.+_(photos|feed|profile_history|accounts|rooms|events)\.json$/i.test(
+                entry.name
+              );
             if (isLegacyMetadata) {
               await fs.remove(entryPath);
               removedLegacyFiles++;
@@ -2508,8 +2997,10 @@ export class RecNetService extends EventEmitter {
       accountId: string;
       hasPhotos: boolean;
       hasFeed: boolean;
+      hasProfileHistory: boolean;
       photoCount: number;
       feedCount: number;
+      profileHistoryCount: number;
       displayLabel?: string;
     }>
   > {
@@ -2518,8 +3009,10 @@ export class RecNetService extends EventEmitter {
       accountId: string;
       hasPhotos: boolean;
       hasFeed: boolean;
+      hasProfileHistory: boolean;
       photoCount: number;
       feedCount: number;
+      profileHistoryCount: number;
       displayLabel?: string;
     }> = [];
 
@@ -2546,6 +3039,10 @@ export class RecNetService extends EventEmitter {
           `${accountId}_photos.json`
         );
         const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
+        const profileHistoryJsonPath = path.join(
+          accountDir,
+          `${accountId}_profile_history.json`
+        );
         const accountsJsonPath = path.join(
           accountDir,
           `${accountId}_accounts.json`
@@ -2553,8 +3050,10 @@ export class RecNetService extends EventEmitter {
 
         let hasPhotos = false;
         let hasFeed = false;
+        let hasProfileHistory = false;
         let photoCount = 0;
         let feedCount = 0;
+        let profileHistoryCount = 0;
         let displayLabel: string | undefined;
 
         // Check for photos metadata
@@ -2589,8 +3088,27 @@ export class RecNetService extends EventEmitter {
           }
         }
 
+        if (await fs.pathExists(profileHistoryJsonPath)) {
+          try {
+            const profileHistory: Photo[] = await fs.readJson(
+              profileHistoryJsonPath
+            );
+            if (
+              Array.isArray(profileHistory) &&
+              profileHistory.length > 0
+            ) {
+              hasProfileHistory = true;
+              profileHistoryCount = profileHistory.length;
+            }
+          } catch (error) {
+            console.log(
+              `Failed to read profile history JSON for ${accountId}: ${(error as Error).message}`
+            );
+          }
+        }
+
         // Only include accounts that have at least one metadata file
-        if (hasPhotos || hasFeed) {
+        if (hasPhotos || hasFeed || hasProfileHistory) {
           // Prefer small folder metadata for owner display.
           const meta = await this.readFolderMeta(accountDir);
           if (meta?.owner) {
@@ -2637,8 +3155,10 @@ export class RecNetService extends EventEmitter {
             accountId,
             hasPhotos,
             hasFeed,
+            hasProfileHistory,
             photoCount,
             feedCount,
+            profileHistoryCount,
             displayLabel,
           });
         }
