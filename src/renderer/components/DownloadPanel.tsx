@@ -7,6 +7,7 @@ import {
   HelpCircle,
   Key,
   RefreshCcw,
+  UserRound,
   X,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
@@ -19,7 +20,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../components/ui/dialog';
-import { RecNetSettings } from '../../shared/types';
+import { buildCdnImageUrl } from '../../shared/cdnUrl';
+import { AccountInfo, RecNetSettings } from '../../shared/types';
+import { Card } from '../components/ui/card';
 import {
   Tooltip,
   TooltipContent,
@@ -81,15 +84,17 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const [token, setToken] = useState('');
   const [filePath, setFilePath] = useState(settings.outputRoot || '');
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle');
+  const [resolvedAccount, setResolvedAccount] = useState<AccountInfo | null>(
+    null
+  );
   const [tokenStatus, setTokenStatus] = useState<TokenStatus>('idle');
   const [tokenStatusMessage, setTokenStatusMessage] = useState(
-    'Optional. Required for profile picture history and private-image access.'
+    'Optional. Required for profile picture history and private image downloads.'
   );
   const [tokenExpiringSoon, setTokenExpiringSoon] = useState(false);
   const [tokenHelpOpen, setTokenHelpOpen] = useState(false);
-  const [downloadSources, setDownloadSources] = useState<DownloadSourceSelection>(
-    DEFAULT_DOWNLOAD_SOURCE_SELECTION
-  );
+  const [downloadSources, setDownloadSources] =
+    useState<DownloadSourceSelection>(DEFAULT_DOWNLOAD_SOURCE_SELECTION);
   const [forceAccountsRefresh, setForceAccountsRefresh] = useState(false);
   const [forceRoomsRefresh, setForceRoomsRefresh] = useState(false);
   const [forceEventsRefresh, setForceEventsRefresh] = useState(false);
@@ -99,6 +104,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const tokenValidationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const tokenValidationRequestIdRef = useRef(0);
+  const tokenTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setFilePath(settings.outputRoot || '');
@@ -164,10 +170,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const checkUsername = async (value: string) => {
     if (!value.trim()) {
       setUsernameStatus('idle');
+      setResolvedAccount(null);
       return;
     }
 
     setUsernameStatus('checking');
+    setResolvedAccount(null);
     try {
       if (electronAPI) {
         const result = await electronAPI.lookupAccountByUsername(
@@ -176,12 +184,15 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
         );
         if (result.success && result.data) {
           setUsernameStatus('found');
+          setResolvedAccount(result.data);
         } else {
           setUsernameStatus('not-found');
+          setResolvedAccount(null);
         }
       }
     } catch {
       setUsernameStatus('not-found');
+      setResolvedAccount(null);
     }
   };
 
@@ -193,7 +204,9 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     return cleaned.replace(/\s+/g, '');
   };
 
-  const decodeJWT = (tokenValue: string): { sub?: string; exp?: number } | null => {
+  const decodeJWT = (
+    tokenValue: string
+  ): { sub?: string; exp?: number } | null => {
     try {
       const parts = tokenValue.split('.');
       if (parts.length !== 3) {
@@ -278,6 +291,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
 
     if (!value.trim()) {
       setUsernameStatus('idle');
+      setResolvedAccount(null);
       return;
     }
 
@@ -306,6 +320,29 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     setToken(cleanToken(e.target.value));
   };
 
+  const handlePasteToken = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const el = tokenTextareaRef.current;
+      if (el) {
+        const start = el.selectionStart ?? 0;
+        const end = el.selectionEnd ?? 0;
+        const combined = token.slice(0, start) + text + token.slice(end);
+        const next = cleanToken(combined);
+        setToken(next);
+        requestAnimationFrame(() => {
+          el.focus();
+          el.setSelectionRange(next.length, next.length);
+        });
+      } else {
+        setToken(cleanToken(token + text));
+      }
+    } catch {
+      // Clipboard API unavailable or denied
+      console.error('Clipboard API unavailable or denied');
+    }
+  };
+
   useEffect(() => {
     if (!username.trim()) {
       return;
@@ -328,7 +365,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     if (!cleanedToken) {
       setTokenStatus('idle');
       setTokenStatusMessage(
-        'Optional. Required for profile picture history and private-image access.'
+        'A bearer token is required for profile picture history and private image downloads.'
       );
       setTokenExpiringSoon(false);
       return;
@@ -363,7 +400,11 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     setTokenStatus('checking');
     setTokenStatusMessage(`Verifying token for @${username.trim()}...`);
     tokenValidationTimeoutRef.current = setTimeout(() => {
-      void validateProfileHistoryAccess(username.trim(), cleanedToken, requestId);
+      void validateProfileHistoryAccess(
+        username.trim(),
+        cleanedToken,
+        requestId
+      );
     }, 500);
 
     return () => clearTokenValidationTimeout();
@@ -404,17 +445,11 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
 
     const cleanedToken = cleanToken(token);
     onOpenChange(false);
-    await onDownload(
-      username,
-      cleanedToken,
-      filePath,
-      downloadSources,
-      {
-        forceAccountsRefresh,
-        forceRoomsRefresh,
-        forceEventsRefresh,
-      }
-    );
+    await onDownload(username, cleanedToken, filePath, downloadSources, {
+      forceAccountsRefresh,
+      forceRoomsRefresh,
+      forceEventsRefresh,
+    });
   };
 
   const isFormValid =
@@ -422,6 +457,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     filePath.trim() !== '' &&
     hasSelectedDownloadSources(downloadSources);
   const profileHistoryEnabled = tokenStatus === 'verified';
+  const feedPhotosVisibilitySuffix =
+    tokenStatus === 'verified' ? '(Public & Private)' : '(Public)';
+  const resolvedProfilePhotoUrl =
+    usernameStatus === 'found' && resolvedAccount
+      ? buildCdnImageUrl(settings.cdnBase, resolvedAccount.profileImage)
+      : '';
 
   const renderDownloadType = (params: {
     id: string;
@@ -481,7 +522,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             Download Photos
           </DialogTitle>
           <DialogDescription>
-            Enter a token, username, save path, and choose what data to download.
+            Enter a token, username, save path, and choose what data to
+            download.
           </DialogDescription>
         </DialogHeader>
 
@@ -490,7 +532,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             <div className="flex items-center gap-2">
               <Label htmlFor="token" className="flex items-center gap-2">
                 <Key className="h-4 w-4" />
-                Token (Optional)
+                Bearer Token (Optional)
               </Label>
               <Button
                 type="button"
@@ -503,14 +545,26 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                 <HelpCircle className="h-4 w-4" />
               </Button>
             </div>
-            <textarea
-              id="token"
-              placeholder="Enter your access token"
-              value={token}
-              onChange={handleTokenChange}
-              className="flex min-h-[2.5rem] max-h-[6rem] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-y overflow-y-auto"
-              rows={4}
-            />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+              <textarea
+                ref={tokenTextareaRef}
+                id="token"
+                placeholder="Enter your access token"
+                value={token}
+                onChange={handleTokenChange}
+                className="flex min-h-[2.5rem] max-h-[6rem] min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-y overflow-y-auto"
+                rows={4}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 shrink-0 sm:mt-0"
+                onClick={() => void handlePasteToken()}
+              >
+                Paste Bearer Token
+              </Button>
+            </div>
             <p
               className={`text-sm ${
                 tokenStatus === 'invalid'
@@ -526,39 +580,73 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             </p>
             {tokenExpiringSoon && (
               <p className="text-sm text-red-600 dark:text-red-400">
-                Warning: Your token is expiring in 20 minutes or less. Please get
-                a fresh token.
+                Warning: Your token is expiring in 20 minutes or less. Please
+                get a fresh token.
               </p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="username">Username</Label>
+            <Label htmlFor="username">Rec Room @ Username</Label>
             <Input
               id="username"
               placeholder="Enter your username"
               value={username}
               onChange={handleUsernameChange}
             />
-            {usernameStatus === 'found' && (
-              <p className="text-sm text-green-600 dark:text-green-400">
-                Username found successfully.
-              </p>
-            )}
-            {usernameStatus === 'not-found' && (
-              <p className="text-sm text-red-600 dark:text-red-400">
-                Username not found.
-              </p>
-            )}
-            {usernameStatus === 'checking' && (
-              <p className="text-sm text-muted-foreground">
-                Checking username...
-              </p>
-            )}
+            <div className="space-y-2">
+              <div className="min-h-5">
+                {usernameStatus === 'found' && resolvedAccount && (
+                  <p className="text-sm text-green-600 dark:text-green-400">
+                    Account found successfully
+                  </p>
+                )}
+                {usernameStatus === 'not-found' && (
+                  <p className="text-sm text-red-600 dark:text-red-400">
+                    Username not found
+                  </p>
+                )}
+                {usernameStatus === 'checking' && (
+                  <p className="text-sm text-muted-foreground">
+                    Checking username...
+                  </p>
+                )}
+              </div>
+              <div className="flex min-h-[3.75rem] items-center">
+                {usernameStatus === 'found' && resolvedAccount && (
+                  <Card className="flex w-full flex-row items-center gap-2.5 p-2.5 shadow-none">
+                    {resolvedProfilePhotoUrl ? (
+                      <img
+                        src={resolvedProfilePhotoUrl}
+                        alt=""
+                        className="size-10 shrink-0 rounded-full object-cover ring-1 ring-border"
+                      />
+                    ) : (
+                      <div
+                        className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted ring-1 ring-border"
+                        aria-hidden
+                      >
+                        <UserRound className="size-5 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium leading-tight">
+                        {resolvedAccount.displayName}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        @{resolvedAccount.username}
+                      </p>
+                    </div>
+                  </Card>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="filepath">File Path</Label>
+            <Label htmlFor="filepath">
+              Where should the downloaded photos be saved?
+            </Label>
             <div className="flex gap-2">
               <Input
                 id="filepath"
@@ -579,10 +667,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              User photos save to <code className="font-mono">[folder]/[accountId]/photos</code>,
-              feed photos save to <code className="font-mono">[folder]/[accountId]/feed</code>,
-              and profile history saves to{' '}
-              <code className="font-mono">[folder]/[accountId]/profile-history</code>.
+              All photos and data are saved to the selected folder.
             </p>
           </div>
 
@@ -597,7 +682,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             <div className="space-y-2">
               {renderDownloadType({
                 id: 'download-user-feed',
-                title: 'User Feed',
+                title: `User Feed ${feedPhotosVisibilitySuffix}`,
                 description: 'Download photos the user was tagged in.',
                 checked: downloadSources.downloadUserFeed,
                 onChange: checked =>
@@ -605,7 +690,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               })}
               {renderDownloadType({
                 id: 'download-user-photos',
-                title: 'User Photos',
+                title: `User Photos ${feedPhotosVisibilitySuffix}`,
                 description: 'Download photos the user took.',
                 checked: downloadSources.downloadUserPhotos,
                 onChange: checked =>
@@ -649,8 +734,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             {advancedOpen && (
               <div className="border-t px-3 pb-3 pt-2 space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  User, room, and event details are reused when available. Toggle
-                  below to force a fresh download.
+                  User, room, and event details are reused when available.
+                  Toggle below to force a fresh download.
                 </p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <Button
@@ -694,12 +779,13 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             )}
           </div>
 
-          {!isFormValid && (
-            <p className="text-sm text-muted-foreground">
-              Enter a username, choose a save folder, and select at least one
-              download type to start.
-            </p>
-          )}
+          <p
+            className={`text-sm text-muted-foreground ${isFormValid ? 'invisible' : ''}`}
+            aria-hidden={isFormValid}
+          >
+            Enter a username, choose a save folder, and select at least one
+            download type to start.
+          </p>
 
           <div className="flex gap-2">
             <Button
@@ -740,8 +826,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               </p>
               <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
                 <li>Log in to your RecNet account in a web browser.</li>
-                <li>Open your browser&apos;s Developer Tools and go to Network.</li>
-                <li>Navigate to any RecNet page that requires authentication.</li>
+                <li>
+                  Open your browser&apos;s Developer Tools and go to Network.
+                </li>
+                <li>
+                  Navigate to any RecNet page that requires authentication.
+                </li>
                 <li>Open one of the RecNet API requests.</li>
                 <li>Find the `Authorization` header in the request headers.</li>
                 <li>Copy the token value, usually after `Bearer `.</li>

@@ -4,6 +4,7 @@ import {
   ipcMain,
   dialog,
   IpcMainInvokeEvent,
+  Menu,
   protocol,
   shell,
 } from 'electron';
@@ -124,6 +125,34 @@ const normalizeEventRecord = (event: EventDto): EventDto => ({
   RoomId: normalizeId(event.RoomId),
 });
 
+function attachEditableContextMenu(win: BrowserWindow): void {
+  win.webContents.on('context-menu', (_event, params) => {
+    const { editFlags, isEditable, selectionText } = params;
+    const template: Electron.MenuItemConstructorOptions[] = [];
+
+    if (isEditable) {
+      template.push(
+        { role: 'undo', enabled: editFlags.canUndo },
+        { role: 'redo', enabled: editFlags.canRedo },
+        { type: 'separator' },
+        { role: 'cut', enabled: editFlags.canCut },
+        { role: 'copy', enabled: editFlags.canCopy },
+        { role: 'paste', enabled: editFlags.canPaste },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: editFlags.canSelectAll }
+      );
+    } else if ((selectionText ?? '').trim()) {
+      template.push({ role: 'copy', enabled: editFlags.canCopy });
+    }
+
+    if (template.length === 0) {
+      return;
+    }
+
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
+}
+
 function createWindow(): void {
   // Create the browser window
   mainWindow = new BrowserWindow({
@@ -184,6 +213,8 @@ function createWindow(): void {
   if (isDev) {
     mainWindow.webContents.openDevTools();
   }
+
+  attachEditableContextMenu(mainWindow);
 
   // Handle window closed
   mainWindow.on('closed', () => {
