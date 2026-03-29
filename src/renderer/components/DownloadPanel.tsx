@@ -815,31 +815,66 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
           <DialogHeader>
             <DialogTitle>How to Get Your Token</DialogTitle>
             <DialogDescription>
-              Instructions for obtaining your RecNet access token.
+              Follow these steps to copy your rec.net token and paste it into
+              this app.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
+            {/* <div className="rounded-md border border-dashed p-3">
+              <p className="text-sm font-medium">Video Walkthrough</p>
+              <p className="text-sm text-muted-foreground">
+                YouTube link placeholder: add video link here.
+              </p>
+            </div> */}
+
+            <div className="space-y-3">
               <p className="text-sm">
-                To download private photos or profile picture history, obtain an
-                access token from RecNet:
+                This is the easiest method. It copies your token from rec.net
+                straight to your clipboard, so you can come back here and click
+                <span className="font-medium"> {`"Paste Bearer Token"`}</span>.
               </p>
               <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                <li>Log in to your RecNet account in a web browser.</li>
+                <li>Open https://rec.net/ in your browser and sign in.</li>
                 <li>
-                  Open your browser&apos;s Developer Tools and go to Network.
+                  Stay on a rec.net page while logged in, then open the browser
+                  dev tools (F12) and select the Console tab.
                 </li>
-                <li>
-                  Navigate to any RecNet page that requires authentication.
-                </li>
-                <li>Open one of the RecNet API requests.</li>
-                <li>Find the `Authorization` header in the request headers.</li>
-                <li>Copy the token value, usually after `Bearer `.</li>
-                <li>Paste the token into the field above.</li>
+                <li>Paste this line into the console and press Enter:</li>
               </ol>
-              <p className="text-sm text-muted-foreground mt-4">
-                <strong>Note:</strong> Tokens expire. If validation or downloads
-                start failing, obtain a fresh token.
+              <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs text-foreground">
+                <code>
+                  {
+                    'copy(JSON.parse(localStorage.getItem("na_current_user_session")).accessToken);'
+                  }
+                </code>
+              </pre>
+              <ol
+                className="list-decimal list-inside space-y-2 text-sm text-muted-foreground"
+                start={4}
+              >
+                <li>Your token should now be in your clipboard.</li>
+                <li>Return to this app.</li>
+                <li>Click `Paste Bearer Token`.</li>
+                <li>
+                  Enter the matching Rec Room username if you have not already.
+                </li>
+              </ol>
+            </div>
+
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p className="text-yellow-600 dark:text-yellow-400">
+                If your browser asks for permission to use the clipboard, allow
+                it.
+              </p>
+              <p className="font-bold italic text-red-600 dark:text-red-400">
+                Keep your token private. Anyone with it may be able to access
+                your account data until it expires.
+              </p>
+              <p>
+                Tokens expire after 1 hour. If the app says the token is
+                invalid, expired, or downloads stop working, repeat the steps
+                above to get a fresh one. https://rec.net/ will refresh the
+                token once expired, refreshing the page will refresh the token.
               </p>
             </div>
           </div>
