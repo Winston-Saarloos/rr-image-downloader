@@ -25,6 +25,7 @@ import {
 import { DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import { PhotoGrid } from './PhotoGrid';
 import { PhotoDetailModal } from './PhotoDetailModal';
+import { AccountSelect } from './AccountSelect';
 import { useFavorites } from '../hooks/useFavorites';
 
 interface PhotoViewerProps {
@@ -79,6 +80,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [roomMap, setRoomMap] = useState<Map<string, string>>(new Map());
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
+  const [usernameMap, setUsernameMap] = useState<Map<string, string>>(
+    new Map()
+  );
   const [eventMap, setEventMap] = useState<Map<string, string>>(new Map());
   const [feedPhotos, setFeedPhotos] = useState<Photo[]>([]);
   const [profileHistoryPhotos, setProfileHistoryPhotos] = useState<Photo[]>([]);
@@ -185,6 +189,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const loadAccountData = useCallback(async () => {
     if (!accountId) {
       setAccountMap(new Map());
+      setUsernameMap(new Map());
       return;
     }
 
@@ -194,18 +199,22 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         if (result.success && result.data) {
           const accounts = result.data as PlayerResult[];
           const accountMapping = new Map<string, string>();
+          const usernameMapping = new Map<string, string>();
           accounts.forEach(account => {
-            const accountId = String(account.accountId);
+            const id = String(account.accountId);
             const displayName =
-              account.displayName || account.username || accountId;
-            accountMapping.set(accountId, displayName);
+              account.displayName || account.username || id;
+            accountMapping.set(id, displayName);
+            usernameMapping.set(id, account.username || '');
           });
           setAccountMap(accountMapping);
+          setUsernameMap(usernameMapping);
         }
       }
     } catch (error) {
       console.error('Failed to load account data:', error);
       setAccountMap(new Map());
+      setUsernameMap(new Map());
     }
   }, [accountId, electronAPI]);
 
@@ -421,14 +430,6 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
   };
 
-  const getAccountDisplayName = (account: AvailableAccount): string => {
-    return (
-      account.displayLabel ||
-      accountMap.get(account.accountId) ||
-      account.accountId
-    );
-  };
-
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden">
       <div
@@ -442,25 +443,14 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             {availableAccounts.length > 0 && (
               <div className="flex min-w-0 flex-1 items-center gap-3">
-                <Select
-                  value={accountId || ''}
+                <AccountSelect
+                  availableAccounts={availableAccounts}
+                  value={accountId}
+                  accountMap={accountMap}
+                  usernameMap={usernameMap}
                   onValueChange={handleAccountChange}
                   disabled={!!propAccountId}
-                >
-                  <SelectTrigger className="w-full sm:w-[250px]">
-                    <SelectValue placeholder="Select an account" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableAccounts.map(account => (
-                      <SelectItem
-                        key={account.accountId}
-                        value={account.accountId}
-                      >
-                        {getAccountDisplayName(account)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
                 {propAccountId && (
                   <span className="text-sm text-muted-foreground">
                     (Downloading...)
@@ -648,6 +638,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         onClose={handleCloseModal}
         roomMap={roomMap}
         accountMap={accountMap}
+        usernameMap={usernameMap}
         eventMap={eventMap}
         cdnBase={cdnBase}
       />

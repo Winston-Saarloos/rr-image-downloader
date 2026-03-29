@@ -30,6 +30,7 @@ interface PhotoDetailModalProps {
   onClose: () => void;
   roomMap?: Map<string, string>;
   accountMap?: Map<string, string>;
+  usernameMap?: Map<string, string>;
   eventMap?: Map<string, string>;
   cdnBase?: string;
 }
@@ -47,11 +48,12 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   onClose,
   roomMap = new Map(),
   accountMap = new Map(),
+  usernameMap = new Map(),
   eventMap = new Map(),
   cdnBase = DEFAULT_CDN_BASE,
 }) => {
-  const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl, getPhotoEvent } =
-    usePhotoMetadata(roomMap, accountMap, eventMap, cdnBase);
+  const { getPhotoRoom, getPhotoTaggedUsers, getPhotoImageUrl, getPhotoEvent } =
+    usePhotoMetadata(roomMap, accountMap, eventMap, cdnBase, usernameMap);
   const { isFavorite, toggleFavorite } = useFavorites();
   const electronAPI = (window as Window & { electronAPI?: OptionalElectronAPI })
     .electronAPI;
@@ -60,7 +62,7 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
 
   const extended = photo as Photo & { Description?: string };
   const room = getPhotoRoom(photo);
-  const users = getPhotoUsers(photo);
+  const taggedUsers = getPhotoTaggedUsers(photo);
   const description = extended.Description || '';
   const imageUrl = getPhotoImageUrl(photo);
   const createdAt = photo.CreatedAt ? new Date(photo.CreatedAt) : null;
@@ -149,18 +151,24 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
               </span>
             </div>
 
-            {users.length > 0 && (
+            {taggedUsers.length > 0 && (
               <div className="flex items-start gap-2">
                 <Users className="h-4 w-4 text-muted-foreground mt-0.5" />
                 <div>
                   <span className="font-medium">Tagged Users: </span>
-                  {users.map(user => {
-                    return (
-                      <Chip className="mr-1" key={user}>
-                        @{user}
-                      </Chip>
-                    );
-                  })}
+                  {taggedUsers.map(({ id, displayName, username }, index) => (
+                    <Chip
+                      className="mr-1 inline-flex flex-col items-start gap-0.5 py-1"
+                      key={`${id}-${index}`}
+                    >
+                      <span>{displayName}</span>
+                      {username ? (
+                        <span className="text-muted-foreground font-normal">
+                          @{username}
+                        </span>
+                      ) : null}
+                    </Chip>
+                  ))}
                 </div>
               </div>
             )}
