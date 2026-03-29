@@ -14,6 +14,7 @@ import { RecNetService } from './services/recnet-service';
 import {
   CollectionResult,
   DownloadResult,
+  ProfileHistoryAccessResult,
   RecNetSettings,
   Progress,
   AccountInfo,
@@ -48,6 +49,11 @@ interface CollectFeedPhotosParams {
 interface DownloadPhotosParams {
   accountId: string;
   token?: string;
+}
+
+interface ValidateProfileHistoryAccessParams {
+  username: string;
+  token: string;
 }
 
 interface ApiResponse<T> {
@@ -374,7 +380,10 @@ ipcMain.handle(
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
-      const result = await recNetService.downloadPhotos(params.accountId);
+      const result = await recNetService.downloadPhotos(
+        params.accountId,
+        params.token
+      );
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -389,7 +398,46 @@ ipcMain.handle(
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
-      const result = await recNetService.downloadFeedPhotos(params.accountId);
+      const result = await recNetService.downloadFeedPhotos(
+        params.accountId,
+        params.token
+      );
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'download-profile-history',
+  async (
+    event: IpcMainInvokeEvent,
+    params: ValidateProfileHistoryAccessParams & { accountId: string }
+  ): Promise<ApiResponse<DownloadResult>> => {
+    try {
+      const result = await recNetService.downloadProfileHistory(
+        params.accountId,
+        params.token
+      );
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'validate-profile-history-access',
+  async (
+    event: IpcMainInvokeEvent,
+    params: ValidateProfileHistoryAccessParams
+  ): Promise<ApiResponse<ProfileHistoryAccessResult>> => {
+    try {
+      const result = await recNetService.validateProfileHistoryAccess(
+        params.username,
+        params.token
+      );
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -456,13 +504,29 @@ ipcMain.handle(
   'lookup-account-by-username',
   async (
     event: IpcMainInvokeEvent,
-    username: string
+    username: string,
+    token?: string
   ): Promise<ApiResponse<AccountInfo>> => {
     try {
-      const result = await recNetService.lookupAccountByUsername(username);
+      const result = await recNetService.lookupAccountByUsername(username, token);
       return { success: true, data: result };
     } catch (error) {
-      return { success: false, error: (error as Error).message };
+      const message = (error as Error).message ?? String(error);
+
+      if (token && /HTTP\s+(401|403)\b/.test(message)) {
+        try {
+          const fallback = await recNetService.lookupAccountByUsername(username);
+          return { success: true, data: fallback };
+        } catch (fallbackError) {
+          return {
+            success: false,
+            error:
+              (fallbackError as Error).message ?? String(fallbackError),
+          };
+        }
+      }
+
+      return { success: false, error: message };
     }
   }
 );
@@ -671,6 +735,64 @@ ipcMain.handle(
   }
 );
 
+ipcMain.handle(
+  'load-profile-history-photos',
+  async (
+    event: IpcMainInvokeEvent,
+    accountId: string
+  ): Promise<ApiResponse<Photo[]>> => {
+    try {
+      const settings = await recNetService.getSettings();
+      const accountDir = path.join(settings.outputRoot, accountId);
+      const profileHistoryJsonPath = path.join(
+        accountDir,
+        `${accountId}_profile_history.json`
+      );
+
+      if (!(await fs.pathExists(profileHistoryJsonPath))) {
+        return { success: true, data: [] };
+      }
+
+      const profileHistoryPhotos: Photo[] = (await fs.readJson(
+        profileHistoryJsonPath
+      )).map(normalizePhotoRecord);
+      const profileHistoryDir = path.join(accountDir, 'profile-history');
+
+      const profileHistoryFileIds = new Set<string>();
+      if (await fs.pathExists(profileHistoryDir)) {
+        const files = await fs.readdir(profileHistoryDir);
+        for (const file of files) {
+          const id = path.parse(file).name;
+          if (id) {
+            profileHistoryFileIds.add(id);
+          }
+        }
+      }
+
+      const photosWithFiles: Photo[] = [];
+      for (const photo of profileHistoryPhotos) {
+        if (!photo.Id) {
+          continue;
+        }
+
+        const photoId = photo.Id.toString();
+        if (!profileHistoryFileIds.has(photoId)) {
+          continue;
+        }
+
+        photosWithFiles.push({
+          ...photo,
+          localFilePath: path.join(profileHistoryDir, `${photoId}.jpg`),
+        });
+      }
+
+      return { success: true, data: photosWithFiles };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
 // List available accounts with metadata
 ipcMain.handle(
   'list-available-accounts',
@@ -680,8 +802,10 @@ ipcMain.handle(
         accountId: string;
         hasPhotos: boolean;
         hasFeed: boolean;
+        hasProfileHistory: boolean;
         photoCount: number;
         feedCount: number;
+        profileHistoryCount: number;
         displayLabel?: string;
       }>
     >

@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  ChevronDown,
+  ChevronRight,
   Download,
   FolderOpen,
-  Key,
   HelpCircle,
-  X,
+  Key,
   RefreshCcw,
+  X,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -18,6 +20,29 @@ import {
   DialogTitle,
 } from '../components/ui/dialog';
 import { RecNetSettings } from '../../shared/types';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../components/ui/tooltip';
+import {
+  DEFAULT_DOWNLOAD_SOURCE_SELECTION,
+  DownloadSourceSelection,
+  hasSelectedDownloadSources,
+} from '../../shared/download-sources';
+
+interface DownloadDraft {
+  username: string;
+  token: string;
+  filePath: string;
+  downloadSources: DownloadSourceSelection;
+  refreshOptions: {
+    forceAccountsRefresh: boolean;
+    forceRoomsRefresh: boolean;
+    forceEventsRefresh: boolean;
+  };
+}
 
 interface DownloadPanelProps {
   open: boolean;
@@ -26,26 +51,21 @@ interface DownloadPanelProps {
     username: string,
     token: string,
     filePath: string,
+    downloadSources: DownloadSourceSelection,
     refreshOptions: {
       forceAccountsRefresh: boolean;
       forceRoomsRefresh: boolean;
       forceEventsRefresh: boolean;
     }
   ) => Promise<void>;
-  onDraftChange?: (draft: {
-    username: string;
-    token: string;
-    filePath: string;
-    refreshOptions: {
-      forceAccountsRefresh: boolean;
-      forceRoomsRefresh: boolean;
-      forceEventsRefresh: boolean;
-    };
-  }) => void;
+  onDraftChange?: (draft: DownloadDraft) => void;
   onCancel?: () => void;
   isDownloading?: boolean;
   settings: RecNetSettings;
 }
+
+type UsernameStatus = 'idle' | 'checking' | 'found' | 'not-found';
+type TokenStatus = 'idle' | 'checking' | 'parsed' | 'verified' | 'invalid';
 
 export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   open,
@@ -60,44 +80,47 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const [username, setUsername] = useState('');
   const [token, setToken] = useState('');
   const [filePath, setFilePath] = useState(settings.outputRoot || '');
-  const [usernameStatus, setUsernameStatus] = useState<
-    'idle' | 'checking' | 'found' | 'not-found'
-  >('idle');
-  const [tokenStatus, setTokenStatus] = useState<
-    'idle' | 'checking' | 'valid' | 'invalid'
-  >('idle');
+  const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle');
+  const [tokenStatus, setTokenStatus] = useState<TokenStatus>('idle');
+  const [tokenStatusMessage, setTokenStatusMessage] = useState(
+    'Optional. Required for profile picture history and private-image access.'
+  );
   const [tokenExpiringSoon, setTokenExpiringSoon] = useState(false);
   const [tokenHelpOpen, setTokenHelpOpen] = useState(false);
-  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(
-    null
+  const [downloadSources, setDownloadSources] = useState<DownloadSourceSelection>(
+    DEFAULT_DOWNLOAD_SOURCE_SELECTION
   );
-  const [tokenTimeout, setTokenTimeout] = useState<NodeJS.Timeout | null>(null);
   const [forceAccountsRefresh, setForceAccountsRefresh] = useState(false);
   const [forceRoomsRefresh, setForceRoomsRefresh] = useState(false);
   const [forceEventsRefresh, setForceEventsRefresh] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const tokenValidationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const tokenValidationRequestIdRef = useRef(0);
 
   useEffect(() => {
     setFilePath(settings.outputRoot || '');
   }, [settings.outputRoot]);
 
   useEffect(() => {
-    // Cleanup timeout on unmount
     return () => {
-      if (searchTimeout) {
-        clearTimeout(searchTimeout);
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
       }
-      if (tokenTimeout) {
-        clearTimeout(tokenTimeout);
+      if (tokenValidationTimeoutRef.current) {
+        clearTimeout(tokenValidationTimeoutRef.current);
       }
     };
-  }, [searchTimeout, tokenTimeout]);
+  }, []);
 
   useEffect(() => {
     if (open) {
       setForceAccountsRefresh(false);
       setForceRoomsRefresh(false);
       setForceEventsRefresh(false);
+      setAdvancedOpen(false);
     }
   }, [open]);
 
@@ -106,6 +129,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       username,
       token,
       filePath,
+      downloadSources,
       refreshOptions: {
         forceAccountsRefresh,
         forceRoomsRefresh,
@@ -113,6 +137,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       },
     });
   }, [
+    downloadSources,
     filePath,
     forceAccountsRefresh,
     forceEventsRefresh,
@@ -121,6 +146,20 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     token,
     username,
   ]);
+
+  const clearSearchTimeout = () => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+      searchTimeoutRef.current = null;
+    }
+  };
+
+  const clearTokenValidationTimeout = () => {
+    if (tokenValidationTimeoutRef.current) {
+      clearTimeout(tokenValidationTimeoutRef.current);
+      tokenValidationTimeoutRef.current = null;
+    }
+  };
 
   const checkUsername = async (value: string) => {
     if (!value.trim()) {
@@ -141,40 +180,40 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
           setUsernameStatus('not-found');
         }
       }
-    } catch (error) {
+    } catch {
       setUsernameStatus('not-found');
     }
   };
 
   const cleanToken = (tokenValue: string): string => {
-    // Remove "Bearer " prefix if present (case insensitive)
     let cleaned = tokenValue.trim();
     if (cleaned.toLowerCase().startsWith('bearer ')) {
       cleaned = cleaned.substring(7).trim();
     }
-    // Remove any extra spaces
-    cleaned = cleaned.replace(/\s+/g, '');
-    return cleaned;
+    return cleaned.replace(/\s+/g, '');
   };
 
-  const decodeJWT = (token: string): { sub?: string; exp?: number } | null => {
+  const decodeJWT = (tokenValue: string): { sub?: string; exp?: number } | null => {
     try {
-      // JWT tokens have three parts: header.payload.signature
-      const parts = token.split('.');
+      const parts = tokenValue.split('.');
       if (parts.length !== 3) {
         return null;
       }
 
-      // Decode the payload (second part)
       const payload = parts[1];
-      // Base64URL decode
       const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
       const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
-      const decoded = atob(padded);
-      return JSON.parse(decoded);
-    } catch (error) {
+      return JSON.parse(atob(padded));
+    } catch {
       return null;
     }
+  };
+
+  const isTokenExpired = (decoded: { exp?: number }): boolean => {
+    if (!decoded.exp) {
+      return false;
+    }
+    return decoded.exp * 1000 <= Date.now();
   };
 
   const checkTokenExpiration = (decoded: { exp?: number }): boolean => {
@@ -182,70 +221,69 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       return false;
     }
 
-    // exp is in seconds since Unix epoch
-    const expirationTime = decoded.exp * 1000; // Convert to milliseconds
+    const expirationTime = decoded.exp * 1000;
     const currentTime = Date.now();
     const timeUntilExpiration = expirationTime - currentTime;
-    const twentyMinutesInMs = 20 * 60 * 1000; // 20 minutes in milliseconds
-
-    // Return true if token expires in 20 minutes or less (and hasn't already expired)
+    const twentyMinutesInMs = 20 * 60 * 1000;
     return timeUntilExpiration <= twentyMinutesInMs && timeUntilExpiration > 0;
   };
 
-  const validateToken = (tokenValue: string) => {
-    if (!tokenValue.trim()) {
-      setTokenStatus('idle');
-      setTokenExpiringSoon(false);
-      return;
-    }
-
-    setTokenStatus('checking');
-    setTokenExpiringSoon(false);
-
+  const validateProfileHistoryAccess = async (
+    usernameValue: string,
+    tokenValue: string,
+    requestId: number
+  ) => {
     try {
-      // Clean the token
-      const cleaned = cleanToken(tokenValue);
+      if (!electronAPI?.validateProfileHistoryAccess) {
+        throw new Error('Profile history validation is unavailable.');
+      }
 
-      // Decode the JWT (no ownership/account checks)
-      const decoded = decodeJWT(cleaned);
+      const result = await electronAPI.validateProfileHistoryAccess({
+        username: usernameValue,
+        token: tokenValue,
+      });
 
-      if (!decoded) {
-        setTokenStatus('invalid');
-        setTokenExpiringSoon(false);
+      if (requestId !== tokenValidationRequestIdRef.current) {
         return;
       }
 
-      // Check if token is expiring soon
-      const isExpiringSoon = checkTokenExpiration(decoded);
-      setTokenExpiringSoon(isExpiringSoon);
-      setTokenStatus('valid');
+      if (result.success && result.data) {
+        setTokenStatus('verified');
+        setTokenStatusMessage(
+          `Profile picture history is available for @${result.data.username}.`
+        );
+      } else {
+        setTokenStatus('invalid');
+        setTokenStatusMessage(
+          result.error || 'Token does not belong to this user.'
+        );
+      }
     } catch (error) {
+      if (requestId !== tokenValidationRequestIdRef.current) {
+        return;
+      }
       setTokenStatus('invalid');
-      setTokenExpiringSoon(false);
+      setTokenStatusMessage(
+        error instanceof Error
+          ? error.message
+          : 'Could not validate profile picture history access.'
+      );
     }
   };
 
   const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setUsername(value);
+    clearSearchTimeout();
 
-    // Clear existing timeout
-    if (searchTimeout) {
-      clearTimeout(searchTimeout);
-    }
-
-    // Reset status if empty
     if (!value.trim()) {
       setUsernameStatus('idle');
       return;
     }
 
-    // Debounce the search
-    const timeout = setTimeout(() => {
-      checkUsername(value);
+    searchTimeoutRef.current = setTimeout(() => {
+      void checkUsername(value);
     }, 1000);
-
-    setSearchTimeout(timeout);
   };
 
   const handleSelectFolder = async () => {
@@ -257,7 +295,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
           setFilePath(selectedPath);
         }
       }
-    } catch (error) {
+    } catch {
       setFolderError(
         'Could not open folder picker. Try typing the path manually.'
       );
@@ -265,106 +303,189 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   };
 
   const handleTokenChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
+    setToken(cleanToken(e.target.value));
+  };
 
-    // Clean the token immediately
-    const cleaned = cleanToken(value);
-
-    // Update state with cleaned value
-    setToken(cleaned);
-
-    // Clear existing timeout
-    if (tokenTimeout) {
-      clearTimeout(tokenTimeout);
-    }
-
-    // Reset status if empty
-    if (!cleaned.trim()) {
-      setTokenStatus('idle');
+  useEffect(() => {
+    if (!username.trim()) {
       return;
     }
 
-    // Debounce the validation
-    const timeout = setTimeout(() => {
-      validateToken(cleaned);
-    }, 500);
-
-    setTokenTimeout(timeout);
-  };
-
-  // Re-check username existence when token changes, so optional auth
-  // is used for account lookup.
-  useEffect(() => {
-    if (!username.trim()) return;
-
-    if (searchTimeout) {
-      clearTimeout(searchTimeout);
-    }
-
-    const timeout = setTimeout(() => {
+    clearSearchTimeout();
+    searchTimeoutRef.current = setTimeout(() => {
       void checkUsername(username);
     }, 1000);
 
-    setSearchTimeout(timeout);
-
+    return () => clearSearchTimeout();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  useEffect(() => {
+    clearTokenValidationTimeout();
+    tokenValidationRequestIdRef.current += 1;
+
+    const cleanedToken = cleanToken(token);
+    if (!cleanedToken) {
+      setTokenStatus('idle');
+      setTokenStatusMessage(
+        'Optional. Required for profile picture history and private-image access.'
+      );
+      setTokenExpiringSoon(false);
+      return;
+    }
+
+    const decoded = decodeJWT(cleanedToken);
+    if (!decoded) {
+      setTokenStatus('invalid');
+      setTokenStatusMessage('Token is invalid or could not be parsed.');
+      setTokenExpiringSoon(false);
+      return;
+    }
+
+    if (isTokenExpired(decoded)) {
+      setTokenStatus('invalid');
+      setTokenStatusMessage('Token has expired.');
+      setTokenExpiringSoon(false);
+      return;
+    }
+
+    setTokenExpiringSoon(checkTokenExpiration(decoded));
+
+    if (!username.trim()) {
+      setTokenStatus('parsed');
+      setTokenStatusMessage(
+        'Token looks valid. Enter a username to verify profile picture history access.'
+      );
+      return;
+    }
+
+    const requestId = tokenValidationRequestIdRef.current;
+    setTokenStatus('checking');
+    setTokenStatusMessage(`Verifying token for @${username.trim()}...`);
+    tokenValidationTimeoutRef.current = setTimeout(() => {
+      void validateProfileHistoryAccess(username.trim(), cleanedToken, requestId);
+    }, 500);
+
+    return () => clearTokenValidationTimeout();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, username]);
+
+  useEffect(() => {
+    if (!downloadSources.downloadProfileHistory) {
+      return;
+    }
+    if (tokenStatus === 'verified') {
+      return;
+    }
+
+    setDownloadSources(current => ({
+      ...current,
+      downloadProfileHistory: false,
+    }));
+  }, [downloadSources.downloadProfileHistory, tokenStatus]);
+
+  const toggleDownloadSource = (
+    key: keyof DownloadSourceSelection,
+    checked: boolean
+  ) => {
+    setDownloadSources(current => ({
+      ...current,
+      [key]: checked,
+    }));
+  };
 
   const handleDownload = async () => {
     if (!username.trim() || !filePath.trim()) {
       return;
     }
-    // Clean the token before passing it
+    if (!hasSelectedDownloadSources(downloadSources)) {
+      return;
+    }
+
     const cleanedToken = cleanToken(token);
-    // Close the dialog before starting download
     onOpenChange(false);
-    await onDownload(username, cleanedToken, filePath, {
-      forceAccountsRefresh,
-      forceRoomsRefresh,
-      forceEventsRefresh,
-    });
+    await onDownload(
+      username,
+      cleanedToken,
+      filePath,
+      downloadSources,
+      {
+        forceAccountsRefresh,
+        forceRoomsRefresh,
+        forceEventsRefresh,
+      }
+    );
   };
 
-  const isFormValid = username.trim() !== '' && filePath.trim() !== '';
+  const isFormValid =
+    username.trim() !== '' &&
+    filePath.trim() !== '' &&
+    hasSelectedDownloadSources(downloadSources);
+  const profileHistoryEnabled = tokenStatus === 'verified';
+
+  const renderDownloadType = (params: {
+    id: string;
+    title: string;
+    description: string;
+    checked: boolean;
+    disabled?: boolean;
+    onChange: (checked: boolean) => void;
+    disabledReason?: string;
+  }) => {
+    const option = (
+      <label
+        htmlFor={params.id}
+        className={`flex items-start gap-3 rounded-md border p-3 transition-colors ${
+          params.checked ? 'border-primary bg-muted/40' : 'border-border'
+        } ${params.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+      >
+        <input
+          id={params.id}
+          type="checkbox"
+          className="mt-1 h-4 w-4 rounded border-input"
+          checked={params.checked}
+          disabled={params.disabled}
+          onChange={event => params.onChange(event.target.checked)}
+        />
+        <div className="space-y-1">
+          <p className="text-sm font-medium">{params.title}</p>
+          <p className="text-sm text-muted-foreground">{params.description}</p>
+        </div>
+      </label>
+    );
+
+    if (params.disabled && params.disabledReason) {
+      return (
+        <TooltipProvider delayDuration={150}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="block">{option}</span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{params.disabledReason}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
+
+    return option;
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100%-2rem)] max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto">
+      <DialogContent className="w-[calc(100%-2rem)] max-w-3xl max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Download className="h-5 w-5" />
             Download Photos
           </DialogTitle>
           <DialogDescription>
-            Enter your credentials and file path to download photos
+            Enter a token, username, save path, and choose what data to download.
           </DialogDescription>
         </DialogHeader>
+
         <div className="space-y-4">
-          <div className="rounded-md border bg-muted/40 p-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Download Flow
-            </p>
-            <ol className="mt-2 grid gap-2 text-sm sm:grid-cols-3">
-              <li className="flex items-center gap-2">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-semibold">
-                  1
-                </span>
-                <span>Search @username</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-semibold">
-                  2
-                </span>
-                <span>Pick save folder</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-semibold">
-                  3
-                </span>
-                <span>Download photos</span>
-              </li>
-            </ol>
-          </div>
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Label htmlFor="token" className="flex items-center gap-2">
@@ -390,31 +511,23 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               className="flex min-h-[2.5rem] max-h-[6rem] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-y overflow-y-auto"
               rows={4}
             />
-            {tokenStatus === 'valid' && (
-              <p className="text-sm text-green-600 dark:text-green-400">
-                Token validated successfully
-              </p>
-            )}
-            {tokenStatus === 'invalid' && (
-              <p className="text-sm text-red-600 dark:text-red-400">
-                Token is invalid or could not be parsed
-              </p>
-            )}
-            {tokenStatus === 'checking' && (
-              <p className="text-sm text-muted-foreground">
-                Validating token...
-              </p>
-            )}
-            {tokenStatus === 'idle' && (
-              <p className="text-sm text-muted-foreground">
-                Optional - required if you want to download private photos as well
-                as public ones
-              </p>
-            )}
+            <p
+              className={`text-sm ${
+                tokenStatus === 'invalid'
+                  ? 'text-red-600 dark:text-red-400'
+                  : tokenStatus === 'verified'
+                    ? 'text-green-600 dark:text-green-400'
+                    : 'text-muted-foreground'
+              }`}
+            >
+              {tokenStatus === 'checking'
+                ? 'Verifying token...'
+                : tokenStatusMessage}
+            </p>
             {tokenExpiringSoon && (
               <p className="text-sm text-red-600 dark:text-red-400">
-                Warning: Your token is expiring in 20 minutes or less. Please
-                get a fresh token (tokens last 1 hour).
+                Warning: Your token is expiring in 20 minutes or less. Please get
+                a fresh token.
               </p>
             )}
           </div>
@@ -429,12 +542,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             />
             {usernameStatus === 'found' && (
               <p className="text-sm text-green-600 dark:text-green-400">
-                Username found successfully
+                Username found successfully.
               </p>
             )}
             {usernameStatus === 'not-found' && (
               <p className="text-sm text-red-600 dark:text-red-400">
-                Username not found
+                Username not found.
               </p>
             )}
             {usernameStatus === 'checking' && (
@@ -466,9 +579,10 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Downloads are organized as{' '}
-              <code className="font-mono">[folder]/[accountId]/photos</code> and{' '}
-              <code className="font-mono">[folder]/[accountId]/feed</code>.
+              User photos save to <code className="font-mono">[folder]/[accountId]/photos</code>,
+              feed photos save to <code className="font-mono">[folder]/[accountId]/feed</code>,
+              and profile history saves to{' '}
+              <code className="font-mono">[folder]/[accountId]/profile-history</code>.
             </p>
           </div>
 
@@ -479,54 +593,111 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
           )}
 
           <div className="space-y-2">
-            <Label>Metadata Refresh</Label>
-            <p className="text-sm text-muted-foreground">
-              User, room, and event details are reused when available. Toggle
-              below to force a fresh download.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <Button
-                type="button"
-                variant={forceAccountsRefresh ? 'destructive' : 'outline'}
-                onClick={() => setForceAccountsRefresh(value => !value)}
-                disabled={isDownloading}
-                className="justify-start"
-              >
-                <RefreshCcw className="mr-2 h-4 w-4" />
-                {forceAccountsRefresh
-                  ? 'Force user data refresh'
-                  : 'Use cached user data'}
-              </Button>
-              <Button
-                type="button"
-                variant={forceRoomsRefresh ? 'destructive' : 'outline'}
-                onClick={() => setForceRoomsRefresh(value => !value)}
-                disabled={isDownloading}
-                className="justify-start"
-              >
-                <RefreshCcw className="mr-2 h-4 w-4" />
-                {forceRoomsRefresh
-                  ? 'Force room data refresh'
-                  : 'Use cached room data'}
-              </Button>
-              <Button
-                type="button"
-                variant={forceEventsRefresh ? 'destructive' : 'outline'}
-                onClick={() => setForceEventsRefresh(value => !value)}
-                disabled={isDownloading}
-                className="justify-start"
-              >
-                <RefreshCcw className="mr-2 h-4 w-4" />
-                {forceEventsRefresh
-                  ? 'Force event data refresh'
-                  : 'Use cached event data'}
-              </Button>
+            <Label>Download Types</Label>
+            <div className="space-y-2">
+              {renderDownloadType({
+                id: 'download-user-feed',
+                title: 'User Feed',
+                description: 'Download photos the user was tagged in.',
+                checked: downloadSources.downloadUserFeed,
+                onChange: checked =>
+                  toggleDownloadSource('downloadUserFeed', checked),
+              })}
+              {renderDownloadType({
+                id: 'download-user-photos',
+                title: 'User Photos',
+                description: 'Download photos the user took.',
+                checked: downloadSources.downloadUserPhotos,
+                onChange: checked =>
+                  toggleDownloadSource('downloadUserPhotos', checked),
+              })}
+              {renderDownloadType({
+                id: 'download-profile-history',
+                title: 'Profile Picture History',
+                description:
+                  'Download the user profile picture history and save the raw JSON manifest.',
+                checked: downloadSources.downloadProfileHistory,
+                disabled: !profileHistoryEnabled,
+                disabledReason:
+                  tokenStatus === 'checking'
+                    ? 'Verifying the bearer token for this username.'
+                    : tokenStatusMessage,
+                onChange: checked =>
+                  toggleDownloadSource('downloadProfileHistory', checked),
+              })}
             </div>
+          </div>
+
+          <div className="rounded-md border">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between px-3 py-3 text-left"
+              onClick={() => setAdvancedOpen(value => !value)}
+            >
+              <div>
+                <p className="text-sm font-medium">Advanced</p>
+                <p className="text-sm text-muted-foreground">
+                  Cache refresh options for feed and photo collection.
+                </p>
+              </div>
+              {advancedOpen ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+            </button>
+            {advancedOpen && (
+              <div className="border-t px-3 pb-3 pt-2 space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  User, room, and event details are reused when available. Toggle
+                  below to force a fresh download.
+                </p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Button
+                    type="button"
+                    variant={forceAccountsRefresh ? 'destructive' : 'outline'}
+                    onClick={() => setForceAccountsRefresh(value => !value)}
+                    disabled={isDownloading}
+                    className="justify-start"
+                  >
+                    <RefreshCcw className="mr-2 h-4 w-4" />
+                    {forceAccountsRefresh
+                      ? 'Force user data refresh'
+                      : 'Use cached user data'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={forceRoomsRefresh ? 'destructive' : 'outline'}
+                    onClick={() => setForceRoomsRefresh(value => !value)}
+                    disabled={isDownloading}
+                    className="justify-start"
+                  >
+                    <RefreshCcw className="mr-2 h-4 w-4" />
+                    {forceRoomsRefresh
+                      ? 'Force room data refresh'
+                      : 'Use cached room data'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={forceEventsRefresh ? 'destructive' : 'outline'}
+                    onClick={() => setForceEventsRefresh(value => !value)}
+                    disabled={isDownloading}
+                    className="justify-start"
+                  >
+                    <RefreshCcw className="mr-2 h-4 w-4" />
+                    {forceEventsRefresh
+                      ? 'Force event data refresh'
+                      : 'Use cached event data'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {!isFormValid && (
             <p className="text-sm text-muted-foreground">
-              Enter your username and save folder to start.
+              Enter a username, choose a save folder, and select at least one
+              download type to start.
             </p>
           )}
 
@@ -553,45 +724,32 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
         </div>
       </DialogContent>
 
-      {/* Token Help Dialog */}
       <Dialog open={tokenHelpOpen} onOpenChange={setTokenHelpOpen}>
-        <DialogContent className="w-[calc(100%-2rem)] max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto">
+        <DialogContent className="w-[calc(100%-2rem)] max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>How to Get Your Token</DialogTitle>
             <DialogDescription>
-              Instructions for obtaining your RecNet access token
+              Instructions for obtaining your RecNet access token.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
               <p className="text-sm">
-                To download private photos, you need to obtain an access token
-                from RecNet:
+                To download private photos or profile picture history, obtain an
+                access token from RecNet:
               </p>
               <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                <li>Log in to your RecNet account in a web browser</li>
-                <li>
-                  Open your browser&apos;s Developer Tools (F12 or right-click →
-                  Inspect)
-                </li>
-                <li>Go to the Network tab</li>
-                <li>
-                  Navigate to any page on RecNet that requires authentication
-                </li>
-                <li>Look for requests to the RecNet API</li>
-                <li>Find the Authorization header in the request headers</li>
-                <li>
-                  Copy the token value (it usually starts with &quot;Bearer
-                  &quot;)
-                </li>
-                <li>
-                  Paste the token (without &quot;Bearer &quot;) into the token
-                  field above
-                </li>
+                <li>Log in to your RecNet account in a web browser.</li>
+                <li>Open your browser&apos;s Developer Tools and go to Network.</li>
+                <li>Navigate to any RecNet page that requires authentication.</li>
+                <li>Open one of the RecNet API requests.</li>
+                <li>Find the `Authorization` header in the request headers.</li>
+                <li>Copy the token value, usually after `Bearer `.</li>
+                <li>Paste the token into the field above.</li>
               </ol>
               <p className="text-sm text-muted-foreground mt-4">
-                <strong>Note:</strong> Tokens may expire after some time. If
-                downloads fail, you may need to obtain a new token.
+                <strong>Note:</strong> Tokens expire. If validation or downloads
+                start failing, obtain a fresh token.
               </p>
             </div>
           </div>

@@ -10,6 +10,7 @@ import type {
   DownloadResult,
   EventDto,
   Photo,
+  ProfileHistoryAccessResult,
   PlayerResult,
   Progress,
   RecNetSettings,
@@ -36,6 +37,14 @@ export interface ElectronAPI {
 
   downloadPhotos: (params: { accountId: string; token?: string }) => Promise<ApiResponse<DownloadResult>>;
   downloadFeedPhotos: (params: { accountId: string; token?: string }) => Promise<ApiResponse<DownloadResult>>;
+  downloadProfileHistory: (params: {
+    accountId: string;
+    token: string;
+  }) => Promise<ApiResponse<DownloadResult>>;
+  validateProfileHistoryAccess: (params: {
+    username: string;
+    token: string;
+  }) => Promise<ApiResponse<ProfileHistoryAccessResult>>;
 
   selectOutputFolder: () => Promise<string | null>;
   getSettings: () => Promise<RecNetSettings>;
@@ -54,6 +63,7 @@ export interface ElectronAPI {
   clearAccountData: (accountId: string) => Promise<ApiResponse<{ filesRemoved: number }>>;
   loadPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
   loadFeedPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
+  loadProfileHistoryPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
   listAvailableAccounts: () => Promise<ApiResponse<AvailableAccount[]>>;
   loadAccountsData: (accountId: string) => Promise<ApiResponse<PlayerResult[]>>;
   loadRoomsData: (accountId: string) => Promise<ApiResponse<RoomDto[]>>;

@@ -12,8 +12,13 @@ import {
   RecNetSettings,
   Progress,
   BulkDataRefreshOptions,
+  DownloadResult,
   UserFacingIncident,
 } from '../shared/types';
+import {
+  DownloadSourceSelection,
+  getSelectedDownloadSources,
+} from '../shared/download-sources';
 import { FavoritesProvider } from './contexts/FavoritesContext';
 import {
   createUserIncident,
@@ -30,6 +35,7 @@ interface DownloadRequestState {
   username: string;
   token: string;
   filePath: string;
+  downloadSources: DownloadSourceSelection;
   refreshOptions: BulkDataRefreshOptions;
 }
 
@@ -37,6 +43,7 @@ function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
     outputRoot: 'output',
     cdnBase: DEFAULT_CDN_BASE,
+    maxConcurrentDownloads: 30,
   });
 
   const [progress, setProgress] = useState<Progress>({
@@ -213,6 +220,48 @@ function App() {
     []
   );
 
+  const reportDownloadResult = useCallback(
+    (params: {
+      operation: string;
+      label: string;
+      result: DownloadResult;
+      directoryPath?: string;
+      directoryLabel?: string;
+      manifestPath?: string;
+    }) => {
+      const { directoryLabel, directoryPath, label, manifestPath, operation, result } =
+        params;
+      const stats = result.downloadStats;
+
+      addLog(
+        stats.failedDownloads > 0
+          ? `${label} complete with warnings: ${stats.newDownloads} new, ${stats.alreadyDownloaded} existing, ${stats.failedDownloads} missed after retries`
+          : `${label} complete: ${stats.newDownloads} new, ${stats.alreadyDownloaded} existing, ${stats.failedDownloads} failed`,
+        stats.failedDownloads > 0 ? 'warning' : 'success'
+      );
+
+      if (stats.retryAttempts > 0) {
+        addLog(
+          stats.failedDownloads > 0
+            ? `Retried ${label.toLowerCase()} ${stats.retryAttempts} time(s) across failed attempts. ${stats.recoveredAfterRetry} file(s) recovered automatically.`
+            : `Retried ${label.toLowerCase()} ${stats.retryAttempts} time(s) and recovered ${stats.recoveredAfterRetry} file(s) automatically.`,
+          stats.failedDownloads > 0 ? 'warning' : 'info'
+        );
+      }
+
+      if (directoryPath && directoryLabel) {
+        addLog(`${directoryLabel}: ${directoryPath}`, 'info');
+      }
+      if (manifestPath) {
+        addLog(`Profile history manifest saved to: ${manifestPath}`, 'info');
+      }
+
+      result.guidance?.forEach(message => addLog(message, 'warning'));
+      addResult(operation, result, 'success');
+    },
+    [addLog, addResult]
+  );
+
   const clearLogs = () => {
     setLogs([]);
     setResults([]);
@@ -278,9 +327,11 @@ function App() {
     username: string,
     token: string,
     filePath: string,
+    downloadSources: DownloadSourceSelection,
     refreshOptions: BulkDataRefreshOptions = {}
   ) => {
-    if (!username.trim() || !filePath.trim()) {
+    const selectedSources = getSelectedDownloadSources(downloadSources);
+    if (!username.trim() || !filePath.trim() || selectedSources.length === 0) {
       return;
     }
 
@@ -295,6 +346,7 @@ function App() {
       username,
       token,
       filePath,
+      downloadSources,
       refreshOptions: {
         forceAccountsRefresh,
         forceRoomsRefresh,
@@ -346,146 +398,160 @@ function App() {
           `Found account: ${account.displayName} (ID: ${accountId})`,
           'success'
         );
-        addLog(
-          forceAccountsRefresh
-            ? 'Forcing refresh of user data for this download'
-            : 'Using existing user data if present',
-          'info'
-        );
-        addLog(
-          forceRoomsRefresh
-            ? 'Forcing refresh of room data for this download'
-            : 'Using existing room data if present',
-          'info'
-        );
-        addLog(
-          forceEventsRefresh
-            ? 'Forcing refresh of event data for this download'
-            : 'Using existing event data if present',
-          'info'
-        );
-
-        // Step 1: Collect photos & feed metadata
-        addLog('Step 1: Collecting photos metadata...', 'info');
-        const collectPhotosResult = await window.electronAPI.collectPhotos({
-          accountId,
-          token: token.trim() || undefined,
-          forceAccountsRefresh,
-          forceRoomsRefresh,
-          forceEventsRefresh,
-        });
-
-        addLog('Step 1b: Collecting feed photos metadata...', 'info');
-        const collectFeedResult = await window.electronAPI.collectFeedPhotos({
-          accountId,
-          token: token.trim() || undefined,
-          incremental: true,
-          forceAccountsRefresh,
-          forceRoomsRefresh,
-          forceEventsRefresh,
-        });
-
-        if (!collectPhotosResult.success) {
-          throw new Error(
-            collectPhotosResult.error || 'Failed to collect photos'
-          );
-        }
-        if (!collectFeedResult.success) {
-          throw new Error(
-            collectFeedResult.error || 'Failed to collect feed photos'
-          );
-        }
-
-        const totalPhotos = collectPhotosResult.data?.totalPhotos || 0;
-        addLog(`Collected ${totalPhotos} photos metadata`, 'success');
-        const totalFeedPhotos = collectFeedResult.data?.totalPhotos || 0;
-        addLog(`Collected ${totalFeedPhotos} feed photos metadata`, 'success');
-
-        // Reload photos immediately after collection so they're visible
-        loadPhotosForAccount(accountId);
-
-        // Step 2: Download photos
-        addLog('Step 2: Downloading photos...', 'info');
-        const downloadResult = await window.electronAPI.downloadPhotos({
-          accountId,
-          token: token.trim() || undefined,
-        });
-
-        if (!downloadResult.success) {
-          throw new Error(downloadResult.error || 'Failed to download photos');
-        }
-
-        const downloadStats = downloadResult.data?.downloadStats;
-        if (downloadStats) {
+        if (
+          downloadSources.downloadUserFeed ||
+          downloadSources.downloadUserPhotos
+        ) {
           addLog(
-            downloadStats.failedDownloads > 0
-              ? `Download complete with warnings: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} missed after retries`
-              : `Download complete: ${downloadStats.newDownloads} new, ${downloadStats.alreadyDownloaded} existing, ${downloadStats.failedDownloads} failed`,
-            downloadStats.failedDownloads > 0 ? 'warning' : 'success'
+            forceAccountsRefresh
+              ? 'Forcing refresh of user data for this download'
+              : 'Using existing user data if present',
+            'info'
           );
-          if (downloadStats.retryAttempts > 0) {
-            addLog(
-              downloadStats.failedDownloads > 0
-                ? `Retried user photo downloads ${downloadStats.retryAttempts} time(s) across failed attempts. ${downloadStats.recoveredAfterRetry} photo(s) recovered automatically.`
-                : `Retried user photo downloads ${downloadStats.retryAttempts} time(s) and recovered ${downloadStats.recoveredAfterRetry} photo(s) automatically.`,
-              downloadStats.failedDownloads > 0 ? 'warning' : 'info'
-            );
-          }
-          if (downloadResult.data?.photosDirectory) {
-            addLog(
-              `User photos saved to: ${downloadResult.data.photosDirectory}`,
-              'info'
-            );
-          }
-          downloadResult.data?.guidance?.forEach(message =>
-            addLog(message, 'warning')
-          );
-          addResult('Download', downloadResult.data, 'success');
-        }
-
-        // Step 3: Download feed photos
-        addLog('Step 3: Downloading feed photos...', 'info');
-        const downloadFeedResult = await window.electronAPI.downloadFeedPhotos({
-          accountId,
-          token: token.trim() || undefined,
-        });
-
-        if (!downloadFeedResult.success) {
-          throw new Error(
-            downloadFeedResult.error || 'Failed to download feed photos'
-          );
-        }
-
-        const downloadFeedStats = downloadFeedResult.data?.downloadStats;
-        if (downloadFeedStats) {
           addLog(
-            downloadFeedStats.failedDownloads > 0
-              ? `Feed download complete with warnings: ${downloadFeedStats.newDownloads} new, ${downloadFeedStats.alreadyDownloaded} existing, ${downloadFeedStats.failedDownloads} missed after retries`
-              : `Feed download complete: ${downloadFeedStats.newDownloads} new, ${downloadFeedStats.alreadyDownloaded} existing, ${downloadFeedStats.failedDownloads} failed`,
-            downloadFeedStats.failedDownloads > 0 ? 'warning' : 'success'
+            forceRoomsRefresh
+              ? 'Forcing refresh of room data for this download'
+              : 'Using existing room data if present',
+            'info'
           );
-          if (downloadFeedStats.retryAttempts > 0) {
-            addLog(
-              downloadFeedStats.failedDownloads > 0
-                ? `Retried feed photo downloads ${downloadFeedStats.retryAttempts} time(s) across failed attempts. ${downloadFeedStats.recoveredAfterRetry} photo(s) recovered automatically.`
-                : `Retried feed photo downloads ${downloadFeedStats.retryAttempts} time(s) and recovered ${downloadFeedStats.recoveredAfterRetry} photo(s) automatically.`,
-              downloadFeedStats.failedDownloads > 0 ? 'warning' : 'info'
-            );
-          }
-          if (downloadFeedResult.data?.feedPhotosDirectory) {
-            addLog(
-              `Feed photos saved to: ${downloadFeedResult.data.feedPhotosDirectory}`,
-              'info'
-            );
-          }
-          downloadFeedResult.data?.guidance?.forEach(message =>
-            addLog(message, 'warning')
+          addLog(
+            forceEventsRefresh
+              ? 'Forcing refresh of event data for this download'
+              : 'Using existing event data if present',
+            'info'
           );
-          addResult('Feed Download', downloadFeedResult.data, 'success');
         }
 
-        // Reload photos after download completes
-        loadPhotosForAccount(accountId);
+        for (const source of selectedSources) {
+          if (source === 'user-feed') {
+            addLog('Collecting feed photos metadata...', 'info');
+            const collectFeedResult = await window.electronAPI.collectFeedPhotos({
+              accountId,
+              token: token.trim() || undefined,
+              incremental: true,
+              forceAccountsRefresh,
+              forceRoomsRefresh,
+              forceEventsRefresh,
+            });
+
+            if (!collectFeedResult.success) {
+              throw new Error(
+                collectFeedResult.error || 'Failed to collect feed photos'
+              );
+            }
+
+            const totalFeedPhotos = collectFeedResult.data?.totalPhotos || 0;
+            addLog(`Collected ${totalFeedPhotos} feed photos metadata`, 'success');
+
+            addLog('Downloading feed photos...', 'info');
+            const downloadFeedResult =
+              await window.electronAPI.downloadFeedPhotos({
+                accountId,
+                token: token.trim() || undefined,
+              });
+
+            if (!downloadFeedResult.success || !downloadFeedResult.data) {
+              throw new Error(
+                downloadFeedResult.error || 'Failed to download feed photos'
+              );
+            }
+
+            reportDownloadResult({
+              operation: 'User Feed Download',
+              label: 'Feed download',
+              result: downloadFeedResult.data,
+              directoryPath: downloadFeedResult.data.feedPhotosDirectory,
+              directoryLabel: 'Feed photos saved to',
+            });
+            loadPhotosForAccount(accountId);
+            continue;
+          }
+
+          if (source === 'user-photos') {
+            addLog('Collecting user photos metadata...', 'info');
+            const collectPhotosResult = await window.electronAPI.collectPhotos({
+              accountId,
+              token: token.trim() || undefined,
+              forceAccountsRefresh,
+              forceRoomsRefresh,
+              forceEventsRefresh,
+            });
+
+            if (!collectPhotosResult.success) {
+              throw new Error(
+                collectPhotosResult.error || 'Failed to collect photos'
+              );
+            }
+
+            const totalPhotos = collectPhotosResult.data?.totalPhotos || 0;
+            addLog(`Collected ${totalPhotos} photos metadata`, 'success');
+
+            addLog('Downloading user photos...', 'info');
+            const downloadPhotosResult = await window.electronAPI.downloadPhotos({
+              accountId,
+              token: token.trim() || undefined,
+            });
+
+            if (!downloadPhotosResult.success || !downloadPhotosResult.data) {
+              throw new Error(
+                downloadPhotosResult.error || 'Failed to download photos'
+              );
+            }
+
+            reportDownloadResult({
+              operation: 'User Photos Download',
+              label: 'User photos download',
+              result: downloadPhotosResult.data,
+              directoryPath: downloadPhotosResult.data.photosDirectory,
+              directoryLabel: 'User photos saved to',
+            });
+            loadPhotosForAccount(accountId);
+            continue;
+          }
+
+          if (source === 'profile-history') {
+            if (!token.trim()) {
+              throw new Error(
+                'Profile picture history requires a valid access token.'
+              );
+            }
+
+            addLog('Downloading profile picture history...', 'info');
+            const downloadProfileHistoryResult =
+              await window.electronAPI.downloadProfileHistory({
+                accountId,
+                token: token.trim(),
+              });
+
+            if (
+              !downloadProfileHistoryResult.success ||
+              !downloadProfileHistoryResult.data
+            ) {
+              throw new Error(
+                downloadProfileHistoryResult.error ||
+                  'Failed to download profile picture history'
+              );
+            }
+
+            reportDownloadResult({
+              operation: 'Profile Picture History Download',
+              label: 'Profile picture history download',
+              result: downloadProfileHistoryResult.data,
+              directoryPath:
+                downloadProfileHistoryResult.data.profileHistoryDirectory,
+              directoryLabel: 'Profile picture history saved to',
+              manifestPath:
+                downloadProfileHistoryResult.data.profileHistoryManifestPath,
+            });
+          }
+        }
+
+        if (
+          downloadSources.downloadUserFeed ||
+          downloadSources.downloadUserPhotos
+        ) {
+          loadPhotosForAccount(accountId);
+        }
         setActiveIncident(null);
       }
     } catch (error) {
@@ -561,6 +627,7 @@ function App() {
       retryRequest.username,
       retryRequest.token,
       retryRequest.filePath,
+      retryRequest.downloadSources,
       retryRequest.refreshOptions
     );
   }, [handleDownload, isDownloading, retryRequest]);

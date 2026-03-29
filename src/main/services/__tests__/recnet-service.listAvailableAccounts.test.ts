@@ -85,8 +85,10 @@ describe('RecNetService - listAvailableAccounts (folder meta)', () => {
         accountId,
         hasPhotos: true,
         hasFeed: false,
+        hasProfileHistory: false,
         photoCount: 1,
         feedCount: 0,
+        profileHistoryCount: 0,
         displayLabel: 'Alice (@alice)',
       },
     ]);
@@ -200,6 +202,42 @@ describe('RecNetService - listAvailableAccounts (folder meta)', () => {
       }),
       expect.anything()
     );
+  });
+
+  it('includes accounts that only have profile history metadata', async () => {
+    const accountId = '256147';
+    const accountDir = path.join(testOutputDir, accountId);
+    const profileHistoryJsonPath = path.join(
+      accountDir,
+      `${accountId}_profile_history.json`
+    );
+
+    (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+      if (p === testOutputDir) return true;
+      if (p === profileHistoryJsonPath) return true;
+      return false;
+    });
+
+    (mockedFs.readdir as jest.Mock).mockResolvedValue([makeDirent(accountId)]);
+    (mockedFs.readJson as jest.Mock).mockImplementation(async (p: string) => {
+      if (p === profileHistoryJsonPath) return [{ Id: '1' }];
+      throw new Error(`Unexpected readJson(${p})`);
+    });
+
+    const result = await service.listAvailableAccounts();
+
+    expect(result).toEqual([
+      {
+        accountId,
+        hasPhotos: false,
+        hasFeed: false,
+        hasProfileHistory: true,
+        photoCount: 0,
+        feedCount: 0,
+        profileHistoryCount: 1,
+        displayLabel: undefined,
+      },
+    ]);
   });
 });
 

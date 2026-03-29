@@ -115,11 +115,19 @@ export interface DownloadResult {
   accountId: string;
   photosDirectory?: string;
   feedPhotosDirectory?: string;
+  profileHistoryDirectory?: string;
+  profileHistoryManifestPath?: string;
   processedCount: number;
   downloadStats: DownloadStats;
   downloadResults: DownloadResultItem[];
   totalResults: number;
   guidance?: string[];
+}
+
+export interface ProfileHistoryAccessResult {
+  accountId: string;
+  username: string;
+  tokenAccountId: string;
 }
 
 export interface ApiResponse<T> {
@@ -168,8 +176,10 @@ export interface AvailableAccount {
   accountId: string;
   hasPhotos: boolean;
   hasFeed: boolean;
+  hasProfileHistory: boolean;
   photoCount: number;
   feedCount: number;
+  profileHistoryCount: number;
   /**
    * Optional human-friendly label for the folder owner.
    * Populated from per-folder metadata when available.

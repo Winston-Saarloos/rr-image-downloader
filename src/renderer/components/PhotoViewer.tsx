@@ -42,7 +42,7 @@ interface PhotoViewerProps {
   cdnBase?: string;
 }
 
-type PhotoSource = 'photos' | 'feed';
+type PhotoSource = 'photos' | 'feed' | 'profile-history';
 
 export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   filePath,
@@ -81,6 +81,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
   const [eventMap, setEventMap] = useState<Map<string, string>>(new Map());
   const [feedPhotos, setFeedPhotos] = useState<Photo[]>([]);
+  const [profileHistoryPhotos, setProfileHistoryPhotos] = useState<Photo[]>([]);
   const [photoSource, setPhotoSource] = useState<PhotoSource>('photos');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
@@ -103,7 +104,12 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
 
   // Use propAccountId if provided, otherwise use selectedAccountId
   const accountId = propAccountId || selectedAccountId;
-  const basePhotos = photoSource === 'feed' ? feedPhotos : photos;
+  const basePhotos =
+    photoSource === 'feed'
+      ? feedPhotos
+      : photoSource === 'profile-history'
+        ? profileHistoryPhotos
+        : photos;
 
   // Filter photos based on favorites filter
   const activePhotos = useMemo(() => {
@@ -111,7 +117,12 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     return basePhotos.filter(photo => favorites.has(photo.Id.toString()));
   }, [basePhotos, showFavoritesOnly, favorites]);
 
-  const activeViewLabel = photoSource === 'feed' ? 'feed photos' : 'photos';
+  const activeViewLabel =
+    photoSource === 'feed'
+      ? 'feed photos'
+      : photoSource === 'profile-history'
+        ? 'profile picture history'
+        : 'photos';
 
   const loadAvailableAccounts = useCallback(async () => {
     setLoadingAccounts(true);
@@ -227,6 +238,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     if (!filePath || !accountId) {
       setPhotos([]);
       setFeedPhotos([]);
+      setProfileHistoryPhotos([]);
       return;
     }
 
@@ -234,9 +246,11 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     setLoadError(null);
     try {
       if (electronAPI) {
-        const [photosResult, feedPhotosResult] = await Promise.all([
+        const [photosResult, feedPhotosResult, profileHistoryResult] =
+          await Promise.all([
           electronAPI.loadPhotos(accountId),
           electronAPI.loadFeedPhotos(accountId),
+          electronAPI.loadProfileHistoryPhotos(accountId),
         ]);
 
         if (photosResult.success && photosResult.data) {
@@ -250,10 +264,16 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         } else {
           setFeedPhotos([]);
         }
+        if (profileHistoryResult.success && profileHistoryResult.data) {
+          setProfileHistoryPhotos(profileHistoryResult.data);
+        } else {
+          setProfileHistoryPhotos([]);
+        }
         onPhotosLoadSuccessRef.current?.();
       } else {
         setPhotos([]);
         setFeedPhotos([]);
+        setProfileHistoryPhotos([]);
       }
     } catch (error) {
       const msg = `Failed to load photos: ${error instanceof Error ? error.message : 'Unknown error'}. Check that your output folder is accessible.`;
@@ -261,6 +281,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       onPhotosLoadErrorRef.current?.(msg);
       setPhotos([]);
       setFeedPhotos([]);
+      setProfileHistoryPhotos([]);
     } finally {
       setLoading(false);
     }
@@ -290,6 +311,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     } else {
       setPhotos([]);
       setFeedPhotos([]);
+      setProfileHistoryPhotos([]);
       setRoomMap(new Map());
       setAccountMap(new Map());
       setEventMap(new Map());
@@ -302,6 +324,34 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     loadAccountData,
     loadEventData,
   ]);
+
+  useEffect(() => {
+    if (!accountId) {
+      return;
+    }
+
+    if (photoSource === 'photos' && photos.length > 0) {
+      return;
+    }
+    if (photoSource === 'feed' && feedPhotos.length > 0) {
+      return;
+    }
+    if (photoSource === 'profile-history' && profileHistoryPhotos.length > 0) {
+      return;
+    }
+
+    if (photos.length > 0) {
+      setPhotoSource('photos');
+      return;
+    }
+    if (feedPhotos.length > 0) {
+      setPhotoSource('feed');
+      return;
+    }
+    if (profileHistoryPhotos.length > 0) {
+      setPhotoSource('profile-history');
+    }
+  }, [accountId, feedPhotos.length, photoSource, photos.length, profileHistoryPhotos.length]);
 
   // Reload photos + metadata periodically during download so names resolve
   useEffect(() => {
@@ -429,6 +479,15 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                 onClick={() => setPhotoSource('feed')}
               >
                 Feed ({feedPhotos.length})
+              </Button>
+              <Button
+                size="sm"
+                variant={
+                  photoSource === 'profile-history' ? 'default' : 'outline'
+                }
+                onClick={() => setPhotoSource('profile-history')}
+              >
+                Profile History ({profileHistoryPhotos.length})
               </Button>
               <Button
                 size="sm"

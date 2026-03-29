@@ -51,6 +51,13 @@ describe('RecNetService - Download Functionality', () => {
   let testAccountId: string;
   let mockPhotosController: jest.Mocked<PhotosController>;
 
+  const createJwt = (payload: Record<string, unknown>): string => {
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+      .toString('base64url');
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    return `${header}.${body}.signature`;
+  };
+
   beforeEach(() => {
     // Create a unique test directory for each test
     testOutputDir = path.join(__dirname, 'test-output', `test-${Date.now()}`);
@@ -69,6 +76,7 @@ describe('RecNetService - Download Functionality', () => {
       downloadPhoto: jest.fn(),
       fetchPlayerPhotos: jest.fn(),
       fetchFeedPhotos: jest.fn(),
+      fetchProfilePhotoHistory: jest.fn(),
     } as any;
 
     // Replace the photosController with our mock
@@ -1008,6 +1016,220 @@ describe('RecNetService - Download Functionality', () => {
       await expect(service.downloadFeedPhotos(testAccountId)).rejects.toThrow(
         'Operation cancelled'
       );
+    });
+  });
+
+  describe('validateProfileHistoryAccess', () => {
+    it('rejects malformed JWT tokens', async () => {
+      await expect(
+        service.validateProfileHistoryAccess('test-user', 'not-a-jwt')
+      ).rejects.toThrow('Token is invalid or could not be parsed.');
+    });
+
+    it('rejects expired JWT tokens', async () => {
+      const expiredToken = createJwt({
+        sub: testAccountId,
+        exp: Math.floor(Date.now() / 1000) - 60,
+      });
+
+      await expect(
+        service.validateProfileHistoryAccess('test-user', expiredToken)
+      ).rejects.toThrow('Token has expired.');
+    });
+
+    it('rejects when the username cannot be resolved', async () => {
+      const token = createJwt({
+        sub: testAccountId,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      });
+      const mockAccountsController = (
+        service as unknown as {
+          accountsController: { lookupAccountByUsername: jest.Mock };
+        }
+      ).accountsController;
+
+      mockAccountsController.lookupAccountByUsername.mockRejectedValue(
+        new Error('HTTP 404: Not found')
+      );
+
+      await expect(
+        service.validateProfileHistoryAccess('missing-user', token)
+      ).rejects.toThrow('Failed to lookup account by username: HTTP 404: Not found');
+    });
+
+    it('rejects when the token belongs to a different user', async () => {
+      const token = createJwt({
+        sub: 'someone-else',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      });
+      const mockAccountsController = (
+        service as unknown as {
+          accountsController: { lookupAccountByUsername: jest.Mock };
+        }
+      ).accountsController;
+
+      mockAccountsController.lookupAccountByUsername.mockResolvedValue({
+        accountId: testAccountId,
+        username: 'test-user',
+        displayName: 'Test User',
+      });
+
+      await expect(
+        service.validateProfileHistoryAccess('test-user', token)
+      ).rejects.toThrow('Token does not belong to this user.');
+    });
+
+    it('validates matching tokens and confirms profile history access', async () => {
+      const token = createJwt({
+        sub: testAccountId,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      });
+      const mockAccountsController = (
+        service as unknown as {
+          accountsController: { lookupAccountByUsername: jest.Mock };
+        }
+      ).accountsController;
+
+      mockAccountsController.lookupAccountByUsername.mockResolvedValue({
+        accountId: testAccountId,
+        username: 'test-user',
+        displayName: 'Test User',
+      });
+      mockPhotosController.fetchProfilePhotoHistory.mockResolvedValue([]);
+
+      const result = await service.validateProfileHistoryAccess(
+        'test-user',
+        token
+      );
+
+      expect(result).toEqual({
+        accountId: testAccountId,
+        username: 'test-user',
+        tokenAccountId: testAccountId,
+      });
+      expect(mockPhotosController.fetchProfilePhotoHistory).toHaveBeenCalledWith(
+        token
+      );
+    });
+  });
+
+  describe('downloadProfileHistory', () => {
+    const createProfileHistoryEntry = (id: number, imageName: string) => ({
+      Id: id,
+      Type: 4,
+      Accessibility: 0,
+      AccessibilityLocked: false,
+      ImageName: imageName,
+      Description: null,
+      PlayerId: 256147,
+      TaggedPlayerIds: [],
+      RoomId: 517859,
+      PlayerEventId: null,
+      CreatedAt: new Date().toISOString(),
+      CheerCount: 0,
+      CommentCount: 0,
+    });
+
+    it('saves the manifest and downloads profile history images', async () => {
+      const historyPayload = [
+        createProfileHistoryEntry(85498573, 'avatar1.jpg'),
+        createProfileHistoryEntry(85498574, 'avatar2.jpg'),
+      ];
+      const profileHistoryDir = path.join(
+        testOutputDir,
+        testAccountId,
+        'profile-history'
+      );
+      const manifestPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_profile_history.json`
+      );
+
+      mockPhotosController.fetchProfilePhotoHistory.mockResolvedValue(historyPayload);
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: true,
+        value: new ArrayBuffer(512),
+        status: 200,
+      } as GenericResponse<ArrayBuffer>);
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      const result = await service.downloadProfileHistory(testAccountId, 'token');
+
+      expect(result.profileHistoryDirectory).toBe(profileHistoryDir);
+      expect(result.profileHistoryManifestPath).toBe(manifestPath);
+      expect(result.downloadStats.newDownloads).toBe(2);
+      expect(mockedFs.writeJson).toHaveBeenCalledWith(
+        manifestPath,
+        historyPayload,
+        { spaces: 2 }
+      );
+      expect(mockedFs.writeFile).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips already-downloaded profile history images on rerun', async () => {
+      const historyPayload = [createProfileHistoryEntry(85498573, 'avatar1.jpg')];
+      const existingPhotoPath = path.join(
+        testOutputDir,
+        testAccountId,
+        'profile-history',
+        '85498573.jpg'
+      );
+
+      mockPhotosController.fetchProfilePhotoHistory.mockResolvedValue(historyPayload);
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === existingPhotoPath) {
+          return true;
+        }
+        return false;
+      });
+      (mockedFs.readdir as jest.Mock).mockResolvedValue(['85498573.jpg']);
+
+      const result = await service.downloadProfileHistory(testAccountId, 'token');
+
+      expect(result.downloadStats.alreadyDownloaded).toBe(1);
+      expect(result.downloadStats.newDownloads).toBe(0);
+      expect(mockPhotosController.downloadPhoto).not.toHaveBeenCalled();
+    });
+
+    it('retries failed profile history downloads before reporting failure', async () => {
+      const historyPayload = [createProfileHistoryEntry(85498573, 'avatar1.jpg')];
+
+      mockPhotosController.fetchProfilePhotoHistory.mockResolvedValue(historyPayload);
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: false,
+        value: null,
+        status: 500,
+        error: 'CDN failure',
+      } as GenericResponse<ArrayBuffer>);
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      const result = await service.downloadProfileHistory(testAccountId, 'token');
+
+      expect(result.downloadStats.failedDownloads).toBe(1);
+      expect(result.downloadStats.retryAttempts).toBe(3);
+      expect(result.downloadResults[0].attempts).toBe(4);
+      expect(result.guidance?.[0]).toContain('profile picture history images');
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(4);
+    });
+
+    it('rejects when no token is provided', async () => {
+      await expect(
+        service.downloadProfileHistory(testAccountId, '')
+      ).rejects.toThrow('Profile picture history requires a valid access token.');
+    });
+
+    it('rejects unauthorized profile history requests', async () => {
+      mockPhotosController.fetchProfilePhotoHistory.mockRejectedValue(
+        new Error('HTTP 401: Unauthorized')
+      );
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      await expect(
+        service.downloadProfileHistory(testAccountId, 'token')
+      ).rejects.toThrow('HTTP 401: Unauthorized');
     });
   });
 });

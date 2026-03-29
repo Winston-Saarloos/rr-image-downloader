@@ -147,6 +147,8 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
       saved?: string;
       photosDirectory?: string;
       feedPhotosDirectory?: string;
+      profileHistoryDirectory?: string;
+      profileHistoryManifestPath?: string;
       guidance?: string[];
     };
 
@@ -232,6 +234,24 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
             <Info className="w-4 h-4 text-blue-600 dark:text-blue-400" />
             <span className="text-blue-600 dark:text-blue-400 text-sm">
               Feed: {data.feedPhotosDirectory}
+            </span>
+          </div>
+        )}
+
+        {data.profileHistoryDirectory && (
+          <div className="flex items-center gap-2">
+            <Info className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <span className="text-blue-600 dark:text-blue-400 text-sm">
+              Profile history: {data.profileHistoryDirectory}
+            </span>
+          </div>
+        )}
+
+        {data.profileHistoryManifestPath && (
+          <div className="flex items-center gap-2">
+            <Info className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <span className="text-blue-600 dark:text-blue-400 text-sm">
+              Manifest: {data.profileHistoryManifestPath}
             </span>
           </div>
         )}
