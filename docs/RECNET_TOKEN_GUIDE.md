@@ -2,9 +2,8 @@
 
 Use this guide if you want to download private photos or profile picture history in RR Image Downloader.
 
-## Video Walkthrough
-
-YouTube link placeholder: add video link here.
+<!-- ## Video Walkthrough
+YouTube link placeholder: add video link here. -->
 
 ## Before You Start
 
@@ -34,6 +33,8 @@ Copy and paste this into the console, then press `Enter`:
 copy(JSON.parse(localStorage.getItem('na_current_user_session')).accessToken);
 ```
 
+The command reads the current RecNet session from browser local storage and copies the `accessToken` value to your clipboard.
+
 ![Token command pasted into the browser console](../images/step_3.png)
 
 ### Step 4: Allow Clipboard Access If Asked
@@ -58,10 +59,11 @@ Your token should appear in the token box automatically.
 - Choose your save folder.
 - Select what you want to download.
 - Start the download.
+- Enjoy Forever
 
 ## Important Warning
 
-Your token is private. Anyone who has it may be able to access your account data until the token expires.
+Your token is private. Anyone who has it will be able to access your account data until the token expires.
 
 Do not share it in screenshots, messages, streams, or videos.
 
@@ -74,7 +76,3 @@ Try these fixes:
 - Refresh the RecNet page and try again.
 - If the token is old, get a new one by repeating the steps.
 - If the clipboard does not fill automatically, run the command again and allow clipboard access.
-
-## For Advanced Users
-
-The command reads the current RecNet session from browser local storage and copies the `accessToken` value to your clipboard.
