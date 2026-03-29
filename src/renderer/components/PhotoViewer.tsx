@@ -79,6 +79,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [roomMap, setRoomMap] = useState<Map<string, string>>(new Map());
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
+  const [usernameMap, setUsernameMap] = useState<Map<string, string>>(
+    new Map()
+  );
   const [eventMap, setEventMap] = useState<Map<string, string>>(new Map());
   const [feedPhotos, setFeedPhotos] = useState<Photo[]>([]);
   const [profileHistoryPhotos, setProfileHistoryPhotos] = useState<Photo[]>([]);
@@ -185,6 +188,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const loadAccountData = useCallback(async () => {
     if (!accountId) {
       setAccountMap(new Map());
+      setUsernameMap(new Map());
       return;
     }
 
@@ -194,18 +198,22 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         if (result.success && result.data) {
           const accounts = result.data as PlayerResult[];
           const accountMapping = new Map<string, string>();
+          const usernameMapping = new Map<string, string>();
           accounts.forEach(account => {
-            const accountId = String(account.accountId);
+            const id = String(account.accountId);
             const displayName =
-              account.displayName || account.username || accountId;
-            accountMapping.set(accountId, displayName);
+              account.displayName || account.username || id;
+            accountMapping.set(id, displayName);
+            usernameMapping.set(id, account.username || '');
           });
           setAccountMap(accountMapping);
+          setUsernameMap(usernameMapping);
         }
       }
     } catch (error) {
       console.error('Failed to load account data:', error);
       setAccountMap(new Map());
+      setUsernameMap(new Map());
     }
   }, [accountId, electronAPI]);
 
@@ -648,6 +656,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         onClose={handleCloseModal}
         roomMap={roomMap}
         accountMap={accountMap}
+        usernameMap={usernameMap}
         eventMap={eventMap}
         cdnBase={cdnBase}
       />

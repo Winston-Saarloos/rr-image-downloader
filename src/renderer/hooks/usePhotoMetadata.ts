@@ -10,6 +10,12 @@ export interface PhotoEventInfo {
   name?: string;
 }
 
+export interface TaggedUserInfo {
+  id: string;
+  displayName: string;
+  username: string;
+}
+
 const normalizeId = (value: unknown): string => {
   if (value === null || value === undefined) {
     return '';
@@ -71,12 +77,14 @@ export const usePhotoMetadata = (
   roomMap?: Map<string, string>,
   accountMap?: Map<string, string>,
   eventMap?: Map<string, string>,
-  cdnBase = DEFAULT_CDN_BASE
+  cdnBase = DEFAULT_CDN_BASE,
+  usernameMap?: Map<string, string>
 ) => {
   const fallbackMap = useMemo(() => new Map<string, string>(), []);
   const safeRoomMap = roomMap ?? fallbackMap;
   const safeAccountMap = accountMap ?? fallbackMap;
   const safeEventMap = eventMap ?? fallbackMap;
+  const safeUsernameMap = usernameMap ?? fallbackMap;
 
   const getPhotoRoom = useCallback(
     (photo: Photo): string => {
@@ -108,6 +116,31 @@ export const usePhotoMetadata = (
       });
     },
     [safeAccountMap]
+  );
+
+  const getPhotoTaggedUsers = useCallback(
+    (photo: Photo): TaggedUserInfo[] => {
+      const userIds = Array.isArray(photo.TaggedPlayerIds)
+        ? photo.TaggedPlayerIds
+        : [];
+
+      if (!Array.isArray(userIds)) {
+        return [];
+      }
+
+      return userIds.map(userId => {
+        const normalizedUserId = normalizeId(userId);
+        const id = normalizedUserId || String(userId);
+        const displayName =
+          getMapValue(safeAccountMap, normalizedUserId) ||
+          normalizedUserId ||
+          String(userId);
+        const username =
+          getMapValue(safeUsernameMap, normalizedUserId) || '';
+        return { id, displayName, username };
+      });
+    },
+    [safeAccountMap, safeUsernameMap]
   );
 
   const getPhotoImageUrl = useCallback(
@@ -147,6 +180,7 @@ export const usePhotoMetadata = (
   return {
     getPhotoRoom,
     getPhotoUsers,
+    getPhotoTaggedUsers,
     getPhotoImageUrl,
     getPhotoEvent,
   };
