@@ -25,6 +25,7 @@ import {
 import { DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import { PhotoGrid } from './PhotoGrid';
 import { PhotoDetailModal } from './PhotoDetailModal';
+import { AccountSelect } from './AccountSelect';
 import { useFavorites } from '../hooks/useFavorites';
 
 interface PhotoViewerProps {
@@ -429,14 +430,6 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
   };
 
-  const getAccountDisplayName = (account: AvailableAccount): string => {
-    return (
-      account.displayLabel ||
-      accountMap.get(account.accountId) ||
-      account.accountId
-    );
-  };
-
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden">
       <div
@@ -450,25 +443,14 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             {availableAccounts.length > 0 && (
               <div className="flex min-w-0 flex-1 items-center gap-3">
-                <Select
-                  value={accountId || ''}
+                <AccountSelect
+                  availableAccounts={availableAccounts}
+                  value={accountId}
+                  accountMap={accountMap}
+                  usernameMap={usernameMap}
                   onValueChange={handleAccountChange}
                   disabled={!!propAccountId}
-                >
-                  <SelectTrigger className="w-full sm:w-[250px]">
-                    <SelectValue placeholder="Select an account" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableAccounts.map(account => (
-                      <SelectItem
-                        key={account.accountId}
-                        value={account.accountId}
-                      >
-                        {getAccountDisplayName(account)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
                 {propAccountId && (
                   <span className="text-sm text-muted-foreground">
                     (Downloading...)
