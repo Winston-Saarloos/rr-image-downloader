@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  ExternalLink,
   FolderOpen,
   HelpCircle,
   Key,
@@ -80,6 +81,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   settings,
 }) => {
   const electronAPI = (window as unknown as { electronAPI?: any }).electronAPI;
+  const recNetTokenGuideUrl =
+    'https://github.com/Winston-Saarloos/rr-image-downloader/blob/main/docs/RECNET_TOKEN_GUIDE.md';
   const [username, setUsername] = useState('');
   const [token, setToken] = useState('');
   const [filePath, setFilePath] = useState(settings.outputRoot || '');
@@ -237,8 +240,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     const expirationTime = decoded.exp * 1000;
     const currentTime = Date.now();
     const timeUntilExpiration = expirationTime - currentTime;
-    const twentyMinutesInMs = 20 * 60 * 1000;
-    return timeUntilExpiration <= twentyMinutesInMs && timeUntilExpiration > 0;
+    const tenMinutesInMs = 10 * 60 * 1000;
+    return timeUntilExpiration <= tenMinutesInMs && timeUntilExpiration > 0;
   };
 
   const validateProfileHistoryAccess = async (
@@ -323,19 +326,15 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const handlePasteToken = async () => {
     try {
       const text = await navigator.clipboard.readText();
+      const next = cleanToken(text);
+      setToken(next);
+
       const el = tokenTextareaRef.current;
       if (el) {
-        const start = el.selectionStart ?? 0;
-        const end = el.selectionEnd ?? 0;
-        const combined = token.slice(0, start) + text + token.slice(end);
-        const next = cleanToken(combined);
-        setToken(next);
         requestAnimationFrame(() => {
           el.focus();
           el.setSelectionRange(next.length, next.length);
         });
-      } else {
-        setToken(cleanToken(token + text));
       }
     } catch {
       // Clipboard API unavailable or denied
@@ -580,7 +579,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             </p>
             {tokenExpiringSoon && (
               <p className="text-sm text-red-600 dark:text-red-400">
-                Warning: Your token is expiring in 20 minutes or less. Please
+                Warning: Your token is expiring in 10 minutes or less. Please
                 get a fresh token.
               </p>
             )}
@@ -814,58 +813,29 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
         <DialogContent className="w-[calc(100%-2rem)] max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>How to Get Your Token</DialogTitle>
-            <DialogDescription>
-              Follow these steps to copy your rec.net token and paste it into
-              this app.
-            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {/* <div className="rounded-md border border-dashed p-3">
-              <p className="text-sm font-medium">Video Walkthrough</p>
+            <div className="rounded-md border p-4 space-y-3">
+              <Button asChild variant="outline" className="w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (electronAPI?.openExternal) {
+                      void electronAPI.openExternal(recNetTokenGuideUrl);
+                    }
+                  }}
+                >
+                  Open Token Guide on GitHub
+                  <ExternalLink className="ml-2 h-4 w-4" />
+                </button>
+              </Button>
               <p className="text-sm text-muted-foreground">
-                YouTube link placeholder: add video link here.
-              </p>
-            </div> */}
-
-            <div className="space-y-3">
-              <p className="text-sm">
-                This is the easiest method. It copies your token from rec.net
-                straight to your clipboard, so you can come back here and click
+                After following the guide, return here and click
                 <span className="font-medium"> {`"Paste Bearer Token"`}</span>.
               </p>
-              <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                <li>Open https://rec.net/ in your browser and sign in.</li>
-                <li>
-                  Stay on a rec.net page while logged in, then open the browser
-                  dev tools (F12) and select the Console tab.
-                </li>
-                <li>Paste this line into the console and press Enter:</li>
-              </ol>
-              <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs text-foreground">
-                <code>
-                  {
-                    'copy(JSON.parse(localStorage.getItem("na_current_user_session")).accessToken);'
-                  }
-                </code>
-              </pre>
-              <ol
-                className="list-decimal list-inside space-y-2 text-sm text-muted-foreground"
-                start={4}
-              >
-                <li>Your token should now be in your clipboard.</li>
-                <li>Return to this app.</li>
-                <li>Click `Paste Bearer Token`.</li>
-                <li>
-                  Enter the matching Rec Room username if you have not already.
-                </li>
-              </ol>
             </div>
 
             <div className="space-y-2 text-sm text-muted-foreground">
-              <p className="text-yellow-600 dark:text-yellow-400">
-                If your browser asks for permission to use the clipboard, allow
-                it.
-              </p>
               <p className="font-bold italic text-red-600 dark:text-red-400">
                 Keep your token private. Anyone with it may be able to access
                 your account data until it expires.
