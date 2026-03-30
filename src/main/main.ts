@@ -1012,7 +1012,10 @@ ipcMain.handle(
 );
 
 // Allowlist of URL prefixes that the renderer may open in the system browser
-const ALLOWED_EXTERNAL_URL_PREFIXES = ['https://rec.net/'];
+const ALLOWED_EXTERNAL_URL_PREFIXES = [
+  'https://rec.net/',
+  'https://github.com/Winston-Saarloos/rr-image-downloader/',
+];
 
 // Open external URL in system browser
 ipcMain.handle(

@@ -2,8 +2,9 @@
 
 Use this guide if you want to download private photos or profile picture history in RR Image Downloader.
 
-<!-- ## Video Walkthrough
-YouTube link placeholder: add video link here. -->
+## Video Walkthrough
+
+https://youtu.be/aEJrRHOrYDk?si=hCRcUmP4dEcDZCPn&t=227
 
 ## Before You Start
 
