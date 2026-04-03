@@ -2,7 +2,10 @@ import { AxiosRequestConfig } from 'axios';
 import { GenericResponse } from '../../models/GenericResponse';
 import { axiosRequest } from '../../utils/axiosRequest';
 
-export const UNIVERSAL_BATCH_SIZE = 100_000;
+// Metadata bulk endpoints are more reliable with smaller payloads. Large
+// requests make partial failures harder to diagnose and can silently leave
+// account/room/event caches incomplete on very large libraries. (originally was 100,000)
+export const UNIVERSAL_BATCH_SIZE = 2_500;
 export interface RecNetRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
