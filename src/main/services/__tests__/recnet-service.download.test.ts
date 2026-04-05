@@ -900,6 +900,75 @@ describe('RecNetService - Download Functionality', () => {
     });
   });
 
+  describe('collectPhotos metadata retries', () => {
+    const createMetadataPhoto = (id: string, imageName: string): ImageDto => ({
+      Id: id,
+      Type: 1,
+      Accessibility: 0,
+      AccessibilityLocked: false,
+      ImageName: imageName,
+      Description: '',
+      PlayerId: 'player-123',
+      TaggedPlayerIds: [],
+      RoomId: 'room-123',
+      PlayerEventId: 'event-123',
+      CreatedAt: new Date().toISOString(),
+      CheerCount: 0,
+      CommentCount: 0,
+    });
+
+    it('retries failed metadata page requests and recovers cleanly', async () => {
+      const progressUpdates: Progress[] = [];
+      service.on('progress-update', progress => progressUpdates.push(progress));
+      jest.spyOn(service, 'fetchAndSaveBulkData').mockResolvedValue({
+        accountsFetched: 0,
+        roomsFetched: 0,
+        eventsFetched: 0,
+      });
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+
+      mockPhotosController.fetchPlayerPhotos
+        .mockRejectedValueOnce(new Error('Temporary outage'))
+        .mockResolvedValueOnce([createMetadataPhoto('photo-1', 'image1.jpg')]);
+
+      const result = await service.collectPhotos(testAccountId);
+
+      expect(result.totalPhotos).toBe(1);
+      expect(mockPhotosController.fetchPlayerPhotos).toHaveBeenCalledTimes(2);
+      expect(
+        progressUpdates.some(progress =>
+          progress.lastIssue?.includes(
+            'Issue collecting user photos page 1: Temporary outage. Retry 1/3 will start now.'
+          )
+        )
+      ).toBe(true);
+      expect(
+        progressUpdates.some(progress =>
+          progress.lastIssue?.includes(
+            'Recovered user photos page 1 after 1 retry. Metadata collection is continuing.'
+          )
+        )
+      ).toBe(true);
+    });
+
+    it('fails metadata collection after exhausting retries', async () => {
+      jest.spyOn(service, 'fetchAndSaveBulkData').mockResolvedValue({
+        accountsFetched: 0,
+        roomsFetched: 0,
+        eventsFetched: 0,
+      });
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+      mockPhotosController.fetchPlayerPhotos.mockRejectedValue(
+        new Error('Temporary outage')
+      );
+
+      await expect(service.collectPhotos(testAccountId)).rejects.toThrow(
+        'Failed to collect user photos page 1 after 3 retries: Temporary outage'
+      );
+      expect(mockPhotosController.fetchPlayerPhotos).toHaveBeenCalledTimes(4);
+    });
+  });
+
   /**
    * Tests for the downloadFeedPhotos method
    *
@@ -995,6 +1064,52 @@ describe('RecNetService - Download Functionality', () => {
       expect(result.downloadStats.retryAttempts).toBe(3);
       expect(result.downloadResults[0].attempts).toBe(4);
       expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(4);
+    });
+
+    it('should stop the whole feed download when the disk is full', async () => {
+      service.updateSettings({
+        outputRoot: testOutputDir,
+        maxConcurrentDownloads: 1,
+      });
+
+      const feedPhotos: ImageDto[] = [
+        createMockFeedPhoto('feed-1', 'feed1.jpg'),
+        createMockFeedPhoto('feed-2', 'feed2.jpg'),
+      ];
+
+      const feedJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_feed.json`
+      );
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === feedJsonPath) return true;
+        return false;
+      });
+
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(feedPhotos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+
+      const diskFullError = Object.assign(
+        new Error('ENOSPC: no space left on device'),
+        { code: 'ENOSPC' }
+      );
+      (mockedFs.writeFile as jest.Mock)
+        .mockRejectedValueOnce(diskFullError)
+        .mockResolvedValue(undefined);
+
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: true,
+        value: new ArrayBuffer(1024),
+        status: 200,
+      } as GenericResponse<ArrayBuffer>);
+
+      await expect(service.downloadFeedPhotos(testAccountId)).rejects.toThrow(
+        /no space left on your disk/i
+      );
+      expect(mockedFs.writeFile).toHaveBeenCalledTimes(1);
+      expect(mockPhotosController.downloadPhoto).toHaveBeenCalledTimes(1);
     });
 
     /**
@@ -1113,7 +1228,7 @@ describe('RecNetService - Download Functionality', () => {
     });
   });
 
-  describe('downloadProfileHistory', () => {
+  describe('profile history preflight and download', () => {
     const createProfileHistoryEntry = (id: number, imageName: string) => ({
       Id: id,
       Type: 4,
@@ -1130,7 +1245,35 @@ describe('RecNetService - Download Functionality', () => {
       CommentCount: 0,
     });
 
-    it('saves the manifest and downloads profile history images', async () => {
+    it('collects the manifest before downloading profile history images', async () => {
+      const historyPayload = [
+        createProfileHistoryEntry(85498573, 'avatar1.jpg'),
+        createProfileHistoryEntry(85498574, 'avatar2.jpg'),
+      ];
+      const manifestPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_profile_history.json`
+      );
+
+      mockPhotosController.fetchProfilePhotoHistory.mockResolvedValue(historyPayload);
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+
+      const result = await service.collectProfileHistoryManifest(
+        testAccountId,
+        'token'
+      );
+
+      expect(result.saved).toBe(manifestPath);
+      expect(result.totalPhotos).toBe(2);
+      expect(mockedFs.writeJson).toHaveBeenCalledWith(
+        manifestPath,
+        historyPayload,
+        { spaces: 2 }
+      );
+    });
+
+    it('downloads profile history images from an existing manifest', async () => {
       const historyPayload = [
         createProfileHistoryEntry(85498573, 'avatar1.jpg'),
         createProfileHistoryEntry(85498574, 'avatar2.jpg'),
@@ -1146,13 +1289,18 @@ describe('RecNetService - Download Functionality', () => {
         `${testAccountId}_profile_history.json`
       );
 
-      mockPhotosController.fetchProfilePhotoHistory.mockResolvedValue(historyPayload);
       mockPhotosController.downloadPhoto.mockResolvedValue({
         success: true,
         value: new ArrayBuffer(512),
         status: 200,
       } as GenericResponse<ArrayBuffer>);
-      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === manifestPath) {
+          return true;
+        }
+        return false;
+      });
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(historyPayload);
       (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
 
       const result = await service.downloadProfileHistory(testAccountId, 'token');
@@ -1160,16 +1308,17 @@ describe('RecNetService - Download Functionality', () => {
       expect(result.profileHistoryDirectory).toBe(profileHistoryDir);
       expect(result.profileHistoryManifestPath).toBe(manifestPath);
       expect(result.downloadStats.newDownloads).toBe(2);
-      expect(mockedFs.writeJson).toHaveBeenCalledWith(
-        manifestPath,
-        historyPayload,
-        { spaces: 2 }
-      );
       expect(mockedFs.writeFile).toHaveBeenCalledTimes(2);
+      expect(mockPhotosController.fetchProfilePhotoHistory).not.toHaveBeenCalled();
     });
 
     it('skips already-downloaded profile history images on rerun', async () => {
       const historyPayload = [createProfileHistoryEntry(85498573, 'avatar1.jpg')];
+      const manifestPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_profile_history.json`
+      );
       const existingPhotoPath = path.join(
         testOutputDir,
         testAccountId,
@@ -1177,13 +1326,16 @@ describe('RecNetService - Download Functionality', () => {
         '85498573.jpg'
       );
 
-      mockPhotosController.fetchProfilePhotoHistory.mockResolvedValue(historyPayload);
       (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === manifestPath) {
+          return true;
+        }
         if (p === existingPhotoPath) {
           return true;
         }
         return false;
       });
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(historyPayload);
       (mockedFs.readdir as jest.Mock).mockResolvedValue(['85498573.jpg']);
 
       const result = await service.downloadProfileHistory(testAccountId, 'token');
@@ -1195,15 +1347,25 @@ describe('RecNetService - Download Functionality', () => {
 
     it('retries failed profile history downloads before reporting failure', async () => {
       const historyPayload = [createProfileHistoryEntry(85498573, 'avatar1.jpg')];
+      const manifestPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_profile_history.json`
+      );
 
-      mockPhotosController.fetchProfilePhotoHistory.mockResolvedValue(historyPayload);
       mockPhotosController.downloadPhoto.mockResolvedValue({
         success: false,
         value: null,
         status: 500,
         error: 'CDN failure',
       } as GenericResponse<ArrayBuffer>);
-      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+      (mockedFs.pathExists as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === manifestPath) {
+          return true;
+        }
+        return false;
+      });
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(historyPayload);
       (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
 
       const result = await service.downloadProfileHistory(testAccountId, 'token');
@@ -1221,14 +1383,13 @@ describe('RecNetService - Download Functionality', () => {
       ).rejects.toThrow('Profile picture history requires a valid access token.');
     });
 
-    it('rejects unauthorized profile history requests', async () => {
+    it('rejects unauthorized manifest collection requests', async () => {
       mockPhotosController.fetchProfilePhotoHistory.mockRejectedValue(
         new Error('HTTP 401: Unauthorized')
       );
-      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
 
       await expect(
-        service.downloadProfileHistory(testAccountId, 'token')
+        service.collectProfileHistoryManifest(testAccountId, 'token')
       ).rejects.toThrow('HTTP 401: Unauthorized');
     });
   });

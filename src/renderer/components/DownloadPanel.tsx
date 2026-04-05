@@ -65,6 +65,7 @@ interface DownloadPanelProps {
   onDraftChange?: (draft: DownloadDraft) => void;
   onCancel?: () => void;
   isDownloading?: boolean;
+  showCancel?: boolean;
   settings: RecNetSettings;
 }
 
@@ -78,6 +79,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   onDraftChange,
   onCancel,
   isDownloading = false,
+  showCancel = false,
   settings,
 }) => {
   const electronAPI = (window as unknown as { electronAPI?: any }).electronAPI;
@@ -795,7 +797,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               <Download className="mr-2 h-4 w-4" />
               Download
             </Button>
-            {isDownloading && onCancel && (
+            {showCancel && onCancel && (
               <Button
                 onClick={onCancel}
                 variant="destructive"

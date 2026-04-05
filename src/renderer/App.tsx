@@ -12,6 +12,7 @@ import {
   RecNetSettings,
   Progress,
   BulkDataRefreshOptions,
+  DownloadPreflightSummary,
   DownloadResult,
   UserFacingIncident,
 } from '../shared/types';
@@ -39,7 +40,15 @@ interface DownloadRequestState {
   refreshOptions: BulkDataRefreshOptions;
 }
 
+interface PendingDownloadPreflight {
+  accountId: string;
+  request: DownloadRequestState;
+  summary: DownloadPreflightSummary;
+}
+
 const EMPTY_DOWNLOAD_STEP = 'Nothing to download';
+const CLEAN_DOWNLOAD_FOLLOW_UP =
+  'If you take more photos in Rec Room, come back and run this download again. The app will only grab anything new.';
 
 function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
@@ -51,6 +60,7 @@ function App() {
 
   const [progress, setProgress] = useState<Progress>({
     isRunning: false,
+    phase: 'complete',
     currentStep: 'Ready',
     progress: 0,
     total: 0,
@@ -92,14 +102,14 @@ function App() {
       timestamp: string;
     }>
   >([]);
-  const [downloadDraft, setDownloadDraft] = useState<DownloadRequestState | null>(
-    null
-  );
+  const [downloadDraft, setDownloadDraft] =
+    useState<DownloadRequestState | null>(null);
+  const [pendingPreflight, setPendingPreflight] =
+    useState<PendingDownloadPreflight | null>(null);
   const [lastDownloadRequest, setLastDownloadRequest] =
     useState<DownloadRequestState | null>(null);
-  const [activeIncident, setActiveIncident] = useState<UserFacingIncident | null>(
-    null
-  );
+  const [activeIncident, setActiveIncident] =
+    useState<UserFacingIncident | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -125,8 +135,7 @@ function App() {
         setSettings(loadedSettings);
       }
     } catch (error) {
-      const msg =
-        error instanceof Error ? error.message : 'Unknown error';
+      const msg = error instanceof Error ? error.message : 'Unknown error';
       addLog(`Failed to load settings: ${msg}`, 'error');
       setActiveIncident(createUserIncident('settings', msg));
     }
@@ -136,7 +145,10 @@ function App() {
     if (window.electronAPI) {
       window.electronAPI.onProgress((event, progressData) => {
         setProgress(progressData);
-        if (progressData.statusLevel !== 'info' || progressData.issueCount > 0) {
+        if (
+          progressData.statusLevel !== 'info' ||
+          progressData.issueCount > 0
+        ) {
           setShowProgressPanel(true);
         }
       });
@@ -149,12 +161,8 @@ function App() {
         await window.electronAPI.loadPhotos(accountId);
       }
     } catch (error) {
-      const msg =
-        error instanceof Error ? error.message : 'Unknown error';
-      addLog(
-        `Failed to load photos for account ${accountId}: ${msg}`,
-        'error'
-      );
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      addLog(`Failed to load photos for account ${accountId}: ${msg}`, 'error');
       setActiveIncident(createUserIncident('photos', msg));
     }
   };
@@ -191,26 +199,23 @@ function App() {
     setActiveIncident(prev => (prev?.source === 'photos' ? null : prev));
   }, []);
 
-  const handleOpenPathInExplorer = useCallback(
-    async (folderPath: string) => {
-      if (!window.electronAPI?.openPathInExplorer) {
-        return;
-      }
-      const r = await window.electronAPI.openPathInExplorer(folderPath);
-      if (!r.success) {
-        const timestamp = new Date().toLocaleTimeString();
-        setLogs(prev => [
-          ...prev.slice(-99),
-          {
-            message: r.error ?? 'Could not open folder',
-            type: 'error' as const,
-            timestamp,
-          },
-        ]);
-      }
-    },
-    []
-  );
+  const handleOpenPathInExplorer = useCallback(async (folderPath: string) => {
+    if (!window.electronAPI?.openPathInExplorer) {
+      return;
+    }
+    const r = await window.electronAPI.openPathInExplorer(folderPath);
+    if (!r.success) {
+      const timestamp = new Date().toLocaleTimeString();
+      setLogs(prev => [
+        ...prev.slice(-99),
+        {
+          message: r.error ?? 'Could not open folder',
+          type: 'error' as const,
+          timestamp,
+        },
+      ]);
+    }
+  }, []);
 
   const addResult = useCallback(
     (operation: string, data: unknown, type: 'success' | 'error') => {
@@ -232,8 +237,14 @@ function App() {
       directoryLabel?: string;
       manifestPath?: string;
     }) => {
-      const { directoryLabel, directoryPath, label, manifestPath, operation, result } =
-        params;
+      const {
+        directoryLabel,
+        directoryPath,
+        label,
+        manifestPath,
+        operation,
+        result,
+      } = params;
       const stats = result.downloadStats;
 
       addLog(
@@ -263,6 +274,59 @@ function App() {
       addResult(operation, result, 'success');
     },
     [addLog, addResult]
+  );
+
+  const setCleanCompletionProgress = useCallback(
+    (currentStep: string, recentActivity = CLEAN_DOWNLOAD_FOLLOW_UP) => {
+      setProgress(prev => ({
+        ...prev,
+        isRunning: false,
+        phase: 'complete',
+        currentStep,
+        progress: 100,
+        total: 0,
+        current: 0,
+        statusLevel: 'info',
+        issueCount: 0,
+        retryAttempts: 0,
+        failedItems: 0,
+        recoveredAfterRetry: 0,
+        currentSource: undefined,
+        pageLabel: undefined,
+        activeItemLabel: undefined,
+        recentActivity,
+        lastIssue: undefined,
+        confirmation: undefined,
+      }));
+    },
+    []
+  );
+
+  const setConfirmationProgress = useCallback(
+    (summary: DownloadPreflightSummary) => {
+      setProgress(prev => ({
+        ...prev,
+        isRunning: false,
+        phase: 'confirm',
+        currentStep:
+          'Metadata is ready. Review this download before continuing.',
+        progress: 100,
+        total: summary.totalRemainingToDownload,
+        current: 0,
+        statusLevel: 'info',
+        issueCount: 0,
+        retryAttempts: 0,
+        failedItems: 0,
+        recoveredAfterRetry: 0,
+        currentSource: undefined,
+        pageLabel: undefined,
+        activeItemLabel: undefined,
+        recentActivity: undefined,
+        lastIssue: undefined,
+        confirmation: summary,
+      }));
+    },
+    []
   );
 
   const clearLogs = () => {
@@ -297,9 +361,11 @@ function App() {
     const previousProgress = previousProgressRef.current;
 
     if (previousProgress) {
-      getDownloadProgressLogEntries(previousProgress, progress).forEach(entry => {
-        addLog(entry.message, entry.type);
-      });
+      getDownloadProgressLogEntries(previousProgress, progress).forEach(
+        entry => {
+          addLog(entry.message, entry.type);
+        }
+      );
 
       const progressChanged =
         progress.issueCount !== previousProgress.issueCount ||
@@ -319,6 +385,10 @@ function App() {
         const incident = buildDownloadProgressIncident(progress);
         if (incident) {
           setActiveIncident(incident);
+        } else {
+          setActiveIncident(prev =>
+            prev?.source === 'download' ? null : prev
+          );
         }
       }
     }
@@ -339,6 +409,7 @@ function App() {
     }
 
     setActiveIncident(null);
+    setPendingPreflight(null);
 
     const {
       forceAccountsRefresh = false,
@@ -360,10 +431,11 @@ function App() {
     setLastDownloadRequest(requestState);
 
     setIsDownloading(true);
-    addLog(`Starting download for username: ${username}`, 'info');
+    addLog(`Starting metadata collection for username: ${username}`, 'info');
     setProgress({
       isRunning: true,
-      currentStep: 'Starting download...',
+      phase: 'metadata',
+      currentStep: 'Starting metadata collection...',
       progress: 0,
       total: 0,
       current: 0,
@@ -372,11 +444,14 @@ function App() {
       retryAttempts: 0,
       failedItems: 0,
       recoveredAfterRetry: 0,
+      currentSource: undefined,
+      pageLabel: undefined,
+      activeItemLabel: undefined,
+      recentActivity: 'Preparing download metadata...',
+      confirmation: undefined,
     });
 
     try {
-      let encounteredEmptySource = false;
-
       // Update settings with new file path
       if (window.electronAPI) {
         await window.electronAPI.updateSettings({ outputRoot: filePath });
@@ -389,10 +464,7 @@ function App() {
           username,
           token.trim() || undefined
         );
-        if (
-          !searchResult.success ||
-          !searchResult.data
-        ) {
+        if (!searchResult.success || !searchResult.data) {
           throw new Error('Account not found');
         }
 
@@ -430,14 +502,15 @@ function App() {
         for (const source of selectedSources) {
           if (source === 'user-feed') {
             addLog('Collecting feed photos metadata...', 'info');
-            const collectFeedResult = await window.electronAPI.collectFeedPhotos({
-              accountId,
-              token: token.trim() || undefined,
-              incremental: true,
-              forceAccountsRefresh,
-              forceRoomsRefresh,
-              forceEventsRefresh,
-            });
+            const collectFeedResult =
+              await window.electronAPI.collectFeedPhotos({
+                accountId,
+                token: token.trim() || undefined,
+                incremental: true,
+                forceAccountsRefresh,
+                forceRoomsRefresh,
+                forceEventsRefresh,
+              });
 
             if (!collectFeedResult.success) {
               throw new Error(
@@ -446,57 +519,10 @@ function App() {
             }
 
             const totalFeedPhotos = collectFeedResult.data?.totalPhotos || 0;
-            if (totalFeedPhotos === 0) {
-              const emptyMessage =
-                'This account does not have any feed photos to download.';
-              addLog(emptyMessage, 'warning');
-              setShowProgressPanel(true);
-              setProgress(prev => ({
-                ...prev,
-                isRunning: false,
-                currentStep: EMPTY_DOWNLOAD_STEP,
-                progress: 100,
-                total: 0,
-                current: 0,
-                statusLevel: 'warning',
-                issueCount: 0,
-                retryAttempts: 0,
-                failedItems: 0,
-                recoveredAfterRetry: 0,
-                lastIssue: emptyMessage,
-              }));
-              setActiveIncident(
-                createUserIncident('download', emptyMessage, {
-                  severity: 'warning',
-                })
-              );
-              encounteredEmptySource = true;
-              continue;
-            }
-
-            addLog(`Collected ${totalFeedPhotos} feed photos metadata`, 'success');
-
-            addLog('Downloading feed photos...', 'info');
-            const downloadFeedResult =
-              await window.electronAPI.downloadFeedPhotos({
-                accountId,
-                token: token.trim() || undefined,
-              });
-
-            if (!downloadFeedResult.success || !downloadFeedResult.data) {
-              throw new Error(
-                downloadFeedResult.error || 'Failed to download feed photos'
-              );
-            }
-
-            reportDownloadResult({
-              operation: 'User Feed Download',
-              label: 'Feed download',
-              result: downloadFeedResult.data,
-              directoryPath: downloadFeedResult.data.feedPhotosDirectory,
-              directoryLabel: 'Feed photos saved to',
-            });
-            loadPhotosForAccount(accountId);
+            addLog(
+              `Collected feed metadata for ${totalFeedPhotos} image(s).`,
+              'success'
+            );
             continue;
           }
 
@@ -517,56 +543,10 @@ function App() {
             }
 
             const totalPhotos = collectPhotosResult.data?.totalPhotos || 0;
-            if (totalPhotos === 0) {
-              const emptyMessage =
-                'This account does not have any user photos to download.';
-              addLog(emptyMessage, 'warning');
-              setShowProgressPanel(true);
-              setProgress(prev => ({
-                ...prev,
-                isRunning: false,
-                currentStep: EMPTY_DOWNLOAD_STEP,
-                progress: 100,
-                total: 0,
-                current: 0,
-                statusLevel: 'warning',
-                issueCount: 0,
-                retryAttempts: 0,
-                failedItems: 0,
-                recoveredAfterRetry: 0,
-                lastIssue: emptyMessage,
-              }));
-              setActiveIncident(
-                createUserIncident('download', emptyMessage, {
-                  severity: 'warning',
-                })
-              );
-              encounteredEmptySource = true;
-              continue;
-            }
-
-            addLog(`Collected ${totalPhotos} photos metadata`, 'success');
-
-            addLog('Downloading user photos...', 'info');
-            const downloadPhotosResult = await window.electronAPI.downloadPhotos({
-              accountId,
-              token: token.trim() || undefined,
-            });
-
-            if (!downloadPhotosResult.success || !downloadPhotosResult.data) {
-              throw new Error(
-                downloadPhotosResult.error || 'Failed to download photos'
-              );
-            }
-
-            reportDownloadResult({
-              operation: 'User Photos Download',
-              label: 'User photos download',
-              result: downloadPhotosResult.data,
-              directoryPath: downloadPhotosResult.data.photosDirectory,
-              directoryLabel: 'User photos saved to',
-            });
-            loadPhotosForAccount(accountId);
+            addLog(
+              `Collected user photo metadata for ${totalPhotos} image(s).`,
+              'success'
+            );
             continue;
           }
 
@@ -577,45 +557,70 @@ function App() {
               );
             }
 
-            addLog('Downloading profile picture history...', 'info');
-            const downloadProfileHistoryResult =
-              await window.electronAPI.downloadProfileHistory({
+            addLog('Collecting profile picture history metadata...', 'info');
+            const collectProfileHistoryResult =
+              await window.electronAPI.collectProfileHistoryManifest({
                 accountId,
                 token: token.trim(),
               });
 
             if (
-              !downloadProfileHistoryResult.success ||
-              !downloadProfileHistoryResult.data
+              !collectProfileHistoryResult.success ||
+              !collectProfileHistoryResult.data
             ) {
               throw new Error(
-                downloadProfileHistoryResult.error ||
-                  'Failed to download profile picture history'
+                collectProfileHistoryResult.error ||
+                  'Failed to collect profile picture history metadata'
               );
             }
 
-            reportDownloadResult({
-              operation: 'Profile Picture History Download',
-              label: 'Profile picture history download',
-              result: downloadProfileHistoryResult.data,
-              directoryPath:
-                downloadProfileHistoryResult.data.profileHistoryDirectory,
-              directoryLabel: 'Profile picture history saved to',
-              manifestPath:
-                downloadProfileHistoryResult.data.profileHistoryManifestPath,
-            });
+            addLog(
+              `Collected profile picture history metadata for ${
+                collectProfileHistoryResult.data.totalPhotos || 0
+              } image(s).`,
+              'success'
+            );
           }
         }
 
-        if (
-          downloadSources.downloadUserFeed ||
-          downloadSources.downloadUserPhotos
-        ) {
-          loadPhotosForAccount(accountId);
+        const preflightResult = await window.electronAPI.buildDownloadPreflight(
+          {
+            accountId,
+            downloadSources,
+          }
+        );
+
+        if (!preflightResult.success || !preflightResult.data) {
+          throw new Error(
+            preflightResult.error || 'Failed to prepare the download summary'
+          );
         }
-        if (!encounteredEmptySource) {
-          setActiveIncident(null);
+
+        const summary = preflightResult.data;
+        setShowProgressPanel(true);
+        setActiveIncident(null);
+
+        if (summary.totalRemainingToDownload === 0) {
+          addLog(
+            'Metadata saved. Everything selected is already on disk.',
+            'success'
+          );
+          setCleanCompletionProgress(
+            'Metadata saved. No new images need downloading.'
+          );
+          return;
         }
+
+        setPendingPreflight({
+          accountId,
+          request: requestState,
+          summary,
+        });
+        setConfirmationProgress(summary);
+        addLog(
+          `Metadata saved. Review ${summary.totalRemainingToDownload} new image(s) before downloading.`,
+          'info'
+        );
       }
     } catch (error) {
       const errorMessage =
@@ -627,12 +632,14 @@ function App() {
         setProgress(prev => ({
           ...prev,
           isRunning: false,
+          phase: 'cancelled',
           currentStep: 'Cancelled',
           total: 0,
           current: 0,
           statusLevel: 'info',
           issueCount: 0,
           failedItems: 0,
+          confirmation: undefined,
           lastIssue: undefined,
         }));
         setActiveIncident(
@@ -644,27 +651,26 @@ function App() {
         setProgress(prev => ({
           ...prev,
           isRunning: false,
+          phase: 'complete',
           currentStep: EMPTY_DOWNLOAD_STEP,
           progress: 100,
           total: 0,
           current: 0,
-          statusLevel: 'warning',
+          statusLevel: 'info',
           issueCount: 0,
           failedItems: 0,
+          confirmation: undefined,
           lastIssue: classifiedError.detail,
         }));
-        setActiveIncident(
-          createUserIncident('download', errorMessage, { severity: 'warning' })
-        );
+        setActiveIncident(null);
       } else {
         addLog(`Download failed: ${errorMessage}`, 'error');
-        classifiedError.guidance.forEach(message =>
-          addLog(message, 'warning')
-        );
+        classifiedError.guidance.forEach(message => addLog(message, 'warning'));
         setShowProgressPanel(true);
         setProgress(prev => ({
           ...prev,
           isRunning: false,
+          phase: 'failed',
           currentStep: 'Failed',
           progress: 100,
           total: 0,
@@ -672,6 +678,7 @@ function App() {
           statusLevel: 'error',
           issueCount: Math.max(prev.issueCount, 1),
           failedItems: Math.max(prev.failedItems, 1),
+          confirmation: undefined,
           lastIssue: errorMessage,
         }));
         setActiveIncident(createUserIncident('download', errorMessage));
@@ -683,24 +690,188 @@ function App() {
       }
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  const handleConfirmDownload = useCallback(async () => {
+    if (!pendingPreflight || !window.electronAPI) {
+      return;
+    }
+
+    const { accountId, request, summary } = pendingPreflight;
+    const selectedSources = getSelectedDownloadSources(request.downloadSources);
+    let failedDownloads = 0;
+    let ranPhotoDownloads = false;
+
+    setPendingPreflight(null);
+    setActiveIncident(null);
+    setIsDownloading(true);
+    setShowProgressPanel(true);
+    addLog('Image download confirmed. Starting file downloads...', 'info');
+
+    try {
+      for (const source of selectedSources) {
+        const sourceSummary = summary.sourceSummaries.find(
+          item => item.source === source
+        );
+        if (!sourceSummary || sourceSummary.totalImages === 0) {
+          continue;
+        }
+
+        if (source === 'user-feed') {
+          addLog('Downloading feed photos...', 'info');
+          const downloadFeedResult =
+            await window.electronAPI.downloadFeedPhotos({
+              accountId,
+              token: request.token.trim() || undefined,
+            });
+
+          if (!downloadFeedResult.success || !downloadFeedResult.data) {
+            throw new Error(
+              downloadFeedResult.error || 'Failed to download feed photos'
+            );
+          }
+
+          ranPhotoDownloads = true;
+          failedDownloads +=
+            downloadFeedResult.data.downloadStats.failedDownloads;
+          reportDownloadResult({
+            operation: 'User Feed Download',
+            label: 'Feed download',
+            result: downloadFeedResult.data,
+            directoryPath: downloadFeedResult.data.feedPhotosDirectory,
+            directoryLabel: 'Feed photos saved to',
+          });
+          continue;
+        }
+
+        if (source === 'user-photos') {
+          addLog('Downloading user photos...', 'info');
+          const downloadPhotosResult = await window.electronAPI.downloadPhotos({
+            accountId,
+            token: request.token.trim() || undefined,
+          });
+
+          if (!downloadPhotosResult.success || !downloadPhotosResult.data) {
+            throw new Error(
+              downloadPhotosResult.error || 'Failed to download photos'
+            );
+          }
+
+          ranPhotoDownloads = true;
+          failedDownloads +=
+            downloadPhotosResult.data.downloadStats.failedDownloads;
+          reportDownloadResult({
+            operation: 'User Photos Download',
+            label: 'User photos download',
+            result: downloadPhotosResult.data,
+            directoryPath: downloadPhotosResult.data.photosDirectory,
+            directoryLabel: 'User photos saved to',
+          });
+          continue;
+        }
+
+        if (source === 'profile-history') {
+          addLog('Downloading profile picture history...', 'info');
+          const downloadProfileHistoryResult =
+            await window.electronAPI.downloadProfileHistory({
+              accountId,
+              token: request.token.trim(),
+            });
+
+          if (
+            !downloadProfileHistoryResult.success ||
+            !downloadProfileHistoryResult.data
+          ) {
+            throw new Error(
+              downloadProfileHistoryResult.error ||
+                'Failed to download profile picture history'
+            );
+          }
+
+          ranPhotoDownloads = true;
+          failedDownloads +=
+            downloadProfileHistoryResult.data.downloadStats.failedDownloads;
+          reportDownloadResult({
+            operation: 'Profile Picture History Download',
+            label: 'Profile picture history download',
+            result: downloadProfileHistoryResult.data,
+            directoryPath:
+              downloadProfileHistoryResult.data.profileHistoryDirectory,
+            directoryLabel: 'Profile picture history saved to',
+            manifestPath:
+              downloadProfileHistoryResult.data.profileHistoryManifestPath,
+          });
+        }
+      }
+
+      if (
+        request.downloadSources.downloadUserFeed ||
+        request.downloadSources.downloadUserPhotos
+      ) {
+        loadPhotosForAccount(accountId);
+      }
+
+      if (!ranPhotoDownloads) {
+        setCleanCompletionProgress(
+          'Metadata saved. No new images needed downloading.'
+        );
+      } else if (failedDownloads === 0) {
+        setActiveIncident(null);
+        setCleanCompletionProgress('Completed download');
+        addLog(
+          'Download complete. Run this again later to pick up anything new from Rec Room.',
+          'success'
+        );
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Download failed';
+      addLog(`Download failed: ${errorMessage}`, 'error');
       setProgress(prev => ({
         ...prev,
         isRunning: false,
-        currentStep:
-          prev.currentStep === 'Cancelled'
-            ? 'Cancelled'
-            : prev.currentStep === 'Failed'
-              ? 'Failed'
-              : prev.currentStep === EMPTY_DOWNLOAD_STEP
-                ? EMPTY_DOWNLOAD_STEP
-              : 'Complete',
-        progress:
-          prev.currentStep === 'Cancelled' ? prev.progress : 100,
+        phase: 'failed',
+        currentStep: 'Failed',
+        progress: 100,
         total: 0,
         current: 0,
+        statusLevel: 'error',
+        issueCount: Math.max(prev.issueCount, 1),
+        failedItems: Math.max(prev.failedItems, 1),
+        confirmation: undefined,
+        lastIssue: errorMessage,
       }));
+      setActiveIncident(createUserIncident('download', errorMessage));
+      addResult(
+        'Download',
+        toOperationErrorData(errorMessage, 'download'),
+        'error'
+      );
+    } finally {
+      setIsDownloading(false);
     }
-  };
+  }, [
+    addLog,
+    addResult,
+    loadPhotosForAccount,
+    pendingPreflight,
+    reportDownloadResult,
+    setCleanCompletionProgress,
+  ]);
+
+  const handleSkipDownload = useCallback(() => {
+    if (!pendingPreflight) {
+      return;
+    }
+
+    addLog('Metadata saved. Image download skipped.', 'info');
+    setPendingPreflight(null);
+    setActiveIncident(null);
+    setCleanCompletionProgress(
+      'Metadata saved. Image download was skipped for now.'
+    );
+  }, [addLog, pendingPreflight, setCleanCompletionProgress]);
 
   const handleRetryDownload = useCallback(async () => {
     if (!retryRequest || isDownloading) {
@@ -747,6 +918,7 @@ function App() {
           setProgress(prev => ({
             ...prev,
             isRunning: false,
+            phase: 'cancelled',
             currentStep: 'Cancelled',
             progress: 0,
             total: 0,
@@ -798,25 +970,25 @@ function App() {
     <FavoritesProvider>
       <div className="min-h-screen bg-background">
         {/* Custom Title Bar */}
-          <CustomTitleBar
-            onDownloadClick={() => setDownloadPanelOpen(true)}
-            onStatsClick={() => setStatsDialogOpen(true)}
-            settings={settings}
-            onUpdateSettings={updateSettings}
-            logs={logs}
-            results={results}
-            onClearLogs={clearLogs}
-            currentAccountId={currentAccountId}
-            debugMenuOpen={debugMenuOpen}
-            onDebugMenuOpenChange={setDebugMenuOpen}
-            resultsScrollRequestId={resultsScrollRequestId}
-            onRetryDownload={handleRetryDownload}
-            canRetryDownload={canRetryDownload}
-            isRetryingDownload={isDownloading}
-            onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
-            onOpenOutputFolder={handleOpenPathInExplorer}
-            outputRoot={settings.outputRoot}
-          />
+        <CustomTitleBar
+          onDownloadClick={() => setDownloadPanelOpen(true)}
+          onStatsClick={() => setStatsDialogOpen(true)}
+          settings={settings}
+          onUpdateSettings={updateSettings}
+          logs={logs}
+          results={results}
+          onClearLogs={clearLogs}
+          currentAccountId={currentAccountId}
+          debugMenuOpen={debugMenuOpen}
+          onDebugMenuOpenChange={setDebugMenuOpen}
+          resultsScrollRequestId={resultsScrollRequestId}
+          onRetryDownload={handleRetryDownload}
+          canRetryDownload={canRetryDownload}
+          isRetryingDownload={isDownloading}
+          onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
+          onOpenOutputFolder={handleOpenPathInExplorer}
+          outputRoot={settings.outputRoot}
+        />
 
         <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden pt-14">
           <ErrorRecoveryBanner
@@ -840,7 +1012,8 @@ function App() {
               onDownload={handleDownload}
               onDraftChange={handleDownloadDraftChange}
               onCancel={handleCancelDownload}
-              isDownloading={isDownloading}
+              isDownloading={isDownloading || !!pendingPreflight}
+              showCancel={isDownloading}
               settings={settings}
             />
           </ErrorBoundary>
@@ -863,6 +1036,8 @@ function App() {
                 onClose={() => setShowProgressPanel(false)}
                 onOpenOperationResults={openOperationResults}
                 onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
+                onConfirmDownload={handleConfirmDownload}
+                onSkipDownload={handleSkipDownload}
                 onRetryDownload={handleRetryDownload}
                 canRetryDownload={canRetryDownload}
                 isRetrying={isDownloading}

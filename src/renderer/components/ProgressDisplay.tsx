@@ -14,6 +14,7 @@ import {
   X,
   AlertTriangle,
   AlertCircle,
+  Download,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 
@@ -22,9 +23,32 @@ interface ProgressDisplayProps {
   onClose?: () => void;
   onOpenOperationResults?: () => void;
   onOpenDownloadPanel?: () => void;
+  onConfirmDownload?: () => void | Promise<void>;
+  onSkipDownload?: () => void;
   onRetryDownload?: () => void | Promise<void>;
   canRetryDownload?: boolean;
   isRetrying?: boolean;
+}
+
+function formatCount(value: number): string {
+  return value.toLocaleString();
+}
+
+function formatImageCount(value: number): string {
+  return `${formatCount(value)} new image${value === 1 ? '' : 's'}`;
+}
+
+function getDownloadPhaseLabel(source?: ProgressType['currentSource']): string {
+  switch (source) {
+    case 'user-feed':
+      return 'Feed';
+    case 'user-photos':
+      return 'User';
+    case 'profile-history':
+      return 'Profile History';
+    default:
+      return 'Image';
+  }
 }
 
 export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
@@ -32,6 +56,8 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   onClose,
   onOpenOperationResults,
   onOpenDownloadPanel,
+  onConfirmDownload,
+  onSkipDownload,
   onRetryDownload,
   canRetryDownload = false,
   isRetrying = false,
@@ -40,25 +66,26 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
     Math.max(Math.round(progress.progress ?? 0), 0),
     100
   );
-  const hasTotals = progress.total > 0;
-  const isComplete = !progress.isRunning && percent >= 100;
+  const isConfirming = progress.phase === 'confirm' && !!progress.confirmation;
+  const hasTotals = progress.total > 0 && !isConfirming;
   const isCancelled =
-    !progress.isRunning && progress.currentStep === 'Cancelled';
-  const hasIssues = progress.issueCount > 0;
-  const hasFailures =
+    progress.phase === 'cancelled' ||
+    (!progress.isRunning && progress.currentStep === 'Cancelled');
+  const isComplete = progress.phase === 'complete' && !progress.isRunning;
+  const hasOutstandingFailures =
     !isCancelled &&
-    (progress.failedItems > 0 || progress.statusLevel === 'error');
-  const isRetryableCompletion =
-    !progress.isRunning &&
-    progress.currentStep === 'Complete' &&
-    progress.failedItems > 0;
-  const showErrorTone = hasFailures && !isRetryableCompletion;
-  const showWarningTone = hasIssues || isRetryableCompletion;
+    (progress.phase === 'failed' ||
+      progress.failedItems > 0 ||
+      progress.statusLevel === 'error');
+  const hasActiveWarnings =
+    progress.isRunning && !hasOutstandingFailures && progress.issueCount > 0;
+  const showErrorTone = hasOutstandingFailures;
+  const showWarningTone = hasActiveWarnings;
   const [indeterminateValue, setIndeterminateValue] = useState(15);
   const directionRef = useRef<1 | -1>(1);
 
   useEffect(() => {
-    if (!progress.isRunning || hasTotals) {
+    if (!progress.isRunning || hasTotals || isConfirming) {
       setIndeterminateValue(15);
       directionRef.current = 1;
       return;
@@ -83,7 +110,7 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
     }, 120);
 
     return () => clearInterval(interval);
-  }, [progress.isRunning, hasTotals]);
+  }, [progress.isRunning, hasTotals, isConfirming]);
 
   const isIdle =
     !progress.isRunning &&
@@ -113,16 +140,65 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
       : progress.isRunning
         ? 'text-primary'
         : 'text-muted-foreground';
-  const canOpenIssueDetails =
-    (showErrorTone || isRetryableCompletion) && !!onOpenOperationResults;
-  const issueMessage = isRetryableCompletion
-    ? 'The download finished, but some images were missed. Retry the download now to grab any missed images.'
-    : progress.lastIssue ||
-      'Some files are retrying. The download is still moving, but it is not clean.';
 
   if (isIdle) {
     return null;
   }
+
+  const confirmation = progress.confirmation;
+  const issueMessage =
+    progress.lastIssue ||
+    'The app hit a problem and is retrying or waiting for attention.';
+  const completionFollowUpMessage =
+    'Want to verify the download or grab any new photos later? Just run the download again and the app will only download new content.';
+  const downloadPhaseMessage =
+    progress.phase === 'download'
+      ? `Downloading ${getDownloadPhaseLabel(progress.currentSource)} Images...`
+      : undefined;
+  const activityMessage = isConfirming
+    ? undefined
+    : progress.phase === 'download'
+      ? undefined
+    : isComplete && !showErrorTone && !isCancelled
+      ? completionFollowUpMessage
+      : progress.recentActivity;
+  const canOpenIssueDetails =
+    (showErrorTone || showWarningTone) && !!onOpenOperationResults;
+  const totalPrivateImagesToDownload =
+    confirmation?.sourceSummaries.reduce(
+      (sum, source) => sum + (source.privateImagesToDownload ?? 0),
+      0
+    ) ?? 0;
+  const description = isCancelled
+    ? 'You cancelled this run. You can start a new download anytime.'
+    : isComplete && !showErrorTone
+      ? ''
+    : isConfirming
+      ? ''
+      : downloadPhaseMessage
+        ? downloadPhaseMessage
+      : progress.currentStep || (isComplete ? 'Complete' : 'Ready');
+  const titleText =
+    isComplete && !showErrorTone && !isCancelled
+      ? 'Download Completed'
+      : 'Download Progress';
+  const statusText = isCancelled
+    ? 'Cancelled'
+    : isConfirming
+      ? 'Ready to download'
+      : progress.isRunning
+        ? showErrorTone
+          ? 'Issues detected'
+          : showWarningTone
+            ? 'Retrying'
+            : progress.phase === 'metadata'
+              ? 'Collecting metadata'
+              : 'Downloading'
+        : showErrorTone
+          ? 'Complete with failures'
+          : isComplete
+            ? 'Complete'
+            : 'Idle';
 
   return (
     <Card className={cardToneClass}>
@@ -135,16 +211,14 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
               <AlertCircle className="h-5 w-5 text-red-500" />
             ) : showWarningTone ? (
               <AlertTriangle className="h-5 w-5 text-yellow-500" />
+            ) : isConfirming ? (
+              <Download className="h-5 w-5 text-primary" />
             ) : progress.isRunning ? (
               <Loader2 className="h-5 w-5 animate-spin" />
-            ) : null}
-            {isComplete &&
-              !progress.isRunning &&
-              !showWarningTone &&
-              !isCancelled && (
-                <CheckCircle2 className="h-5 w-5 text-green-500" />
-              )}
-            Download Progress
+            ) : (
+              <CheckCircle2 className="h-5 w-5 text-green-500" />
+            )}
+            {titleText}
           </span>
           {onClose && (
             <Button
@@ -157,16 +231,10 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
             </Button>
           )}
         </CardTitle>
-        <CardDescription>
-          {isCancelled
-            ? 'You cancelled this run. You can start a new download anytime.'
-            : isRetryableCompletion
-              ? 'Download complete. Retry the same download to grab any missed images.'
-            : progress.currentStep || (isComplete ? 'Complete' : 'Ready')}
-        </CardDescription>
+        {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
-      <CardContent className="space-y-4">
-        {showWarningTone && !isCancelled && (
+      <CardContent className="max-h-[calc(100vh-8rem)] space-y-4 overflow-y-auto px-6 pb-6 pt-0">
+        {(showErrorTone || showWarningTone) && !isCancelled && (
           <div
             className={
               showErrorTone
@@ -180,16 +248,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
             onClick={canOpenIssueDetails ? onOpenOperationResults : undefined}
             role={canOpenIssueDetails ? 'button' : undefined}
             tabIndex={canOpenIssueDetails ? 0 : undefined}
-            onKeyDown={
-              canOpenIssueDetails
-                ? event => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      onOpenOperationResults?.();
-                    }
-                  }
-                : undefined
-            }
           >
             <div className="flex items-start gap-3">
               {showErrorTone ? (
@@ -208,9 +266,7 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
                   >
                     {showErrorTone
                       ? 'Download issues need attention'
-                      : isRetryableCompletion
-                        ? 'Download completed with missed images'
-                        : 'Download issues detected'}
+                      : 'Download issues detected'}
                   </p>
                   <p
                     className={
@@ -221,17 +277,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
                   >
                     {issueMessage}
                   </p>
-                  {canOpenIssueDetails && (
-                    <p
-                      className={
-                        showErrorTone
-                          ? 'pt-1 text-xs font-medium text-red-700 underline underline-offset-2 dark:text-red-300'
-                          : 'pt-1 text-xs font-medium text-yellow-800 underline underline-offset-2 dark:text-yellow-200'
-                      }
-                    >
-                      Click this area to jump to Operation Results.
-                    </p>
-                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
@@ -251,7 +296,9 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
 
                 {(onOpenOperationResults ||
                   onOpenDownloadPanel ||
-                  (onRetryDownload && canRetryDownload)) && (
+                  (onRetryDownload &&
+                    canRetryDownload &&
+                    !progress.isRunning)) && (
                   <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:flex-wrap">
                     {onOpenOperationResults && (
                       <Button
@@ -302,28 +349,39 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
           </div>
         )}
 
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Status</span>
-          <span className={statusToneClass}>
-            {isCancelled
-              ? 'Cancelled'
-              : progress.isRunning
-                ? showErrorTone
-                  ? 'Issues detected'
-                  : showWarningTone
-                    ? 'Retrying with warnings'
-                    : 'In progress'
-                : isComplete
-                  ? isRetryableCompletion
-                    ? 'Complete with missed images'
-                    : showErrorTone
-                      ? 'Complete with failures'
-                      : showWarningTone
-                      ? 'Complete with warnings'
-                      : 'Complete'
-                  : 'Idle'}
-          </span>
-        </div>
+        {!isConfirming && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Status</span>
+            <span className={statusToneClass}>{statusText}</span>
+          </div>
+        )}
+
+        {progress.phase === 'metadata' &&
+          (progress.pageLabel || progress.currentSource) && (
+            <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+              {progress.currentSource && (
+                <div className="rounded border border-border/70 px-2 py-1">
+                  Source: {progress.currentSource}
+                </div>
+              )}
+              {progress.pageLabel && (
+                <div className="rounded border border-border/70 px-2 py-1">
+                  Step: {progress.pageLabel}
+                </div>
+              )}
+              {progress.activeItemLabel && (
+                <div className="rounded border border-border/70 px-2 py-1">
+                  Item: {progress.activeItemLabel}
+                </div>
+              )}
+            </div>
+          )}
+
+        {activityMessage && (
+          <div className="rounded border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+            {activityMessage}
+          </div>
+        )}
 
         {hasTotals && (
           <>
@@ -337,13 +395,101 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
           </>
         )}
 
-        {!hasTotals && (
-          <>
-            <Progress value={barValue} className={`h-2 ${progressToneClass}`} />
-            <div className="text-sm text-muted-foreground">
-              {progress.currentStep || 'Waiting to start'}
+        {!hasTotals && progress.isRunning && !isConfirming && (
+          <Progress value={barValue} className={`h-2 ${progressToneClass}`} />
+        )}
+
+        {isConfirming && confirmation && (
+          <div className="space-y-4 rounded-2xl bg-muted/20 p-4">
+            {totalPrivateImagesToDownload === 0 && (
+              <div className="rounded-2xl bg-yellow-50/40 px-4 py-3 text-sm text-yellow-800/80 ring-1 ring-yellow-200/60 dark:bg-yellow-950/20 dark:text-yellow-300/75 dark:ring-yellow-900/50">
+                No private photos are included in this download.
+              </div>
+            )}
+
+            <div className="space-y-3 rounded-2xl bg-background/80 px-5 py-5 shadow-sm ring-1 ring-border/50">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                Download Summary
+              </p>
+              <div className="space-y-1">
+                <h3 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                  {formatImageCount(confirmation.totalRemainingToDownload)}
+                </h3>
+              </div>
+              <div className="space-y-1 text-sm text-muted-foreground">
+                <p>
+                  {formatCount(confirmation.totalImages)} total images found
+                </p>
+                <p>
+                  {formatCount(confirmation.totalAlreadyOnDisk)} are already on
+                  disk and will be skipped automatically
+                </p>
+              </div>
             </div>
-          </>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {confirmation.sourceSummaries.map(source => (
+                <div
+                  key={source.source}
+                  className="space-y-3 rounded-2xl bg-background/80 px-4 py-4 shadow-sm ring-1 ring-border/50"
+                >
+                  <div className="space-y-1">
+                    <h4 className="text-base font-semibold">{source.label}</h4>
+                    <p className="text-2xl font-semibold tracking-tight">
+                      {formatImageCount(source.remainingToDownload)}
+                    </p>
+                  </div>
+                  <div className="space-y-1 text-sm text-muted-foreground">
+                    <p>Total found: {formatCount(source.totalImages)}</p>
+                    <p>
+                      {formatCount(source.alreadyOnDisk)} already on disk and
+                      will be skipped
+                    </p>
+                  </div>
+                  {(source.source === 'user-feed' ||
+                    source.source === 'user-photos') &&
+                    (source.privateImagesToDownload ?? 0) > 0 && (
+                      <p className="text-sm text-yellow-800 dark:text-yellow-300">
+                        Includes{' '}
+                        {formatCount(source.privateImagesToDownload ?? 0)}{' '}
+                        private image
+                        {(source.privateImagesToDownload ?? 0) === 1 ? '' : 's'}
+                        .
+                      </p>
+                    )}
+                </div>
+              ))}
+            </div>
+
+            {(onConfirmDownload || onSkipDownload) && (
+              <div className="space-y-3 pt-1">
+                <p className="text-sm text-muted-foreground">
+                  Files already on disk will be skipped automatically.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  {onConfirmDownload && (
+                    <Button
+                      onClick={() => void onConfirmDownload()}
+                      className="sm:flex-1"
+                    >
+                      Download{' '}
+                      {formatCount(confirmation.totalRemainingToDownload)} image
+                      {confirmation.totalRemainingToDownload === 1 ? '' : 's'}
+                    </Button>
+                  )}
+                  {onSkipDownload && (
+                    <Button
+                      variant="outline"
+                      onClick={onSkipDownload}
+                      className="sm:flex-1"
+                    >
+                      Cancel Download
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {isCancelled && !progress.isRunning && (
@@ -359,7 +505,7 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
                 disabled={isRetrying}
                 onClick={() => void onRetryDownload()}
               >
-                {isRetrying ? 'Starting…' : 'Run download again'}
+                {isRetrying ? 'Starting...' : 'Run download again'}
               </Button>
             )}
           </div>

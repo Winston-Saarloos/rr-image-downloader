@@ -6,7 +6,7 @@
  * - File sizes are tracked accurately
  * - Directories are created as needed
  * - Multiple files can be saved in sequence
- * - File write errors are handled gracefully
+   * - Out-of-space write errors stop the download with a clear error
  * - Metadata JSON files are saved with proper formatting
  *
  * These tests ensure data persistence works correctly and files are
@@ -224,11 +224,10 @@ describe('RecNetService - File Saving Functionality', () => {
     });
 
     /**
-     * Verifies that file write errors (e.g., disk full, permissions) are caught
-     * and recorded in the results rather than crashing the entire download process.
-     * Other photos should continue downloading even if one fails to save.
+     * Verifies that a disk-full write error stops the download immediately
+     * with a clear message so the user can free space before retrying.
      */
-    it('should handle file write errors gracefully', async () => {
+    it('should stop the download when the disk is full', async () => {
       const photos: ImageDto[] = [createMockPhoto('photo-1', 'image1.jpg')];
 
       const photosJsonPath = path.join(
@@ -246,9 +245,11 @@ describe('RecNetService - File Saving Functionality', () => {
 
       (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
       (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
-      (mockedFs.writeFile as jest.Mock).mockRejectedValue(
-        new Error('Disk full')
+      const diskFullError = Object.assign(
+        new Error('ENOSPC: no space left on device'),
+        { code: 'ENOSPC' }
       );
+      (mockedFs.writeFile as jest.Mock).mockRejectedValueOnce(diskFullError);
 
       mockPhotosController.downloadPhoto.mockResolvedValue({
         success: true,
@@ -256,10 +257,9 @@ describe('RecNetService - File Saving Functionality', () => {
         status: 200,
       } as GenericResponse<ArrayBuffer>);
 
-      const result = await service.downloadPhotos(testAccountId);
-
-      expect(result.downloadStats.failedDownloads).toBeGreaterThan(0);
-      expect(result.downloadResults[0].status).toBe('error');
+      await expect(service.downloadPhotos(testAccountId)).rejects.toThrow(
+        /no space left on your disk/i
+      );
     });
 
     /**
