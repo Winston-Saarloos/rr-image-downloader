@@ -42,6 +42,7 @@ jest.mock('../recnet/photos-controller');
 jest.mock('../recnet/accounts-controller');
 jest.mock('../recnet/rooms-controller');
 jest.mock('../recnet/events-controller');
+jest.mock('../recnet/image-comments-controller');
 
 const mockedFs = fs as jest.Mocked<typeof fs>;
 
@@ -924,6 +925,7 @@ describe('RecNetService - Download Functionality', () => {
         accountsFetched: 0,
         roomsFetched: 0,
         eventsFetched: 0,
+        imageCommentsFetched: 0,
       });
       (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
 
@@ -956,6 +958,7 @@ describe('RecNetService - Download Functionality', () => {
         accountsFetched: 0,
         roomsFetched: 0,
         eventsFetched: 0,
+        imageCommentsFetched: 0,
       });
       (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
       mockPhotosController.fetchPlayerPhotos.mockRejectedValue(

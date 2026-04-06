@@ -39,6 +39,7 @@ interface CollectPhotosParams {
   forceAccountsRefresh?: boolean;
   forceRoomsRefresh?: boolean;
   forceEventsRefresh?: boolean;
+  forceImageCommentsRefresh?: boolean;
 }
 
 interface CollectFeedPhotosParams {
@@ -48,6 +49,7 @@ interface CollectFeedPhotosParams {
   forceAccountsRefresh?: boolean;
   forceRoomsRefresh?: boolean;
   forceEventsRefresh?: boolean;
+  forceImageCommentsRefresh?: boolean;
 }
 
 interface DownloadPhotosParams {
@@ -379,6 +381,7 @@ ipcMain.handle(
           forceAccountsRefresh: params.forceAccountsRefresh,
           forceRoomsRefresh: params.forceRoomsRefresh,
           forceEventsRefresh: params.forceEventsRefresh,
+          forceImageCommentsRefresh: params.forceImageCommentsRefresh,
         }
       );
       return { success: true, data: result };
@@ -403,6 +406,7 @@ ipcMain.handle(
           forceAccountsRefresh: params.forceAccountsRefresh,
           forceRoomsRefresh: params.forceRoomsRefresh,
           forceEventsRefresh: params.forceEventsRefresh,
+          forceImageCommentsRefresh: params.forceImageCommentsRefresh,
         }
       );
       return { success: true, data: result };

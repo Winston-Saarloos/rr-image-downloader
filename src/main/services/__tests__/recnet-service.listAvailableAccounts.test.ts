@@ -21,6 +21,7 @@ jest.mock('../recnet/photos-controller');
 jest.mock('../recnet/accounts-controller');
 jest.mock('../recnet/rooms-controller');
 jest.mock('../recnet/events-controller');
+jest.mock('../recnet/image-comments-controller');
 
 const mockedFs = fs as jest.Mocked<typeof fs>;
 

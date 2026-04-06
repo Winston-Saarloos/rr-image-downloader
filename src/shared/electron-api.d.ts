@@ -27,6 +27,7 @@ export interface ElectronAPI {
     forceAccountsRefresh?: boolean;
     forceRoomsRefresh?: boolean;
     forceEventsRefresh?: boolean;
+    forceImageCommentsRefresh?: boolean;
   }) => Promise<ApiResponse<CollectionResult>>;
 
   collectFeedPhotos: (params: {
@@ -36,6 +37,7 @@ export interface ElectronAPI {
     forceAccountsRefresh?: boolean;
     forceRoomsRefresh?: boolean;
     forceEventsRefresh?: boolean;
+    forceImageCommentsRefresh?: boolean;
   }) => Promise<ApiResponse<CollectionResult>>;
   collectProfileHistoryManifest: (params: {
     accountId: string;

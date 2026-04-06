@@ -19,6 +19,7 @@ export interface BulkDataRefreshOptions {
   forceAccountsRefresh?: boolean;
   forceRoomsRefresh?: boolean;
   forceEventsRefresh?: boolean;
+  forceImageCommentsRefresh?: boolean;
 }
 
 export interface Progress {

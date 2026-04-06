@@ -25,6 +25,7 @@ import {
   getSelectedDownloadSources,
 } from '../../shared/download-sources';
 import { EventDto } from '../models/EventDto';
+import { ImageCommentDto } from '../models/ImageCommentDto';
 import { ImageDto } from '../models/ImageDto';
 import { PlayerResult } from '../models/PlayerDto';
 import { ProfileHistoryImageDto } from '../models/ProfileHistoryImageDto';
@@ -32,6 +33,7 @@ import { RoomDto } from '../models/RoomDto';
 import { AccountsController } from './recnet/accounts-controller';
 import { EventsController } from './recnet/events-controller';
 import { RecNetHttpClient } from './recnet/http-client';
+import { ImageCommentsController } from './recnet/image-comments-controller';
 import { PhotosController } from './recnet/photos-controller';
 import { RoomsController } from './recnet/rooms-controller';
 import { Semaphore } from '../utils/semaphore';
@@ -91,14 +93,16 @@ const DEFAULT_SETTINGS: RecNetSettings = {
   outputRoot: 'output',
   cdnBase: DEFAULT_CDN_BASE,
   interPageDelayMs: 0,
-  maxConcurrentDownloads: 30
+  maxConcurrentDownloads: 30,
 };
 
 const PHOTO_DOWNLOAD_RETRY_COUNT = 3;
 const PHOTO_DOWNLOAD_MAX_ATTEMPTS = PHOTO_DOWNLOAD_RETRY_COUNT + 1;
 const PHOTO_DOWNLOAD_RETRY_DELAY_MS = 750;
 const PHOTO_DOWNLOAD_TIMEOUT_MS = 15_000;
-const PHOTO_MAX_PAGE_SIZE = 1_000;
+const PHOTO_MAX_PAGE_SIZE = 3_000;
+// RecNet API returns 429s for this if requested too frequently.
+const IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS = 250;
 function normalizeRecNetSettings(input: unknown): RecNetSettings {
   const raw =
     input && typeof input === 'object'
@@ -131,7 +135,7 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
     cdnBase: DEFAULT_SETTINGS.cdnBase,
     interPageDelayMs,
     maxPhotosToDownload,
-    maxConcurrentDownloads
+    maxConcurrentDownloads,
   };
 }
 
@@ -146,6 +150,8 @@ export class RecNetService extends EventEmitter {
   private accountsController: AccountsController;
   private roomsController: RoomsController;
   private eventsController: EventsController;
+  private imageCommentsController: ImageCommentsController;
+  private lastImageCommentRequestStartedAt = 0;
 
   constructor() {
     super();
@@ -169,6 +175,7 @@ export class RecNetService extends EventEmitter {
     this.accountsController = new AccountsController(this.httpClient);
     this.roomsController = new RoomsController(this.httpClient);
     this.eventsController = new EventsController(this.httpClient);
+    this.imageCommentsController = new ImageCommentsController(this.httpClient);
 
     // Load settings from disk
     this.settingsLoaded = this.loadSettings();
@@ -328,10 +335,7 @@ export class RecNetService extends EventEmitter {
   }
 
   private isOperationCancelledError(error: unknown): boolean {
-    return (
-      error instanceof Error &&
-      error.message === 'Operation cancelled'
-    );
+    return error instanceof Error && error.message === 'Operation cancelled';
   }
 
   private isOutOfDiskSpaceError(error: unknown): boolean {
@@ -387,6 +391,7 @@ export class RecNetService extends EventEmitter {
       forceAccountsRefresh = false,
       forceRoomsRefresh = false,
       forceEventsRefresh = false,
+      forceImageCommentsRefresh = false,
     } = options || {};
 
     try {
@@ -539,7 +544,12 @@ export class RecNetService extends EventEmitter {
             operation: () =>
               this.photosController.fetchPlayerPhotos(
                 accountId,
-                { skip, take: PHOTO_MAX_PAGE_SIZE, sort: 2, after: lastSortValue },
+                {
+                  skip,
+                  take: PHOTO_MAX_PAGE_SIZE,
+                  sort: 2,
+                  after: lastSortValue,
+                },
                 token,
                 { signal: operation.controller.signal }
               ),
@@ -644,14 +654,14 @@ export class RecNetService extends EventEmitter {
         this.updateSourceProgress(
           'metadata',
           'user-photos',
-          'Collecting related account, room, and event data...',
+          'Collecting related account, room, event, and image comment data...',
           0,
           0,
           0,
           {
             pageLabel: 'Related data',
             recentActivity:
-              'Collecting related account, room, and event data for user photos...',
+              'Collecting related account, room, event, and image comment data for user photos...',
           }
         );
 
@@ -673,11 +683,16 @@ export class RecNetService extends EventEmitter {
           accountId,
           combinedForMetadata,
           token,
-          { forceAccountsRefresh, forceRoomsRefresh, forceEventsRefresh },
+          {
+            forceAccountsRefresh,
+            forceRoomsRefresh,
+            forceEventsRefresh,
+            forceImageCommentsRefresh,
+          },
           'user-photos'
         );
         console.log(
-          `Fetched ${bulkData.accountsFetched} accounts, ${bulkData.roomsFetched} rooms, and ${bulkData.eventsFetched} events`
+          `Fetched ${bulkData.accountsFetched} accounts, ${bulkData.roomsFetched} rooms, ${bulkData.eventsFetched} events, and ${bulkData.imageCommentsFetched} image comment record(s)`
         );
       } catch (error) {
         console.log(
@@ -724,6 +739,7 @@ export class RecNetService extends EventEmitter {
       forceAccountsRefresh = false,
       forceRoomsRefresh = false,
       forceEventsRefresh = false,
+      forceImageCommentsRefresh = false,
     } = options || {};
 
     try {
@@ -957,14 +973,14 @@ export class RecNetService extends EventEmitter {
         this.updateSourceProgress(
           'metadata',
           'user-feed',
-          'Collecting related account, room, and event data...',
+          'Collecting related account, room, event, and image comment data...',
           0,
           0,
           0,
           {
             pageLabel: 'Related data',
             recentActivity:
-              'Collecting related account, room, and event data for user feed...',
+              'Collecting related account, room, event, and image comment data for user feed...',
           }
         );
 
@@ -989,11 +1005,16 @@ export class RecNetService extends EventEmitter {
           accountId,
           combinedForMetadata,
           token,
-          { forceAccountsRefresh, forceRoomsRefresh, forceEventsRefresh },
+          {
+            forceAccountsRefresh,
+            forceRoomsRefresh,
+            forceEventsRefresh,
+            forceImageCommentsRefresh,
+          },
           'user-feed'
         );
         console.log(
-          `Fetched (feed) ${bulkData.accountsFetched} accounts, ${bulkData.roomsFetched} rooms, and ${bulkData.eventsFetched} events`
+          `Fetched (feed) ${bulkData.accountsFetched} accounts, ${bulkData.roomsFetched} rooms, ${bulkData.eventsFetched} events, and ${bulkData.imageCommentsFetched} image comment record(s)`
         );
       } catch (error) {
         console.log(
@@ -1028,7 +1049,10 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async downloadPhotos(accountId: string, token?: string): Promise<DownloadResult> {
+  async downloadPhotos(
+    accountId: string,
+    token?: string
+  ): Promise<DownloadResult> {
     await this.ensureSettingsLoaded();
     const operation = this.startOperation();
 
@@ -1097,7 +1121,8 @@ export class RecNetService extends EventEmitter {
           totalPhotos,
           100,
           {
-            recentActivity: 'Everything in user photos is already on disk for this run.',
+            recentActivity:
+              'Everything in user photos is already on disk for this run.',
           }
         );
         this.setOperationComplete();
@@ -1375,7 +1400,8 @@ export class RecNetService extends EventEmitter {
           totalPhotos,
           100,
           {
-            recentActivity: 'Everything in user feed is already on disk for this run.',
+            recentActivity:
+              'Everything in user feed is already on disk for this run.',
           }
         );
         this.setOperationComplete();
@@ -1784,8 +1810,7 @@ export class RecNetService extends EventEmitter {
       const existingFiles = (await fs.readdir(profileHistoryDir)).filter(file =>
         file.toLowerCase().endsWith('.jpg')
       ).length;
-      let remainingDownloadSlots =
-        (maxPhotosToDownload || 0) - existingFiles;
+      let remainingDownloadSlots = (maxPhotosToDownload || 0) - existingFiles;
 
       if (hasDownloadLimit && remainingDownloadSlots <= 0) {
         this.updateSourceProgress(
@@ -2296,7 +2321,9 @@ export class RecNetService extends EventEmitter {
         Description: photo.Description ?? '',
         PlayerId: this.normalizeId(photo.PlayerId) || normalizedAccountId,
         TaggedPlayerIds: Array.isArray(photo.TaggedPlayerIds)
-          ? photo.TaggedPlayerIds.map(id => this.normalizeId(id)).filter(Boolean)
+          ? photo.TaggedPlayerIds.map(id => this.normalizeId(id)).filter(
+              Boolean
+            )
           : [],
         RoomId: this.normalizeId(photo.RoomId),
         PlayerEventId: this.normalizeId(photo.PlayerEventId) || undefined,
@@ -2523,6 +2550,266 @@ export class RecNetService extends EventEmitter {
       CreatorPlayerId: this.normalizeId(event.CreatorPlayerId),
       RoomId: this.normalizeId(event.RoomId),
     }));
+  }
+
+  private normalizeImageComments(
+    comments: ImageCommentDto[]
+  ): ImageCommentDto[] {
+    return comments.map(comment => ({
+      ...comment,
+      SavedImageCommentId: this.normalizeId(comment.SavedImageCommentId),
+      SavedImageId: this.normalizeId(comment.SavedImageId),
+      PlayerId: this.normalizeId(comment.PlayerId),
+    }));
+  }
+
+  private async rateLimitedFetchImageComments(
+    imageId: string,
+    token?: string,
+    options?: { signal?: AbortSignal }
+  ): Promise<ImageCommentDto[]> {
+    if (IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS > 0) {
+      const now = Date.now();
+      const waitMs = Math.max(
+        0,
+        this.lastImageCommentRequestStartedAt +
+          IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS -
+          now
+      );
+      if (waitMs > 0) {
+        await this.delay(waitMs, this.currentOperation ?? undefined);
+      }
+    }
+
+    this.lastImageCommentRequestStartedAt = Date.now();
+    return this.imageCommentsController.fetchImageComments(
+      imageId,
+      token,
+      options
+    );
+  }
+
+  private async fetchAndSaveImageCommentsMetadata(params: {
+    source: DownloadSource;
+    token?: string;
+    requestOptions?: { signal?: AbortSignal };
+    normalizedPhotos: Photo[];
+    imageIdsWithComments: string[];
+    imageCommentCounts: Map<string, number>;
+    imageCommentsJsonPath: string;
+    imageCommentsFileExists: boolean;
+    forceRefresh: boolean;
+  }): Promise<{
+    imageCommentsFetched: number;
+    imageComments: ImageCommentDto[];
+  }> {
+    if (
+      params.imageIdsWithComments.length === 0 &&
+      !params.imageCommentsFileExists
+    ) {
+      return { imageCommentsFetched: 0, imageComments: [] };
+    }
+
+    this.updateSourceProgress(
+      'metadata',
+      params.source,
+      'Checking image comments cache',
+      0,
+      params.imageIdsWithComments.length,
+      0,
+      {
+        pageLabel: 'Image comments',
+      }
+    );
+
+    let cachedImageComments: ImageCommentDto[] = [];
+    let imageCommentsFetched = 0;
+    const cachedCommentCountsByImageId = new Map<string, number>();
+    const currentPhotoIds = new Set(
+      params.normalizedPhotos.map(photo => photo.Id).filter(Boolean)
+    );
+
+    if (params.imageCommentsFileExists) {
+      try {
+        const existing = (await fs.readJson(
+          params.imageCommentsJsonPath
+        )) as ImageCommentDto[];
+        if (Array.isArray(existing)) {
+          cachedImageComments = this.normalizeImageComments(existing);
+          for (const comment of cachedImageComments) {
+            const imageId = comment.SavedImageId;
+            if (!imageId) {
+              continue;
+            }
+            cachedCommentCountsByImageId.set(
+              imageId,
+              (cachedCommentCountsByImageId.get(imageId) ?? 0) + 1
+            );
+          }
+          await fs.writeJson(
+            params.imageCommentsJsonPath,
+            cachedImageComments,
+            {
+              spaces: 2,
+            }
+          );
+        }
+      } catch (error) {
+        console.log(
+          `Warning: Failed to normalize cached image comment data: ${(error as Error).message}`
+        );
+      }
+    }
+
+    const missingOrChangedImageIds = params.forceRefresh
+      ? params.imageIdsWithComments
+      : params.imageIdsWithComments.filter(imageId => {
+          const cachedCount = cachedCommentCountsByImageId.get(imageId) ?? 0;
+          const expectedCount = params.imageCommentCounts.get(imageId) ?? 0;
+          return cachedCount !== expectedCount;
+        });
+    const retainedCachedImageComments = cachedImageComments.filter(comment => {
+      const imageId = comment.SavedImageId;
+      if (!imageId) {
+        return false;
+      }
+      if (
+        currentPhotoIds.has(imageId) &&
+        !params.imageCommentCounts.has(imageId)
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    if (missingOrChangedImageIds.length === 0) {
+      if (retainedCachedImageComments.length !== cachedImageComments.length) {
+        await fs.writeJson(
+          params.imageCommentsJsonPath,
+          retainedCachedImageComments,
+          {
+            spaces: 2,
+          }
+        );
+        this.updateSourceProgress(
+          'metadata',
+          params.source,
+          'Image comment data updated',
+          params.imageIdsWithComments.length,
+          params.imageIdsWithComments.length,
+          100,
+          {
+            pageLabel: 'Image comments',
+            recentActivity: 'Removed stale image comment cache entries.',
+          }
+        );
+      } else {
+        this.updateSourceProgress(
+          'metadata',
+          params.source,
+          'Using cached image comment data',
+          params.imageIdsWithComments.length,
+          params.imageIdsWithComments.length,
+          100,
+          {
+            pageLabel: 'Image comments',
+            recentActivity: 'Using cached image comment data.',
+          }
+        );
+      }
+
+      return {
+        imageCommentsFetched: 0,
+        imageComments: retainedCachedImageComments,
+      };
+    }
+
+    this.updateSourceProgress(
+      'metadata',
+      params.source,
+      `Downloading image comment data (${missingOrChangedImageIds.length} image(s) need refresh)...`,
+      0,
+      missingOrChangedImageIds.length,
+      0,
+      {
+        pageLabel: 'Image comments',
+        recentActivity: `Downloading comments for ${missingOrChangedImageIds.length} image(s)...`,
+      }
+    );
+
+    const refreshedComments: ImageCommentDto[] = [];
+    for (let index = 0; index < missingOrChangedImageIds.length; index++) {
+      const imageId = missingOrChangedImageIds[index];
+      const commentsData = await this.runMetadataRequestWithRetry({
+        label: `image comment metadata for image ${imageId}`,
+        source: params.source,
+        operationRef: this.currentOperation ?? undefined,
+        pageLabel: 'Image comments',
+        recentActivity: `Downloaded comments for image ${index + 1}/${missingOrChangedImageIds.length}.`,
+        operation: () =>
+          this.rateLimitedFetchImageComments(
+            imageId,
+            params.token,
+            params.requestOptions
+          ),
+      });
+      const normalizedComments = Array.isArray(commentsData)
+        ? this.normalizeImageComments(commentsData)
+        : [];
+      refreshedComments.push(...normalizedComments);
+      imageCommentsFetched += normalizedComments.length;
+      this.updateSourceProgress(
+        'metadata',
+        params.source,
+        `Downloaded image comments for ${index + 1}/${missingOrChangedImageIds.length} image(s)`,
+        index + 1,
+        missingOrChangedImageIds.length,
+        Math.round(((index + 1) / missingOrChangedImageIds.length) * 100),
+        {
+          pageLabel: 'Image comments',
+        }
+      );
+    }
+
+    const refreshedImageIds = new Set(missingOrChangedImageIds);
+    const mergedImageCommentsMap = new Map<string, ImageCommentDto>();
+
+    for (const comment of retainedCachedImageComments) {
+      const imageId = comment.SavedImageId;
+      if (!imageId || refreshedImageIds.has(imageId)) {
+        continue;
+      }
+      mergedImageCommentsMap.set(comment.SavedImageCommentId, comment);
+    }
+
+    for (const comment of refreshedComments) {
+      mergedImageCommentsMap.set(comment.SavedImageCommentId, comment);
+    }
+
+    const mergedImageComments = Array.from(mergedImageCommentsMap.values());
+    await fs.writeJson(params.imageCommentsJsonPath, mergedImageComments, {
+      spaces: 2,
+    });
+    console.log(
+      `Saved ${mergedImageComments.length} image comments to ${params.imageCommentsJsonPath} (downloaded ${refreshedComments.length} refreshed entries)`
+    );
+
+    this.updateSourceProgress(
+      'metadata',
+      params.source,
+      'Image comment data updated',
+      params.imageIdsWithComments.length,
+      params.imageIdsWithComments.length,
+      100,
+      {
+        pageLabel: 'Image comments',
+      }
+    );
+
+    return {
+      imageCommentsFetched,
+      imageComments: mergedImageComments,
+    };
   }
 
   private delay(ms: number, operation?: CurrentOperation): Promise<void> {
@@ -2935,10 +3222,12 @@ export class RecNetService extends EventEmitter {
     accountIds: Set<string>;
     roomIds: Set<string>;
     eventIds: Set<string>;
+    imageCommentCounts: Map<string, number>;
   } {
     const accountIds = new Set<string>();
     const roomIds = new Set<string>();
     const eventIds = new Set<string>();
+    const imageCommentCounts = new Map<string, number>();
 
     for (const photo of photos) {
       if (photo.RoomId) {
@@ -2966,9 +3255,17 @@ export class RecNetService extends EventEmitter {
       if (photo.EventInstanceId) {
         eventIds.add(photo.EventInstanceId);
       }
+
+      if (
+        photo.Id &&
+        typeof photo.CommentCount === 'number' &&
+        photo.CommentCount > 0
+      ) {
+        imageCommentCounts.set(photo.Id, photo.CommentCount);
+      }
     }
 
-    return { accountIds, roomIds, eventIds };
+    return { accountIds, roomIds, eventIds, imageCommentCounts };
   }
 
   async fetchAndSaveBulkData(
@@ -2981,6 +3278,7 @@ export class RecNetService extends EventEmitter {
     accountsFetched: number;
     roomsFetched: number;
     eventsFetched: number;
+    imageCommentsFetched: number;
   }> {
     await this.ensureSettingsLoaded();
     try {
@@ -2991,12 +3289,13 @@ export class RecNetService extends EventEmitter {
         forceAccountsRefresh = false,
         forceRoomsRefresh = false,
         forceEventsRefresh = false,
+        forceImageCommentsRefresh = false,
       } = options;
       const normalizedPhotos = this.normalizePhotos(photos);
       this.updateSourceProgress(
         'metadata',
         source,
-        'Collecting related account, room, and event data...',
+        'Collecting related account, room, event, and image comment data...',
         0,
         0,
         0,
@@ -3007,13 +3306,14 @@ export class RecNetService extends EventEmitter {
       );
 
       // Extract unique IDs
-      const { accountIds, roomIds, eventIds } =
+      const { accountIds, roomIds, eventIds, imageCommentCounts } =
         this.extractUniqueIds(normalizedPhotos);
-      const accountIdsArray = Array.from(accountIds);
+      let accountIdsArray = Array.from(accountIds);
       const roomIdsArray = Array.from(roomIds);
       const eventIdsArray = Array.from(eventIds);
+      const imageIdsWithComments = Array.from(imageCommentCounts.keys());
       this.updateProgressActivity(
-        `Found ${accountIdsArray.length} accounts, ${roomIdsArray.length} rooms, and ${eventIdsArray.length} events in ${this.getSourceLabel(source)} metadata.`,
+        `Found ${accountIdsArray.length} accounts, ${roomIdsArray.length} rooms, ${eventIdsArray.length} events, and ${imageIdsWithComments.length} image(s) with comments in ${this.getSourceLabel(source)} metadata.`,
         {
           phase: 'metadata',
           currentSource: source,
@@ -3022,7 +3322,7 @@ export class RecNetService extends EventEmitter {
       );
 
       console.log(
-        `Found ${accountIdsArray.length} unique account IDs, ${roomIdsArray.length} unique room IDs, and ${eventIdsArray.length} unique event IDs`
+        `Found ${accountIdsArray.length} unique account IDs, ${roomIdsArray.length} unique room IDs, ${eventIdsArray.length} unique event IDs, and ${imageIdsWithComments.length} image IDs with comments`
       );
 
       const accountDir = path.join(this.settings.outputRoot, accountId);
@@ -3031,15 +3331,64 @@ export class RecNetService extends EventEmitter {
       let accountsFetched = 0;
       let roomsFetched = 0;
       let eventsFetched = 0;
+      let imageCommentsFetched = 0;
       const accountsJsonPath = path.join(
         accountDir,
         `${accountId}_accounts.json`
       );
       const roomsJsonPath = path.join(accountDir, `${accountId}_rooms.json`);
       const eventsJsonPath = path.join(accountDir, `${accountId}_events.json`);
+      const imageCommentsJsonPath = path.join(
+        accountDir,
+        `${accountId}_image_comments.json`
+      );
       const accountsFileExists = await fs.pathExists(accountsJsonPath);
       const roomsFileExists = await fs.pathExists(roomsJsonPath);
       const eventsFileExists = await fs.pathExists(eventsJsonPath);
+      const imageCommentsFileExists = await fs.pathExists(
+        imageCommentsJsonPath
+      );
+
+      const initialPhotoDerivedAccountCount = accountIdsArray.length;
+      const imageCommentMetadata = await this.fetchAndSaveImageCommentsMetadata(
+        {
+          source,
+          token,
+          requestOptions,
+          normalizedPhotos,
+          imageIdsWithComments,
+          imageCommentCounts,
+          imageCommentsJsonPath,
+          imageCommentsFileExists,
+          forceRefresh: forceImageCommentsRefresh,
+        }
+      );
+      imageCommentsFetched = imageCommentMetadata.imageCommentsFetched;
+
+      for (const comment of imageCommentMetadata.imageComments) {
+        if (comment.PlayerId) {
+          accountIds.add(comment.PlayerId);
+        }
+      }
+      accountIdsArray = Array.from(accountIds);
+
+      if (accountIdsArray.length !== initialPhotoDerivedAccountCount) {
+        const commentOnlyAccounts = Math.max(
+          0,
+          accountIdsArray.length - initialPhotoDerivedAccountCount
+        );
+        this.updateProgressActivity(
+          `Found ${commentOnlyAccounts} additional commenter account(s) from image comments.`,
+          {
+            phase: 'metadata',
+            currentSource: source,
+            pageLabel: 'Accounts',
+          }
+        );
+        console.log(
+          `Added ${commentOnlyAccounts} commenter account ID(s) from image comment metadata`
+        );
+      }
 
       // Fetch and save account data
       if (accountIdsArray.length > 0) {
@@ -3401,7 +3750,12 @@ export class RecNetService extends EventEmitter {
         }
       }
 
-      return { accountsFetched, roomsFetched, eventsFetched };
+      return {
+        accountsFetched,
+        roomsFetched,
+        eventsFetched,
+        imageCommentsFetched,
+      };
     } catch (error) {
       console.log(
         `Failed to fetch and save bulk data: ${(error as Error).message}`
@@ -3455,7 +3809,10 @@ export class RecNetService extends EventEmitter {
       const feedInfo = await this.readImageDirectoryInfo(feedDir);
       const isOnDisk = (photo: Photo): boolean => {
         const photoId = this.normalizeId(photo.Id);
-        return !!photoId && (photosInfo.ids.has(photoId) || feedInfo.ids.has(photoId));
+        return (
+          !!photoId &&
+          (photosInfo.ids.has(photoId) || feedInfo.ids.has(photoId))
+        );
       };
       const alreadyOnDisk = metadata.filter(isOnDisk).length;
       const remainingToDownload = Math.max(0, metadata.length - alreadyOnDisk);
@@ -3484,7 +3841,10 @@ export class RecNetService extends EventEmitter {
       const photosInfo = await this.readImageDirectoryInfo(photosDir);
       const isOnDisk = (photo: Photo): boolean => {
         const photoId = this.normalizeId(photo.Id);
-        return !!photoId && (feedInfo.ids.has(photoId) || photosInfo.ids.has(photoId));
+        return (
+          !!photoId &&
+          (feedInfo.ids.has(photoId) || photosInfo.ids.has(photoId))
+        );
       };
       const alreadyOnDisk = metadata.filter(isOnDisk).length;
       const remainingToDownload = Math.max(0, metadata.length - alreadyOnDisk);
@@ -3504,10 +3864,16 @@ export class RecNetService extends EventEmitter {
       };
     }
 
-    const metadataPath = path.join(accountDir, `${accountId}_profile_history.json`);
+    const metadataPath = path.join(
+      accountDir,
+      `${accountId}_profile_history.json`
+    );
     const profileHistoryDir = path.join(accountDir, 'profile-history');
     const manifestPayload = await this.readProfileHistoryManifest(metadataPath);
-    const metadata = this.normalizeProfileHistoryPhotos(manifestPayload, accountId);
+    const metadata = this.normalizeProfileHistoryPhotos(
+      manifestPayload,
+      accountId
+    );
     const directoryInfo = await this.readImageDirectoryInfo(profileHistoryDir);
     const alreadyOnDisk = metadata.filter(photo => {
       const photoId = this.normalizeId(photo.Id);
@@ -3542,7 +3908,9 @@ export class RecNetService extends EventEmitter {
       return [];
     }
 
-    const payload = (await fs.readJson(metadataPath)) as ProfileHistoryImageDto[];
+    const payload = (await fs.readJson(
+      metadataPath
+    )) as ProfileHistoryImageDto[];
     return Array.isArray(payload) ? payload : [];
   }
 
@@ -3684,6 +4052,7 @@ export class RecNetService extends EventEmitter {
               `${entry.name}_accounts.json`,
               `${entry.name}_rooms.json`,
               `${entry.name}_events.json`,
+              `${entry.name}_image_comments.json`,
             ];
 
             let hasAppMetadata = false;
@@ -3700,7 +4069,7 @@ export class RecNetService extends EventEmitter {
             }
           } else if (entry.isFile()) {
             const isLegacyMetadata =
-              /.+_(photos|feed|profile_history|accounts|rooms|events)\.json$/i.test(
+              /.+_(photos|feed|profile_history|accounts|rooms|events|image_comments)\.json$/i.test(
                 entry.name
               );
             if (isLegacyMetadata) {
@@ -3875,10 +4244,7 @@ export class RecNetService extends EventEmitter {
             const profileHistory: Photo[] = await fs.readJson(
               profileHistoryJsonPath
             );
-            if (
-              Array.isArray(profileHistory) &&
-              profileHistory.length > 0
-            ) {
+            if (Array.isArray(profileHistory) && profileHistory.length > 0) {
               hasProfileHistory = true;
               profileHistoryCount = profileHistory.length;
             }
