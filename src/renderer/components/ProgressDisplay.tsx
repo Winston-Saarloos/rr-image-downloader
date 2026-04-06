@@ -23,6 +23,7 @@ interface ProgressDisplayProps {
   onClose?: () => void;
   onOpenOperationResults?: () => void;
   onOpenDownloadPanel?: () => void;
+  onCancelDownload?: () => void | Promise<void>;
   onConfirmDownload?: () => void | Promise<void>;
   onSkipDownload?: () => void;
   onRetryDownload?: () => void | Promise<void>;
@@ -56,6 +57,7 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   onClose,
   onOpenOperationResults,
   onOpenDownloadPanel,
+  onCancelDownload,
   onConfirmDownload,
   onSkipDownload,
   onRetryDownload,
@@ -397,6 +399,14 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
 
         {!hasTotals && progress.isRunning && !isConfirming && (
           <Progress value={barValue} className={`h-2 ${progressToneClass}`} />
+        )}
+
+        {progress.isRunning && !isConfirming && onCancelDownload && (
+          <div className="flex justify-end border-t border-border/60 pt-3">
+            <Button variant="destructive" size="sm" onClick={() => void onCancelDownload()}>
+              Cancel Download
+            </Button>
+          </div>
         )}
 
         {isConfirming && confirmation && (

@@ -1036,6 +1036,7 @@ function App() {
                 onClose={() => setShowProgressPanel(false)}
                 onOpenOperationResults={openOperationResults}
                 onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
+                onCancelDownload={handleCancelDownload}
                 onConfirmDownload={handleConfirmDownload}
                 onSkipDownload={handleSkipDownload}
                 onRetryDownload={handleRetryDownload}
