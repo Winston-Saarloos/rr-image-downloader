@@ -35,6 +35,10 @@ export function buildDownloadProgressIncident(
 ): UserFacingIncident | null {
   const detail = trimMessage(progress.lastIssue);
 
+  if (progress.phase === 'confirm') {
+    return null;
+  }
+
   if (progress.currentStep === 'Cancelled') {
     return createIncident(
       'Download cancelled',
@@ -46,11 +50,7 @@ export function buildDownloadProgressIncident(
     );
   }
 
-  if (
-    progress.issueCount === 0 &&
-    progress.recoveredAfterRetry === 0 &&
-    progress.failedItems === 0
-  ) {
+  if (progress.issueCount === 0 && progress.failedItems === 0) {
     return null;
   }
 
@@ -65,6 +65,10 @@ export function buildDownloadProgressIncident(
       ],
       { severity: 'error' }
     );
+  }
+
+  if (!progress.isRunning && progress.failedItems === 0) {
+    return null;
   }
 
   if (detail.toLowerCase().startsWith('recovered ')) {
@@ -93,17 +97,6 @@ export function buildDownloadProgressIncident(
         'The app is retrying the affected file now.',
         'The download is still running and you can cancel it if needed.',
         'If retries run out, run the same download again; existing files will be skipped.',
-      ]
-    );
-  }
-
-  if (!progress.isRunning && progress.issueCount > 0) {
-    return createIncident(
-      'Download finished after retrying',
-      detail || 'The app hit issues during the download but recovered.',
-      [
-        'The app recovered from the issue and completed the run.',
-        'Anything already saved on disk stays in place.',
       ]
     );
   }

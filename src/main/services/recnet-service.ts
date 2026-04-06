@@ -6,8 +6,11 @@ import {
   RecNetSettings,
   Progress,
   CollectionResult,
+  DownloadPreflightSourceSummary,
+  DownloadPreflightSummary,
   DownloadResult,
   ProfileHistoryAccessResult,
+  ProfileHistoryCollectionResult,
   Photo,
   IterationDetail,
   DownloadResultItem,
@@ -16,6 +19,11 @@ import {
   BulkDataRefreshOptions,
 } from '../../shared/types';
 import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
+import {
+  DownloadSource,
+  DownloadSourceSelection,
+  getSelectedDownloadSources,
+} from '../../shared/download-sources';
 import { EventDto } from '../models/EventDto';
 import { ImageDto } from '../models/ImageDto';
 import { PlayerResult } from '../models/PlayerDto';
@@ -32,6 +40,10 @@ interface CurrentOperation {
   cancelled: boolean;
   controller: AbortController;
 }
+
+type ErrorWithCode = Error & {
+  code?: string;
+};
 
 interface PhotoDownloadAttempt {
   response?: {
@@ -87,7 +99,6 @@ const PHOTO_DOWNLOAD_MAX_ATTEMPTS = PHOTO_DOWNLOAD_RETRY_COUNT + 1;
 const PHOTO_DOWNLOAD_RETRY_DELAY_MS = 750;
 const PHOTO_DOWNLOAD_TIMEOUT_MS = 15_000;
 const PHOTO_MAX_PAGE_SIZE = 1_000;
-
 function normalizeRecNetSettings(input: unknown): RecNetSettings {
   const raw =
     input && typeof input === 'object'
@@ -146,6 +157,7 @@ export class RecNetService extends EventEmitter {
     this.settings = { ...DEFAULT_SETTINGS };
     this.progress = this.createProgressState({
       isRunning: false,
+      phase: 'complete',
       currentStep: '',
       progress: 0,
       total: 0,
@@ -223,7 +235,8 @@ export class RecNetService extends EventEmitter {
     step: string,
     current: number,
     total: number,
-    progress?: number
+    progress?: number,
+    overrides: Partial<Progress> = {}
   ): void {
     if (!this.currentOperation || this.currentOperation.cancelled) {
       return;
@@ -235,6 +248,7 @@ export class RecNetService extends EventEmitter {
       current,
       total,
       progress: progress || (total > 0 ? (current / total) * 100 : 0),
+      ...overrides,
     });
     this.emit('progress-update', this.progress);
   }
@@ -243,10 +257,15 @@ export class RecNetService extends EventEmitter {
     this.progress = this.createProgressState({
       ...this.progress,
       isRunning: false,
+      phase: 'complete',
       currentStep: 'Complete',
       current: 0,
       total: 0,
       progress: 100,
+      currentSource: undefined,
+      pageLabel: undefined,
+      activeItemLabel: undefined,
+      confirmation: undefined,
     });
     this.emit('progress-update', this.progress);
   }
@@ -255,6 +274,7 @@ export class RecNetService extends EventEmitter {
     this.progress = this.createProgressState({
       ...this.progress,
       isRunning: false,
+      phase: 'failed',
       currentStep: 'Failed',
       current: 0,
       total: 0,
@@ -263,6 +283,7 @@ export class RecNetService extends EventEmitter {
       issueCount: Math.max(this.progress.issueCount, 1),
       failedItems: Math.max(this.progress.failedItems, 1),
       lastIssue: message,
+      confirmation: undefined,
     });
     this.emit('progress-update', this.progress);
   }
@@ -274,10 +295,12 @@ export class RecNetService extends EventEmitter {
       this.progress = this.createProgressState({
         ...this.progress,
         isRunning: false,
+        phase: 'cancelled',
         currentStep: 'Cancelled',
         current: 0,
         total: 0,
         progress: 100,
+        confirmation: undefined,
       });
       this.emit('progress-update', this.progress);
       return true;
@@ -311,6 +334,38 @@ export class RecNetService extends EventEmitter {
     );
   }
 
+  private isOutOfDiskSpaceError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    const code = ((error as ErrorWithCode).code || '').toUpperCase();
+    const message = error.message || '';
+    return (
+      code === 'ENOSPC' ||
+      /ENOSPC|no space|disk full|disk is full|drive is full/i.test(message)
+    );
+  }
+
+  private abortOperationForDiskFull(
+    imageLabel: string,
+    operation?: CurrentOperation
+  ): never {
+    const targetOperation =
+      operation && this.currentOperation === operation
+        ? operation
+        : this.currentOperation;
+
+    if (targetOperation && !targetOperation.cancelled) {
+      targetOperation.cancelled = true;
+      targetOperation.controller.abort();
+    }
+
+    throw new Error(
+      `The download stopped because there is no space left on your disk while saving ${imageLabel}. Free up space and run the same download again. Anything already saved will be skipped automatically.`
+    );
+  }
+
   private isCancelledResponse(response?: {
     error?: string | null;
     message?: string | null;
@@ -336,7 +391,17 @@ export class RecNetService extends EventEmitter {
 
     try {
       this.resetProgressIssueState();
-      this.updateProgress('Downloading user photo data...', 0, 0, 0);
+      this.updateSourceProgress(
+        'metadata',
+        'user-photos',
+        'Collecting user photos metadata...',
+        0,
+        0,
+        0,
+        {
+          recentActivity: 'Preparing to collect user photos metadata...',
+        }
+      );
 
       const all: Photo[] = [];
       let skip = 0;
@@ -440,11 +505,20 @@ export class RecNetService extends EventEmitter {
           throw this.createOperationCancelledError();
         }
 
+        const pageNumber = iteration + 1;
         const modeText = isIncrementalMode ? ' (incremental)' : '';
-        this.updateProgress(
-          `Fetching page ${iteration + 1}${modeText}...`,
+        const pageLabel = `Page ${pageNumber}${modeText}`;
+        this.updateSourceProgress(
+          'metadata',
+          'user-photos',
+          'Collecting user photos metadata...',
           iteration,
-          0 // Total unknown since we loop until done
+          0,
+          undefined,
+          {
+            pageLabel,
+            recentActivity: `Checking ${pageLabel.toLowerCase()} for user photos...`,
+          }
         );
 
         let url = `https://apim.rec.net/apis/api/images/v4/player/${encodeURIComponent(
@@ -456,12 +530,20 @@ export class RecNetService extends EventEmitter {
         }
 
         const photos = this.normalizePhotos(
-          await this.photosController.fetchPlayerPhotos(
-            accountId,
-            { skip, take: PHOTO_MAX_PAGE_SIZE, sort: 2, after: lastSortValue },
-            token,
-            { signal: operation.controller.signal }
-          )
+          await this.runMetadataRequestWithRetry({
+            label: `user photos page ${pageNumber}`,
+            source: 'user-photos',
+            operationRef: operation,
+            pageLabel,
+            recentActivity: `Collected ${pageLabel.toLowerCase()} for user photos metadata.`,
+            operation: () =>
+              this.photosController.fetchPlayerPhotos(
+                accountId,
+                { skip, take: PHOTO_MAX_PAGE_SIZE, sort: 2, after: lastSortValue },
+                token,
+                { signal: operation.controller.signal }
+              ),
+          })
         );
         if (!Array.isArray(photos)) {
           throw new Error('Unexpected response format: expected array');
@@ -511,7 +593,7 @@ export class RecNetService extends EventEmitter {
         totalFetched += photos.length;
 
         iterationDetails.push({
-          iteration: iteration + 1,
+          iteration: pageNumber,
           url,
           skip,
           take: PHOTO_MAX_PAGE_SIZE,
@@ -559,11 +641,18 @@ export class RecNetService extends EventEmitter {
 
       // Fetch and save bulk account and room data (from photos + any existing feed)
       try {
-        this.updateProgress(
-          'Fetching account, room, and event data...',
+        this.updateSourceProgress(
+          'metadata',
+          'user-photos',
+          'Collecting related account, room, and event data...',
           0,
           0,
-          0
+          0,
+          {
+            pageLabel: 'Related data',
+            recentActivity:
+              'Collecting related account, room, and event data for user photos...',
+          }
         );
 
         let combinedForMetadata: Photo[] = [...normalizedAll];
@@ -584,7 +673,8 @@ export class RecNetService extends EventEmitter {
           accountId,
           combinedForMetadata,
           token,
-          { forceAccountsRefresh, forceRoomsRefresh, forceEventsRefresh }
+          { forceAccountsRefresh, forceRoomsRefresh, forceEventsRefresh },
+          'user-photos'
         );
         console.log(
           `Fetched ${bulkData.accountsFetched} accounts, ${bulkData.roomsFetched} rooms, and ${bulkData.eventsFetched} events`
@@ -638,7 +728,17 @@ export class RecNetService extends EventEmitter {
 
     try {
       this.resetProgressIssueState();
-      this.updateProgress('Downloading user feed data...', 0, 0, 0);
+      this.updateSourceProgress(
+        'metadata',
+        'user-feed',
+        'Collecting user feed metadata...',
+        0,
+        0,
+        0,
+        {
+          recentActivity: 'Preparing to collect user feed metadata...',
+        }
+      );
 
       const accountDir = path.join(this.settings.outputRoot, accountId);
       console.log(`Creating account directory for feed: ${accountDir}`);
@@ -740,10 +840,19 @@ export class RecNetService extends EventEmitter {
           throw this.createOperationCancelledError();
         }
 
-        this.updateProgress(
-          `Fetching feed page ${iteration + 1}...`,
+        const pageNumber = iteration + 1;
+        const pageLabel = `Page ${pageNumber}`;
+        this.updateSourceProgress(
+          'metadata',
+          'user-feed',
+          'Collecting user feed metadata...',
           iteration,
-          0 // Total unknown since we loop until done
+          0,
+          undefined,
+          {
+            pageLabel,
+            recentActivity: `Checking ${pageLabel.toLowerCase()} for user feed...`,
+          }
         );
 
         const sinceParam = sinceTime.toISOString();
@@ -752,12 +861,20 @@ export class RecNetService extends EventEmitter {
         )}?skip=${skip}&take=${PHOTO_MAX_PAGE_SIZE}&since=${encodeURIComponent(sinceParam)}`;
 
         const photos = this.normalizePhotos(
-          await this.photosController.fetchFeedPhotos(
-            accountId,
-            { skip, take: PHOTO_MAX_PAGE_SIZE, since: sinceParam },
-            token,
-            { signal: operation.controller.signal }
-          )
+          await this.runMetadataRequestWithRetry({
+            label: `user feed page ${pageNumber}`,
+            source: 'user-feed',
+            operationRef: operation,
+            pageLabel,
+            recentActivity: `Collected ${pageLabel.toLowerCase()} for user feed metadata.`,
+            operation: () =>
+              this.photosController.fetchFeedPhotos(
+                accountId,
+                { skip, take: PHOTO_MAX_PAGE_SIZE, since: sinceParam },
+                token,
+                { signal: operation.controller.signal }
+              ),
+          })
         );
         if (!Array.isArray(photos)) {
           throw new Error('Unexpected response format: expected array');
@@ -799,7 +916,7 @@ export class RecNetService extends EventEmitter {
         totalFetched += photos.length;
 
         iterationDetails.push({
-          iteration: iteration + 1,
+          iteration: pageNumber,
           url,
           skip,
           take: PHOTO_MAX_PAGE_SIZE,
@@ -837,11 +954,18 @@ export class RecNetService extends EventEmitter {
 
       // Fetch and save bulk account and room data (feed + any existing photos)
       try {
-        this.updateProgress(
-          'Fetching feed account, room, and event data...',
+        this.updateSourceProgress(
+          'metadata',
+          'user-feed',
+          'Collecting related account, room, and event data...',
           0,
           0,
-          0
+          0,
+          {
+            pageLabel: 'Related data',
+            recentActivity:
+              'Collecting related account, room, and event data for user feed...',
+          }
         );
 
         let combinedForMetadata: Photo[] = [...normalizedFeed];
@@ -865,7 +989,8 @@ export class RecNetService extends EventEmitter {
           accountId,
           combinedForMetadata,
           token,
-          { forceAccountsRefresh, forceRoomsRefresh, forceEventsRefresh }
+          { forceAccountsRefresh, forceRoomsRefresh, forceEventsRefresh },
+          'user-feed'
         );
         console.log(
           `Fetched (feed) ${bulkData.accountsFetched} accounts, ${bulkData.roomsFetched} rooms, and ${bulkData.eventsFetched} events`
@@ -909,7 +1034,14 @@ export class RecNetService extends EventEmitter {
 
     try {
       this.resetProgressIssueState();
-      this.updateProgress('Downloading user photos...', 0, 0, 0);
+      this.updateSourceProgress(
+        'download',
+        'user-photos',
+        'Downloading user photos...',
+        0,
+        0,
+        0
+      );
       const accountDir = path.join(this.settings.outputRoot, accountId);
       const jsonPath = path.join(accountDir, `${accountId}_photos.json`);
 
@@ -957,11 +1089,16 @@ export class RecNetService extends EventEmitter {
         console.log(
           `Skipping photo downloads: limit ${maxPhotosToDownload} reached by existing files (${existingPhotoFiles})`
         );
-        this.updateProgress(
+        this.updateSourceProgress(
+          'download',
+          'user-photos',
           'Download limit reached for photos',
           totalPhotos,
           totalPhotos,
-          100
+          100,
+          {
+            recentActivity: 'Everything in user photos is already on disk for this run.',
+          }
         );
         this.setOperationComplete();
         return {
@@ -1001,7 +1138,14 @@ export class RecNetService extends EventEmitter {
       let recoveredAfterRetry = 0;
       let processedCount = 0;
 
-      this.updateProgress('Downloading user photos...', 0, totalPhotos, 0);
+      this.updateSourceProgress(
+        'download',
+        'user-photos',
+        'Downloading user photos...',
+        0,
+        totalPhotos,
+        0
+      );
 
       let delay = 0;
       const promises: Array<Promise<DownloadResultItem>> = [];
@@ -1041,6 +1185,10 @@ export class RecNetService extends EventEmitter {
                   slotWaitMs,
                 });
                 try {
+                  this.setDownloadItemActivity(
+                    'user-photos',
+                    imageName || photoId || `image ${scheduledIndex}`
+                  );
                   result = await this.downloadImage(
                     photo,
                     photosDir,
@@ -1091,12 +1239,15 @@ export class RecNetService extends EventEmitter {
                   });
                   semaphore.release();
                   if (this.currentOperation === operation) {
-                    this.updateProgress(
+                    processedCount++;
+                    this.setDownloadResultActivity('user-photos', result);
+                    this.updateSourceProgress(
+                      'download',
+                      'user-photos',
                       'Downloading user photos...',
                       processedCount,
                       totalPhotos
                     );
-                    processedCount++;
                   }
                 }
               } catch (error) {
@@ -1158,7 +1309,14 @@ export class RecNetService extends EventEmitter {
 
     try {
       this.resetProgressIssueState();
-      this.updateProgress('Downloading feed photos...', 0, 0, 0);
+      this.updateSourceProgress(
+        'download',
+        'user-feed',
+        'Downloading feed photos...',
+        0,
+        0,
+        0
+      );
       const accountDir = path.join(this.settings.outputRoot, accountId);
       const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
@@ -1209,11 +1367,16 @@ export class RecNetService extends EventEmitter {
         console.log(
           `Skipping feed photo downloads: limit ${maxPhotosToDownload} reached by existing files (${existingFeedFiles})`
         );
-        this.updateProgress(
+        this.updateSourceProgress(
+          'download',
+          'user-feed',
           'Download limit reached for feed photos',
           totalPhotos,
           totalPhotos,
-          100
+          100,
+          {
+            recentActivity: 'Everything in user feed is already on disk for this run.',
+          }
         );
         this.setOperationComplete();
         return {
@@ -1253,7 +1416,14 @@ export class RecNetService extends EventEmitter {
       let recoveredAfterRetry = 0;
       let processedCount = 0;
 
-      this.updateProgress('Downloading feed photos...', 0, totalPhotos, 0);
+      this.updateSourceProgress(
+        'download',
+        'user-feed',
+        'Downloading feed photos...',
+        0,
+        totalPhotos,
+        0
+      );
 
       let delay = 0;
       const promises: Array<Promise<DownloadResultItem>> = [];
@@ -1293,6 +1463,10 @@ export class RecNetService extends EventEmitter {
                   slotWaitMs,
                 });
                 try {
+                  this.setDownloadItemActivity(
+                    'user-feed',
+                    imageName || photoId || `image ${scheduledIndex}`
+                  );
                   result = await this.downloadImage(
                     photo,
                     photosDir,
@@ -1343,12 +1517,15 @@ export class RecNetService extends EventEmitter {
                   });
                   semaphore.release();
                   if (this.currentOperation === operation) {
-                    this.updateProgress(
+                    processedCount++;
+                    this.setDownloadResultActivity('user-feed', result);
+                    this.updateSourceProgress(
+                      'download',
+                      'user-feed',
                       'Downloading feed photos...',
                       processedCount,
                       totalPhotos
                     );
-                    processedCount++;
                   }
                 }
               } catch (error) {
@@ -1453,6 +1630,102 @@ export class RecNetService extends EventEmitter {
     };
   }
 
+  async collectProfileHistoryManifest(
+    accountId: string,
+    token: string
+  ): Promise<ProfileHistoryCollectionResult> {
+    await this.ensureSettingsLoaded();
+    const operation = this.startOperation();
+
+    try {
+      this.resetProgressIssueState();
+      this.updateSourceProgress(
+        'metadata',
+        'profile-history',
+        'Collecting profile picture history metadata...',
+        0,
+        0,
+        0,
+        {
+          recentActivity:
+            'Preparing to collect profile picture history metadata...',
+        }
+      );
+
+      const cleanedToken = token.trim();
+      if (!cleanedToken) {
+        throw new Error(
+          'Profile picture history requires a valid access token.'
+        );
+      }
+
+      const accountDir = path.join(this.settings.outputRoot, accountId);
+      await fs.ensureDir(accountDir);
+
+      const manifestPath = path.join(
+        accountDir,
+        `${accountId}_profile_history.json`
+      );
+      let existingPhotos = 0;
+
+      if (await fs.pathExists(manifestPath)) {
+        try {
+          const existingPayload = (await fs.readJson(
+            manifestPath
+          )) as ProfileHistoryImageDto[];
+          existingPhotos = this.normalizeProfileHistoryPhotos(
+            existingPayload,
+            accountId
+          ).length;
+        } catch (error) {
+          console.log(
+            `Warning: Failed to read existing profile history manifest: ${(error as Error).message}`
+          );
+        }
+      }
+
+      const historyPayload = await this.runMetadataRequestWithRetry({
+        label: 'profile picture history manifest',
+        source: 'profile-history',
+        operationRef: operation,
+        pageLabel: 'Manifest',
+        recentActivity: 'Collected profile picture history manifest.',
+        operation: () =>
+          this.photosController.fetchProfilePhotoHistory(cleanedToken, {
+            signal: operation.controller.signal,
+          }),
+      });
+
+      if (operation.cancelled) {
+        throw this.createOperationCancelledError();
+      }
+
+      await fs.writeJson(manifestPath, historyPayload, { spaces: 2 });
+
+      const totalPhotos = this.normalizeProfileHistoryPhotos(
+        historyPayload,
+        accountId
+      ).length;
+
+      this.setOperationComplete();
+
+      return {
+        accountId,
+        saved: manifestPath,
+        existingPhotos,
+        totalNewPhotosAdded: Math.max(0, totalPhotos - existingPhotos),
+        totalPhotos,
+      };
+    } catch (error) {
+      if (!this.isOperationCancelledError(error)) {
+        this.setOperationFailed((error as Error).message);
+      }
+      throw error;
+    } finally {
+      this.finishOperation(operation);
+    }
+  }
+
   async downloadProfileHistory(
     accountId: string,
     token: string
@@ -1465,23 +1738,20 @@ export class RecNetService extends EventEmitter {
 
     try {
       this.resetProgressIssueState();
-      this.updateProgress('Downloading profile picture history...', 0, 0, 0);
+      this.updateSourceProgress(
+        'download',
+        'profile-history',
+        'Downloading profile picture history...',
+        0,
+        0,
+        0
+      );
 
       const cleanedToken = token.trim();
       if (!cleanedToken) {
         throw new Error(
           'Profile picture history requires a valid access token.'
         );
-      }
-
-      const requestOptions = { signal: operation.controller.signal };
-      const historyPayload = await this.photosController.fetchProfilePhotoHistory(
-        cleanedToken,
-        requestOptions
-      );
-
-      if (operation.cancelled) {
-        throw this.createOperationCancelledError();
       }
 
       const accountDir = path.join(this.settings.outputRoot, accountId);
@@ -1491,11 +1761,18 @@ export class RecNetService extends EventEmitter {
         accountDir,
         `${accountId}_profile_history.json`
       );
-      await fs.writeJson(manifestPath, historyPayload, { spaces: 2 });
+      if (!(await fs.pathExists(manifestPath))) {
+        throw new Error(
+          'Profile picture history metadata not collected. Run metadata collection first.'
+        );
+      }
 
       const profileHistoryDir = path.join(accountDir, 'profile-history');
       await fs.ensureDir(profileHistoryDir);
 
+      const historyPayload = (await fs.readJson(
+        manifestPath
+      )) as ProfileHistoryImageDto[];
       const profilePhotos = this.normalizeProfileHistoryPhotos(
         historyPayload,
         accountId
@@ -1511,11 +1788,17 @@ export class RecNetService extends EventEmitter {
         (maxPhotosToDownload || 0) - existingFiles;
 
       if (hasDownloadLimit && remainingDownloadSlots <= 0) {
-        this.updateProgress(
+        this.updateSourceProgress(
+          'download',
+          'profile-history',
           'Download limit reached for profile picture history',
           totalPhotos,
           totalPhotos,
-          100
+          100,
+          {
+            recentActivity:
+              'Everything in profile picture history is already on disk for this run.',
+          }
         );
         this.setOperationComplete();
         return {
@@ -1570,7 +1853,9 @@ export class RecNetService extends EventEmitter {
       let recoveredAfterRetry = 0;
       let processedCount = 0;
 
-      this.updateProgress(
+      this.updateSourceProgress(
+        'download',
+        'profile-history',
         'Downloading profile picture history...',
         0,
         totalPhotos,
@@ -1619,6 +1904,10 @@ export class RecNetService extends EventEmitter {
                 });
 
                 try {
+                  this.setDownloadItemActivity(
+                    'profile-history',
+                    imageName || photoId || `image ${scheduledIndex}`
+                  );
                   result = await this.downloadProfileHistoryImage(
                     photo,
                     profileHistoryDir,
@@ -1660,12 +1949,15 @@ export class RecNetService extends EventEmitter {
                   });
                   semaphore.release();
                   if (this.currentOperation === operation) {
-                    this.updateProgress(
+                    processedCount++;
+                    this.setDownloadResultActivity('profile-history', result);
+                    this.updateSourceProgress(
+                      'download',
+                      'profile-history',
                       'Downloading profile picture history...',
                       processedCount,
                       totalPhotos
                     );
-                    processedCount++;
                   }
                 }
               } catch (error) {
@@ -1743,6 +2035,7 @@ export class RecNetService extends EventEmitter {
     if (operation?.cancelled || this.currentOperation?.cancelled) {
       return {
         photoId,
+        imageName,
         status: 'cancelled',
       };
     }
@@ -1754,6 +2047,7 @@ export class RecNetService extends EventEmitter {
     if (await fs.pathExists(photoPath)) {
       return {
         photoId,
+        imageName,
         status: isFeed ? 'already_exists_in_feed' : 'already_exists_in_photos',
         path: photoPath,
       };
@@ -1765,9 +2059,17 @@ export class RecNetService extends EventEmitter {
       `${photoId}.jpg`
     );
     if (await fs.pathExists(otherPhotoPath)) {
-      await fs.copy(otherPhotoPath, photoPath);
+      try {
+        await fs.copy(otherPhotoPath, photoPath);
+      } catch (error) {
+        if (this.isOutOfDiskSpaceError(error)) {
+          this.abortOperationForDiskFull(imageName, operation);
+        }
+        throw error;
+      }
       return {
         photoId,
+        imageName,
         status: isFeed ? 'copied_from_photos' : 'copied_from_feed',
         sourcePath: otherPhotoPath,
         destinationPath: photoPath,
@@ -1794,9 +2096,17 @@ export class RecNetService extends EventEmitter {
       const response = attempt.response;
       if (response?.success && response.value) {
         const data = Buffer.from(response.value);
-        await fs.writeFile(photoPath, data);
+        try {
+          await fs.writeFile(photoPath, data);
+        } catch (error) {
+          if (this.isOutOfDiskSpaceError(error)) {
+            this.abortOperationForDiskFull(imageName, operation);
+          }
+          throw error;
+        }
         return {
           photoId,
+          imageName,
           status: 'downloaded',
           size: data.length,
           path: photoPath,
@@ -1808,6 +2118,7 @@ export class RecNetService extends EventEmitter {
       } else if (response) {
         return {
           photoId,
+          imageName,
           status: 'failed',
           statusCode: response.status,
           reason: (response.message || response.error) ?? undefined,
@@ -1822,12 +2133,18 @@ export class RecNetService extends EventEmitter {
       if (error instanceof Error && error.message === 'Operation cancelled') {
         return {
           photoId,
+          imageName,
           status: 'cancelled',
         };
       }
 
+      if (this.isOutOfDiskSpaceError(error)) {
+        this.abortOperationForDiskFull(imageName, operation);
+      }
+
       return {
         photoId,
+        imageName,
         status: 'error',
         error: (error as Error).message,
         url: photoUrl,
@@ -1859,6 +2176,7 @@ export class RecNetService extends EventEmitter {
     if (operation?.cancelled || this.currentOperation?.cancelled) {
       return {
         photoId,
+        imageName,
         status: 'cancelled',
       };
     }
@@ -1867,6 +2185,7 @@ export class RecNetService extends EventEmitter {
     if (await fs.pathExists(photoPath)) {
       return {
         photoId,
+        imageName,
         status: 'already_exists_in_profile_history',
         path: photoPath,
       };
@@ -1886,9 +2205,17 @@ export class RecNetService extends EventEmitter {
 
       if (response?.success && response.value) {
         const data = Buffer.from(response.value);
-        await fs.writeFile(photoPath, data);
+        try {
+          await fs.writeFile(photoPath, data);
+        } catch (error) {
+          if (this.isOutOfDiskSpaceError(error)) {
+            this.abortOperationForDiskFull(imageName, operation);
+          }
+          throw error;
+        }
         return {
           photoId,
+          imageName,
           status: 'downloaded',
           size: data.length,
           path: photoPath,
@@ -1902,6 +2229,7 @@ export class RecNetService extends EventEmitter {
       if (response) {
         return {
           photoId,
+          imageName,
           status: 'failed',
           statusCode: response.status,
           reason: (response.message || response.error) ?? undefined,
@@ -1916,12 +2244,18 @@ export class RecNetService extends EventEmitter {
       if (error instanceof Error && error.message === 'Operation cancelled') {
         return {
           photoId,
+          imageName,
           status: 'cancelled',
         };
       }
 
+      if (this.isOutOfDiskSpaceError(error)) {
+        this.abortOperationForDiskFull(imageName, operation);
+      }
+
       return {
         photoId,
+        imageName,
         status: 'error',
         error: (error as Error).message,
         url: photoUrl,
@@ -2274,6 +2608,7 @@ export class RecNetService extends EventEmitter {
   private createProgressState(overrides: Partial<Progress>): Progress {
     return {
       isRunning: false,
+      phase: 'complete',
       currentStep: 'Ready',
       progress: 0,
       total: 0,
@@ -2283,7 +2618,12 @@ export class RecNetService extends EventEmitter {
       retryAttempts: 0,
       failedItems: 0,
       recoveredAfterRetry: 0,
+      currentSource: undefined,
+      pageLabel: undefined,
+      activeItemLabel: undefined,
+      recentActivity: undefined,
       lastIssue: undefined,
+      confirmation: undefined,
       ...overrides,
     };
   }
@@ -2296,7 +2636,9 @@ export class RecNetService extends EventEmitter {
       retryAttempts: 0,
       failedItems: 0,
       recoveredAfterRetry: 0,
+      recentActivity: undefined,
       lastIssue: undefined,
+      confirmation: undefined,
     });
   }
 
@@ -2334,6 +2676,125 @@ export class RecNetService extends EventEmitter {
       lastIssue: message,
     });
     this.emit('progress-update', this.progress);
+  }
+
+  private updateProgressActivity(
+    recentActivity: string,
+    overrides: Partial<Progress> = {}
+  ): void {
+    if (!this.currentOperation || this.currentOperation.cancelled) {
+      return;
+    }
+
+    this.progress = this.createProgressState({
+      ...this.progress,
+      recentActivity,
+      ...overrides,
+    });
+    this.emit('progress-update', this.progress);
+  }
+
+  private updateSourceProgress(
+    phase: Progress['phase'],
+    source: DownloadSource,
+    step: string,
+    current: number,
+    total: number,
+    progress?: number,
+    overrides: Partial<Progress> = {}
+  ): void {
+    this.updateProgress(step, current, total, progress, {
+      phase,
+      currentSource: source,
+      ...overrides,
+    });
+  }
+
+  private getSourceLabel(source: DownloadSource): string {
+    switch (source) {
+      case 'user-feed':
+        return 'user feed';
+      case 'user-photos':
+        return 'user photos';
+      case 'profile-history':
+        return 'profile picture history';
+      default:
+        return source;
+    }
+  }
+
+  private async runMetadataRequestWithRetry<T>(params: {
+    label: string;
+    source: DownloadSource;
+    operation: () => Promise<T>;
+    operationRef?: CurrentOperation;
+    pageLabel?: string;
+    recentActivity?: string;
+  }): Promise<T> {
+    let attempts = 0;
+    let lastError: Error | undefined;
+
+    while (attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS) {
+      if (params.operationRef?.cancelled || this.currentOperation?.cancelled) {
+        throw this.createOperationCancelledError();
+      }
+
+      attempts++;
+
+      try {
+        const result = await params.operation();
+
+        if (attempts > 1) {
+          this.markProgressRecovery(
+            `Recovered ${params.label} after ${attempts - 1} retr${
+              attempts - 1 === 1 ? 'y' : 'ies'
+            }. Metadata collection is continuing.`
+          );
+        }
+
+        if (params.recentActivity) {
+          this.updateProgressActivity(params.recentActivity, {
+            phase: 'metadata',
+            currentSource: params.source,
+            pageLabel: params.pageLabel,
+          });
+        }
+
+        return result;
+      } catch (error) {
+        if (this.isOperationCancelledError(error)) {
+          throw error;
+        }
+
+        lastError = error as Error;
+        const failureReason = lastError.message || 'unknown_error';
+        const issueMessage =
+          attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS
+            ? `Issue collecting ${params.label}: ${failureReason}. Retry ${attempts}/${PHOTO_DOWNLOAD_RETRY_COUNT} will start now.`
+            : `Metadata collection failed for ${params.label}: ${failureReason}.`;
+
+        this.markProgressIssue(
+          attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS ? 'warning' : 'error',
+          issueMessage,
+          {
+            retryIncrement: attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS ? 1 : 0,
+            failedItemIncrement:
+              attempts >= PHOTO_DOWNLOAD_MAX_ATTEMPTS ? 1 : 0,
+          }
+        );
+
+        if (attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS) {
+          await this.delay(PHOTO_DOWNLOAD_RETRY_DELAY_MS, params.operationRef);
+          continue;
+        }
+      }
+    }
+
+    throw new Error(
+      `Failed to collect ${params.label} after ${PHOTO_DOWNLOAD_RETRY_COUNT} retries: ${
+        lastError?.message || 'unknown_error'
+      }`
+    );
   }
 
   private async downloadPhotoWithRetry(
@@ -2514,7 +2975,8 @@ export class RecNetService extends EventEmitter {
     accountId: string,
     photos: Photo[],
     token?: string,
-    options: BulkDataRefreshOptions = {}
+    options: BulkDataRefreshOptions = {},
+    source: DownloadSource = 'user-photos'
   ): Promise<{
     accountsFetched: number;
     roomsFetched: number;
@@ -2531,7 +2993,18 @@ export class RecNetService extends EventEmitter {
         forceEventsRefresh = false,
       } = options;
       const normalizedPhotos = this.normalizePhotos(photos);
-      this.updateProgress('Extracting IDs from photos...', 0, 0, 0);
+      this.updateSourceProgress(
+        'metadata',
+        source,
+        'Collecting related account, room, and event data...',
+        0,
+        0,
+        0,
+        {
+          pageLabel: 'Related data',
+          recentActivity: `Extracting related IDs from ${this.getSourceLabel(source)} metadata...`,
+        }
+      );
 
       // Extract unique IDs
       const { accountIds, roomIds, eventIds } =
@@ -2539,9 +3012,14 @@ export class RecNetService extends EventEmitter {
       const accountIdsArray = Array.from(accountIds);
       const roomIdsArray = Array.from(roomIds);
       const eventIdsArray = Array.from(eventIds);
-      this.updateProgress('Grabbing unique accounts', 0, 0, 0);
-      this.updateProgress('Grabbing unique rooms', 0, 0, 0);
-      this.updateProgress('Grabbing unique events', 0, 0, 0);
+      this.updateProgressActivity(
+        `Found ${accountIdsArray.length} accounts, ${roomIdsArray.length} rooms, and ${eventIdsArray.length} events in ${this.getSourceLabel(source)} metadata.`,
+        {
+          phase: 'metadata',
+          currentSource: source,
+          pageLabel: 'Related data',
+        }
+      );
 
       console.log(
         `Found ${accountIdsArray.length} unique account IDs, ${roomIdsArray.length} unique room IDs, and ${eventIdsArray.length} unique event IDs`
@@ -2565,11 +3043,16 @@ export class RecNetService extends EventEmitter {
 
       // Fetch and save account data
       if (accountIdsArray.length > 0) {
-        this.updateProgress(
+        this.updateSourceProgress(
+          'metadata',
+          source,
           'Checking account cache',
           0,
           accountIdsArray.length,
-          0
+          0,
+          {
+            pageLabel: 'Accounts',
+          }
         );
 
         let cachedAccounts: PlayerResult[] = [];
@@ -2613,25 +3096,45 @@ export class RecNetService extends EventEmitter {
             : accountIdsArray;
 
         if (missingAccountIds.length === 0) {
-          this.updateProgress(
+          this.updateSourceProgress(
+            'metadata',
+            source,
             'Using cached account data',
             accountIdsArray.length,
             accountIdsArray.length,
-            100
+            100,
+            {
+              pageLabel: 'Accounts',
+              recentActivity: 'Using cached account data.',
+            }
           );
         } else {
-          this.updateProgress(
+          this.updateSourceProgress(
+            'metadata',
+            source,
             `Downloading account data (${missingAccountIds.length} missing of ${accountIdsArray.length})...`,
             0,
             accountIdsArray.length,
-            0
+            0,
+            {
+              pageLabel: 'Accounts',
+              recentActivity: `Downloading ${missingAccountIds.length} missing account record(s)...`,
+            }
           );
 
-          const accountsData = await this.accountsController.fetchBulkAccounts(
-            missingAccountIds,
-            token,
-            requestOptions
-          );
+          const accountsData = await this.runMetadataRequestWithRetry({
+            label: 'account metadata',
+            source,
+            operationRef: this.currentOperation ?? undefined,
+            pageLabel: 'Accounts',
+            recentActivity: 'Account metadata downloaded.',
+            operation: () =>
+              this.accountsController.fetchBulkAccounts(
+                missingAccountIds,
+                token,
+                requestOptions
+              ),
+          });
           const normalizedAccounts = Array.isArray(accountsData)
             ? this.normalizeAccounts(accountsData)
             : [];
@@ -2662,18 +3165,33 @@ export class RecNetService extends EventEmitter {
             `Saved ${mergedAccounts.length} accounts to ${accountsJsonPath} (downloaded ${normalizedAccounts.length} new entries)`
           );
 
-          this.updateProgress(
+          this.updateSourceProgress(
+            'metadata',
+            source,
             'Account data updated',
             accountIdsArray.length,
             accountIdsArray.length,
-            100
+            100,
+            {
+              pageLabel: 'Accounts',
+            }
           );
         }
       }
 
       // Fetch and save room data
       if (roomIdsArray.length > 0) {
-        this.updateProgress('Checking rooms cache', 0, roomIdsArray.length, 0);
+        this.updateSourceProgress(
+          'metadata',
+          source,
+          'Checking rooms cache',
+          0,
+          roomIdsArray.length,
+          0,
+          {
+            pageLabel: 'Rooms',
+          }
+        );
 
         let cachedRooms: RoomDto[] = [];
         let cachedRoomIds = new Set<string>();
@@ -2699,24 +3217,44 @@ export class RecNetService extends EventEmitter {
             : roomIdsArray;
 
         if (missingRoomIds.length === 0) {
-          this.updateProgress(
+          this.updateSourceProgress(
+            'metadata',
+            source,
             'Using cached room data',
             roomIdsArray.length,
             roomIdsArray.length,
-            100
+            100,
+            {
+              pageLabel: 'Rooms',
+              recentActivity: 'Using cached room data.',
+            }
           );
         } else {
-          this.updateProgress(
+          this.updateSourceProgress(
+            'metadata',
+            source,
             `Downloading room data (${missingRoomIds.length} missing of ${roomIdsArray.length})...`,
             0,
             roomIdsArray.length,
-            0
+            0,
+            {
+              pageLabel: 'Rooms',
+              recentActivity: `Downloading ${missingRoomIds.length} missing room record(s)...`,
+            }
           );
-          const roomsData = await this.roomsController.fetchBulkRooms(
-            missingRoomIds,
-            token,
-            requestOptions
-          );
+          const roomsData = await this.runMetadataRequestWithRetry({
+            label: 'room metadata',
+            source,
+            operationRef: this.currentOperation ?? undefined,
+            pageLabel: 'Rooms',
+            recentActivity: 'Room metadata downloaded.',
+            operation: () =>
+              this.roomsController.fetchBulkRooms(
+                missingRoomIds,
+                token,
+                requestOptions
+              ),
+          });
           const normalizedRooms = Array.isArray(roomsData)
             ? this.normalizeRooms(roomsData)
             : [];
@@ -2736,22 +3274,32 @@ export class RecNetService extends EventEmitter {
             `Saved ${mergedRooms.length} rooms to ${roomsJsonPath} (downloaded ${normalizedRooms.length} new entries)`
           );
 
-          this.updateProgress(
+          this.updateSourceProgress(
+            'metadata',
+            source,
             'Room data updated',
             roomIdsArray.length,
             roomIdsArray.length,
-            100
+            100,
+            {
+              pageLabel: 'Rooms',
+            }
           );
         }
       }
 
       // Fetch and save event data
       if (eventIdsArray.length > 0) {
-        this.updateProgress(
+        this.updateSourceProgress(
+          'metadata',
+          source,
           'Checking events cache',
           0,
           eventIdsArray.length,
-          0
+          0,
+          {
+            pageLabel: 'Events',
+          }
         );
 
         let cachedEvents: EventDto[] = [];
@@ -2782,24 +3330,44 @@ export class RecNetService extends EventEmitter {
             : eventIdsArray;
 
         if (missingEventIds.length === 0) {
-          this.updateProgress(
+          this.updateSourceProgress(
+            'metadata',
+            source,
             'Using cached event data',
             eventIdsArray.length,
             eventIdsArray.length,
-            100
+            100,
+            {
+              pageLabel: 'Events',
+              recentActivity: 'Using cached event data.',
+            }
           );
         } else {
-          this.updateProgress(
+          this.updateSourceProgress(
+            'metadata',
+            source,
             `Downloading event data (${missingEventIds.length} missing of ${eventIdsArray.length})...`,
             0,
             eventIdsArray.length,
-            0
+            0,
+            {
+              pageLabel: 'Events',
+              recentActivity: `Downloading ${missingEventIds.length} missing event record(s)...`,
+            }
           );
-          const eventsData = await this.eventsController.fetchBulkEvents(
-            missingEventIds,
-            token,
-            requestOptions
-          );
+          const eventsData = await this.runMetadataRequestWithRetry({
+            label: 'event metadata',
+            source,
+            operationRef: this.currentOperation ?? undefined,
+            pageLabel: 'Events',
+            recentActivity: 'Event metadata downloaded.',
+            operation: () =>
+              this.eventsController.fetchBulkEvents(
+                missingEventIds,
+                token,
+                requestOptions
+              ),
+          });
           const normalizedEvents = Array.isArray(eventsData)
             ? this.normalizeEvents(eventsData)
             : [];
@@ -2819,11 +3387,16 @@ export class RecNetService extends EventEmitter {
             `Saved ${mergedEvents.length} events to ${eventsJsonPath} (downloaded ${normalizedEvents.length} new entries)`
           );
 
-          this.updateProgress(
+          this.updateSourceProgress(
+            'metadata',
+            source,
             'Event data updated',
             eventIdsArray.length,
             eventIdsArray.length,
-            100
+            100,
+            {
+              pageLabel: 'Events',
+            }
           );
         }
       }
@@ -2835,6 +3408,217 @@ export class RecNetService extends EventEmitter {
       );
       throw error;
     }
+  }
+
+  async buildDownloadPreflightSummary(
+    accountId: string,
+    selection: DownloadSourceSelection
+  ): Promise<DownloadPreflightSummary> {
+    await this.ensureSettingsLoaded();
+
+    const sourceSummaries = await Promise.all(
+      getSelectedDownloadSources(selection).map(source =>
+        this.buildPreflightSourceSummary(accountId, source)
+      )
+    );
+
+    return {
+      accountId,
+      sourceSummaries,
+      totalImages: sourceSummaries.reduce(
+        (sum, summary) => sum + summary.totalImages,
+        0
+      ),
+      totalAlreadyOnDisk: sourceSummaries.reduce(
+        (sum, summary) => sum + summary.alreadyOnDisk,
+        0
+      ),
+      totalRemainingToDownload: sourceSummaries.reduce(
+        (sum, summary) => sum + summary.remainingToDownload,
+        0
+      ),
+    };
+  }
+
+  private async buildPreflightSourceSummary(
+    accountId: string,
+    source: DownloadSource
+  ): Promise<DownloadPreflightSourceSummary> {
+    const accountDir = path.join(this.settings.outputRoot, accountId);
+
+    if (source === 'user-photos') {
+      const metadataPath = path.join(accountDir, `${accountId}_photos.json`);
+      const photosDir = path.join(accountDir, 'photos');
+      const feedDir = path.join(accountDir, 'feed');
+      const metadata = await this.readPhotoMetadataFile(metadataPath);
+      const photosInfo = await this.readImageDirectoryInfo(photosDir);
+      const feedInfo = await this.readImageDirectoryInfo(feedDir);
+      const isOnDisk = (photo: Photo): boolean => {
+        const photoId = this.normalizeId(photo.Id);
+        return !!photoId && (photosInfo.ids.has(photoId) || feedInfo.ids.has(photoId));
+      };
+      const alreadyOnDisk = metadata.filter(isOnDisk).length;
+      const remainingToDownload = Math.max(0, metadata.length - alreadyOnDisk);
+      const privateImagesToDownload = metadata.filter(
+        photo => photo.Accessibility === 0 && !isOnDisk(photo)
+      ).length;
+
+      return {
+        source,
+        label: 'User Photos',
+        totalImages: metadata.length,
+        alreadyOnDisk,
+        remainingToDownload,
+        privateImagesToDownload,
+        metadataPath,
+        downloadDirectory: photosDir,
+      };
+    }
+
+    if (source === 'user-feed') {
+      const metadataPath = path.join(accountDir, `${accountId}_feed.json`);
+      const feedDir = path.join(accountDir, 'feed');
+      const photosDir = path.join(accountDir, 'photos');
+      const metadata = await this.readPhotoMetadataFile(metadataPath);
+      const feedInfo = await this.readImageDirectoryInfo(feedDir);
+      const photosInfo = await this.readImageDirectoryInfo(photosDir);
+      const isOnDisk = (photo: Photo): boolean => {
+        const photoId = this.normalizeId(photo.Id);
+        return !!photoId && (feedInfo.ids.has(photoId) || photosInfo.ids.has(photoId));
+      };
+      const alreadyOnDisk = metadata.filter(isOnDisk).length;
+      const remainingToDownload = Math.max(0, metadata.length - alreadyOnDisk);
+      const privateImagesToDownload = metadata.filter(
+        photo => photo.Accessibility === 0 && !isOnDisk(photo)
+      ).length;
+
+      return {
+        source,
+        label: 'User Feed',
+        totalImages: metadata.length,
+        alreadyOnDisk,
+        remainingToDownload,
+        privateImagesToDownload,
+        metadataPath,
+        downloadDirectory: feedDir,
+      };
+    }
+
+    const metadataPath = path.join(accountDir, `${accountId}_profile_history.json`);
+    const profileHistoryDir = path.join(accountDir, 'profile-history');
+    const manifestPayload = await this.readProfileHistoryManifest(metadataPath);
+    const metadata = this.normalizeProfileHistoryPhotos(manifestPayload, accountId);
+    const directoryInfo = await this.readImageDirectoryInfo(profileHistoryDir);
+    const alreadyOnDisk = metadata.filter(photo => {
+      const photoId = this.normalizeId(photo.Id);
+      return !!photoId && directoryInfo.ids.has(photoId);
+    }).length;
+    const remainingToDownload = Math.max(0, metadata.length - alreadyOnDisk);
+
+    return {
+      source,
+      label: 'Profile Picture History',
+      totalImages: metadata.length,
+      alreadyOnDisk,
+      remainingToDownload,
+      metadataPath,
+      downloadDirectory: profileHistoryDir,
+    };
+  }
+
+  private async readPhotoMetadataFile(metadataPath: string): Promise<Photo[]> {
+    if (!(await fs.pathExists(metadataPath))) {
+      return [];
+    }
+
+    const payload = (await fs.readJson(metadataPath)) as ImageDto[];
+    return Array.isArray(payload) ? this.normalizePhotos(payload) : [];
+  }
+
+  private async readProfileHistoryManifest(
+    metadataPath: string
+  ): Promise<ProfileHistoryImageDto[]> {
+    if (!(await fs.pathExists(metadataPath))) {
+      return [];
+    }
+
+    const payload = (await fs.readJson(metadataPath)) as ProfileHistoryImageDto[];
+    return Array.isArray(payload) ? payload : [];
+  }
+
+  private async readImageDirectoryInfo(directoryPath: string): Promise<{
+    ids: Set<string>;
+  }> {
+    const ids = new Set<string>();
+
+    if (!(await fs.pathExists(directoryPath))) {
+      return { ids };
+    }
+
+    const entries = await fs.readdir(directoryPath);
+    for (const entry of entries) {
+      if (!entry.toLowerCase().endsWith('.jpg')) {
+        continue;
+      }
+
+      const id = path.parse(entry).name;
+      if (id) {
+        ids.add(id);
+      }
+    }
+
+    return { ids };
+  }
+
+  private setDownloadItemActivity(
+    source: DownloadSource,
+    imageLabel: string
+  ): void {
+    this.updateProgressActivity(`Downloading ${imageLabel}...`, {
+      phase: 'download',
+      currentSource: source,
+      activeItemLabel: imageLabel,
+    });
+  }
+
+  private setDownloadResultActivity(
+    source: DownloadSource,
+    result?: DownloadResultItem
+  ): void {
+    if (!result) {
+      return;
+    }
+
+    const imageLabel = result.imageName || result.photoId || 'image';
+    let recentActivity: string | undefined;
+
+    if (result.status === 'downloaded') {
+      recentActivity = `Downloaded ${imageLabel}.`;
+    } else if (
+      result.status &&
+      (result.status.startsWith('already_exists') ||
+        result.status.startsWith('copied_from'))
+    ) {
+      recentActivity = `Grabbed from disk: ${imageLabel}.`;
+    } else if (result.status === 'failed' || result.status === 'error') {
+      const retryCount = Math.max(0, (result.attempts || 1) - 1);
+      recentActivity =
+        retryCount > 0
+          ? `Could not download ${imageLabel} after ${retryCount} retr${
+              retryCount === 1 ? 'y' : 'ies'
+            }.`
+          : `Could not download ${imageLabel}.`;
+    }
+
+    if (!recentActivity) {
+      return;
+    }
+
+    this.updateProgressActivity(recentActivity, {
+      phase: 'download',
+      currentSource: source,
+      activeItemLabel: imageLabel,
+    });
   }
 
   async lookupAccountById(accountId: string): Promise<AccountInfo> {

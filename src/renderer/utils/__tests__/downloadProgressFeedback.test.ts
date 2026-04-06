@@ -7,6 +7,7 @@ import {
 function createProgress(overrides: Partial<Progress> = {}): Progress {
   return {
     isRunning: false,
+    phase: 'complete',
     currentStep: 'Ready',
     progress: 0,
     total: 0,
@@ -26,6 +27,7 @@ describe('downloadProgressFeedback', () => {
     const incident = buildDownloadProgressIncident(
       createProgress({
         isRunning: true,
+        phase: 'download',
         currentStep: 'Downloading user photos...',
         issueCount: 1,
         retryAttempts: 1,
@@ -44,6 +46,7 @@ describe('downloadProgressFeedback', () => {
     const incident = buildDownloadProgressIncident(
       createProgress({
         isRunning: true,
+        phase: 'download',
         currentStep: 'Downloading user photos...',
         issueCount: 1,
         retryAttempts: 1,
@@ -61,6 +64,7 @@ describe('downloadProgressFeedback', () => {
     const incident = buildDownloadProgressIncident(
       createProgress({
         isRunning: false,
+        phase: 'complete',
         currentStep: 'Complete',
         issueCount: 4,
         retryAttempts: 3,
@@ -82,6 +86,7 @@ describe('downloadProgressFeedback', () => {
     const incident = buildDownloadProgressIncident(
       createProgress({
         isRunning: false,
+        phase: 'cancelled',
         currentStep: 'Cancelled',
       })
     );
@@ -94,10 +99,12 @@ describe('downloadProgressFeedback', () => {
   it('emits log entries for issue and recovery transitions', () => {
     const previous = createProgress({
       isRunning: true,
+      phase: 'download',
       currentStep: 'Downloading user photos...',
     });
     const warningProgress = createProgress({
       isRunning: true,
+      phase: 'download',
       currentStep: 'Downloading user photos...',
       issueCount: 1,
       retryAttempts: 1,
@@ -105,6 +112,7 @@ describe('downloadProgressFeedback', () => {
     });
     const recoveredProgress = createProgress({
       isRunning: true,
+      phase: 'download',
       currentStep: 'Downloading user photos...',
       issueCount: 1,
       retryAttempts: 1,
@@ -127,5 +135,34 @@ describe('downloadProgressFeedback', () => {
         type: 'success',
       },
     ]);
+  });
+
+  it('does not create a lingering incident after a clean recovered completion', () => {
+    const incident = buildDownloadProgressIncident(
+      createProgress({
+        isRunning: false,
+        phase: 'complete',
+        currentStep: 'Complete',
+        issueCount: 1,
+        retryAttempts: 1,
+        recoveredAfterRetry: 1,
+        failedItems: 0,
+        lastIssue: 'Recovered image1.jpg after 1 retry. Download is continuing.',
+      })
+    );
+
+    expect(incident).toBeNull();
+  });
+
+  it('does not create an incident while waiting on confirmation', () => {
+    const incident = buildDownloadProgressIncident(
+      createProgress({
+        isRunning: false,
+        phase: 'confirm',
+        currentStep: 'Metadata is ready.',
+      })
+    );
+
+    expect(incident).toBeNull();
   });
 });

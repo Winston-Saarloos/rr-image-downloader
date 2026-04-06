@@ -7,15 +7,18 @@ import type {
   ApiResponse,
   AvailableAccount,
   CollectionResult,
+  DownloadPreflightSummary,
   DownloadResult,
   EventDto,
   Photo,
   ProfileHistoryAccessResult,
+  ProfileHistoryCollectionResult,
   PlayerResult,
   Progress,
   RecNetSettings,
   RoomDto,
 } from './types';
+import type { DownloadSourceSelection } from './download-sources';
 
 export interface ElectronAPI {
   collectPhotos: (params: {
@@ -34,6 +37,14 @@ export interface ElectronAPI {
     forceRoomsRefresh?: boolean;
     forceEventsRefresh?: boolean;
   }) => Promise<ApiResponse<CollectionResult>>;
+  collectProfileHistoryManifest: (params: {
+    accountId: string;
+    token: string;
+  }) => Promise<ApiResponse<ProfileHistoryCollectionResult>>;
+  buildDownloadPreflight: (params: {
+    accountId: string;
+    downloadSources: DownloadSourceSelection;
+  }) => Promise<ApiResponse<DownloadPreflightSummary>>;
 
   downloadPhotos: (params: { accountId: string; token?: string }) => Promise<ApiResponse<DownloadResult>>;
   downloadFeedPhotos: (params: { accountId: string; token?: string }) => Promise<ApiResponse<DownloadResult>>;

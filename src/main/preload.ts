@@ -4,6 +4,10 @@ import type { ElectronAPI } from '../shared/electron-api';
 const electronAPI: ElectronAPI = {
   collectPhotos: (params) => ipcRenderer.invoke('collect-photos', params),
   collectFeedPhotos: (params) => ipcRenderer.invoke('collect-feed-photos', params),
+  collectProfileHistoryManifest: (params) =>
+    ipcRenderer.invoke('collect-profile-history-manifest', params),
+  buildDownloadPreflight: (params) =>
+    ipcRenderer.invoke('build-download-preflight', params),
 
   downloadPhotos: (params) => ipcRenderer.invoke('download-photos', params),
   downloadFeedPhotos: (params) => ipcRenderer.invoke('download-feed-photos', params),

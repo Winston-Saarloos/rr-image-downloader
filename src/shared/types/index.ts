@@ -2,6 +2,7 @@ import { EventDto } from '../../main/models/EventDto';
 import { ImageDto } from '../../main/models/ImageDto';
 import { PlayerResult } from '../../main/models/PlayerDto';
 import { RoomDto } from '../../main/models/RoomDto';
+import type { DownloadSource } from '../download-sources';
 
 export type { EventDto, ImageDto, PlayerResult, RoomDto };
 
@@ -22,6 +23,13 @@ export interface BulkDataRefreshOptions {
 
 export interface Progress {
   isRunning: boolean;
+  phase:
+    | 'metadata'
+    | 'confirm'
+    | 'download'
+    | 'complete'
+    | 'cancelled'
+    | 'failed';
   currentStep: string;
   progress: number;
   total: number;
@@ -31,7 +39,12 @@ export interface Progress {
   retryAttempts: number;
   failedItems: number;
   recoveredAfterRetry: number;
+  currentSource?: DownloadSource;
+  pageLabel?: string;
+  activeItemLabel?: string;
+  recentActivity?: string;
   lastIssue?: string;
+  confirmation?: DownloadPreflightSummary;
 }
 
 export type Photo = Omit<ImageDto, 'PlayerEventId'> & {
@@ -81,6 +94,33 @@ export interface CollectionResult {
   iterationDetails: IterationDetail[];
   sinceTime?: string;
   incremental?: boolean;
+}
+
+export interface ProfileHistoryCollectionResult {
+  accountId: string;
+  saved: string;
+  existingPhotos: number;
+  totalNewPhotosAdded: number;
+  totalPhotos: number;
+}
+
+export interface DownloadPreflightSourceSummary {
+  source: DownloadSource;
+  label: string;
+  totalImages: number;
+  alreadyOnDisk: number;
+  remainingToDownload: number;
+  privateImagesToDownload?: number;
+  metadataPath?: string;
+  downloadDirectory?: string;
+}
+
+export interface DownloadPreflightSummary {
+  accountId: string;
+  sourceSummaries: DownloadPreflightSourceSummary[];
+  totalImages: number;
+  totalAlreadyOnDisk: number;
+  totalRemainingToDownload: number;
 }
 
 export interface DownloadStats {

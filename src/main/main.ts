@@ -14,8 +14,10 @@ import { autoUpdater } from 'electron-updater';
 import { RecNetService } from './services/recnet-service';
 import {
   CollectionResult,
+  DownloadPreflightSummary,
   DownloadResult,
   ProfileHistoryAccessResult,
+  ProfileHistoryCollectionResult,
   RecNetSettings,
   Progress,
   AccountInfo,
@@ -23,6 +25,7 @@ import {
   PlayerResult,
   RoomDto,
 } from '../shared/types';
+import type { DownloadSourceSelection } from '../shared/download-sources';
 import { EventDto } from './models/EventDto';
 
 // Keep a global reference of the window object
@@ -55,6 +58,11 @@ interface DownloadPhotosParams {
 interface ValidateProfileHistoryAccessParams {
   username: string;
   token: string;
+}
+
+interface BuildDownloadPreflightParams {
+  accountId: string;
+  downloadSources: DownloadSourceSelection;
 }
 
 interface ApiResponse<T> {
@@ -396,6 +404,42 @@ ipcMain.handle(
           forceRoomsRefresh: params.forceRoomsRefresh,
           forceEventsRefresh: params.forceEventsRefresh,
         }
+      );
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'collect-profile-history-manifest',
+  async (
+    event: IpcMainInvokeEvent,
+    params: ValidateProfileHistoryAccessParams & { accountId: string }
+  ): Promise<ApiResponse<ProfileHistoryCollectionResult>> => {
+    try {
+      const result = await recNetService.collectProfileHistoryManifest(
+        params.accountId,
+        params.token
+      );
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'build-download-preflight',
+  async (
+    event: IpcMainInvokeEvent,
+    params: BuildDownloadPreflightParams
+  ): Promise<ApiResponse<DownloadPreflightSummary>> => {
+    try {
+      const result = await recNetService.buildDownloadPreflightSummary(
+        params.accountId,
+        params.downloadSources
       );
       return { success: true, data: result };
     } catch (error) {
