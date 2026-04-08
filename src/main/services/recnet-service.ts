@@ -91,7 +91,7 @@ const DEFAULT_SETTINGS: RecNetSettings = {
   outputRoot: 'output',
   cdnBase: DEFAULT_CDN_BASE,
   interPageDelayMs: 100,
-  maxConcurrentDownloads: 3
+  maxConcurrentDownloads: 3,
 };
 
 const PHOTO_DOWNLOAD_RETRY_COUNT = 3;
@@ -137,7 +137,7 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
     cdnBase: DEFAULT_SETTINGS.cdnBase,
     interPageDelayMs,
     maxPhotosToDownload,
-    maxConcurrentDownloads
+    maxConcurrentDownloads,
   };
 }
 
@@ -261,7 +261,7 @@ export class RecNetService extends EventEmitter {
   }
 
   private syncHttpClientSettings(): void {
-    this.httpClient.setRequestDelayMs(this.settings.interPageDelayMs || 0);
+    this.httpClient.setRequestDelayMs(this.settings.interPageDelayMs || 100);
   }
 
   private getPersistedSettingsForDisk(): PersistedRecNetSettings {
@@ -392,10 +392,7 @@ export class RecNetService extends EventEmitter {
   }
 
   private isOperationCancelledError(error: unknown): boolean {
-    return (
-      error instanceof Error &&
-      error.message === 'Operation cancelled'
-    );
+    return error instanceof Error && error.message === 'Operation cancelled';
   }
 
   private isOutOfDiskSpaceError(error: unknown): boolean {
@@ -603,7 +600,12 @@ export class RecNetService extends EventEmitter {
             operation: () =>
               this.photosController.fetchPlayerPhotos(
                 accountId,
-                { skip, take: PHOTO_MAX_PAGE_SIZE, sort: 2, after: lastSortValue },
+                {
+                  skip,
+                  take: PHOTO_MAX_PAGE_SIZE,
+                  sort: 2,
+                  after: lastSortValue,
+                },
                 token,
                 { signal: operation.controller.signal }
               ),
@@ -1084,7 +1086,10 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async downloadPhotos(accountId: string, token?: string): Promise<DownloadResult> {
+  async downloadPhotos(
+    accountId: string,
+    token?: string
+  ): Promise<DownloadResult> {
     await this.ensureSettingsLoaded();
     const operation = this.startOperation();
 
@@ -1153,7 +1158,8 @@ export class RecNetService extends EventEmitter {
           totalPhotos,
           100,
           {
-            recentActivity: 'Everything in user photos is already on disk for this run.',
+            recentActivity:
+              'Everything in user photos is already on disk for this run.',
           }
         );
         this.setOperationComplete();
@@ -1425,7 +1431,8 @@ export class RecNetService extends EventEmitter {
           totalPhotos,
           100,
           {
-            recentActivity: 'Everything in user feed is already on disk for this run.',
+            recentActivity:
+              'Everything in user feed is already on disk for this run.',
           }
         );
         this.setOperationComplete();
@@ -1828,8 +1835,7 @@ export class RecNetService extends EventEmitter {
       const existingFiles = (await fs.readdir(profileHistoryDir)).filter(file =>
         file.toLowerCase().endsWith('.jpg')
       ).length;
-      let remainingDownloadSlots =
-        (maxPhotosToDownload || 0) - existingFiles;
+      let remainingDownloadSlots = (maxPhotosToDownload || 0) - existingFiles;
 
       if (hasDownloadLimit && remainingDownloadSlots <= 0) {
         this.updateSourceProgress(
@@ -2333,7 +2339,9 @@ export class RecNetService extends EventEmitter {
         Description: photo.Description ?? '',
         PlayerId: this.normalizeId(photo.PlayerId) || normalizedAccountId,
         TaggedPlayerIds: Array.isArray(photo.TaggedPlayerIds)
-          ? photo.TaggedPlayerIds.map(id => this.normalizeId(id)).filter(Boolean)
+          ? photo.TaggedPlayerIds.map(id => this.normalizeId(id)).filter(
+              Boolean
+            )
           : [],
         RoomId: this.normalizeId(photo.RoomId),
         PlayerEventId: this.normalizeId(photo.PlayerEventId) || undefined,
@@ -3492,7 +3500,10 @@ export class RecNetService extends EventEmitter {
       const feedInfo = await this.readImageDirectoryInfo(feedDir);
       const isOnDisk = (photo: Photo): boolean => {
         const photoId = this.normalizeId(photo.Id);
-        return !!photoId && (photosInfo.ids.has(photoId) || feedInfo.ids.has(photoId));
+        return (
+          !!photoId &&
+          (photosInfo.ids.has(photoId) || feedInfo.ids.has(photoId))
+        );
       };
       const alreadyOnDisk = metadata.filter(isOnDisk).length;
       const remainingToDownload = Math.max(0, metadata.length - alreadyOnDisk);
@@ -3521,7 +3532,10 @@ export class RecNetService extends EventEmitter {
       const photosInfo = await this.readImageDirectoryInfo(photosDir);
       const isOnDisk = (photo: Photo): boolean => {
         const photoId = this.normalizeId(photo.Id);
-        return !!photoId && (feedInfo.ids.has(photoId) || photosInfo.ids.has(photoId));
+        return (
+          !!photoId &&
+          (feedInfo.ids.has(photoId) || photosInfo.ids.has(photoId))
+        );
       };
       const alreadyOnDisk = metadata.filter(isOnDisk).length;
       const remainingToDownload = Math.max(0, metadata.length - alreadyOnDisk);
@@ -3541,10 +3555,16 @@ export class RecNetService extends EventEmitter {
       };
     }
 
-    const metadataPath = path.join(accountDir, `${accountId}_profile_history.json`);
+    const metadataPath = path.join(
+      accountDir,
+      `${accountId}_profile_history.json`
+    );
     const profileHistoryDir = path.join(accountDir, 'profile-history');
     const manifestPayload = await this.readProfileHistoryManifest(metadataPath);
-    const metadata = this.normalizeProfileHistoryPhotos(manifestPayload, accountId);
+    const metadata = this.normalizeProfileHistoryPhotos(
+      manifestPayload,
+      accountId
+    );
     const directoryInfo = await this.readImageDirectoryInfo(profileHistoryDir);
     const alreadyOnDisk = metadata.filter(photo => {
       const photoId = this.normalizeId(photo.Id);
@@ -3579,7 +3599,9 @@ export class RecNetService extends EventEmitter {
       return [];
     }
 
-    const payload = (await fs.readJson(metadataPath)) as ProfileHistoryImageDto[];
+    const payload = (await fs.readJson(
+      metadataPath
+    )) as ProfileHistoryImageDto[];
     return Array.isArray(payload) ? payload : [];
   }
 
@@ -3913,10 +3935,7 @@ export class RecNetService extends EventEmitter {
             const profileHistory: Photo[] = await fs.readJson(
               profileHistoryJsonPath
             );
-            if (
-              Array.isArray(profileHistory) &&
-              profileHistory.length > 0
-            ) {
+            if (Array.isArray(profileHistory) && profileHistory.length > 0) {
               hasProfileHistory = true;
               profileHistoryCount = profileHistory.length;
             }
