@@ -1,10 +1,11 @@
 import { EventDto } from '../../main/models/EventDto';
 import { ImageDto } from '../../main/models/ImageDto';
+import { ImageCommentDto } from '../../main/models/ImageCommentDto';
 import { PlayerResult } from '../../main/models/PlayerDto';
 import { RoomDto } from '../../main/models/RoomDto';
 import type { DownloadSource } from '../download-sources';
 
-export type { EventDto, ImageDto, PlayerResult, RoomDto };
+export type { EventDto, ImageDto, ImageCommentDto, PlayerResult, RoomDto };
 
 export interface RecNetSettings {
   outputRoot: string;

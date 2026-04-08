@@ -1005,7 +1005,8 @@ describe('RecNetService - Caching Functionality', () => {
         2
       );
       expect(delaySpy).toHaveBeenCalledTimes(1);
-      expect(delaySpy.mock.calls[0]?.[0]).toBe(1000);
+      // Matches IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS in recnet-service (fixed clock at 1000).
+      expect(delaySpy.mock.calls[0]?.[0]).toBe(250);
     });
 
     it('should fetch commenter accounts after image comments are collected', async () => {

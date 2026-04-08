@@ -102,6 +102,7 @@ const PHOTO_DOWNLOAD_RETRY_DELAY_MS = 750;
 const PHOTO_DOWNLOAD_TIMEOUT_MS = 15_000;
 const PHOTO_MAX_PAGE_SIZE = 3_000;
 // RecNet API returns 429s for this if requested too frequently.
+// Serialized globally: one in-flight request and minimum gap between starts.
 const IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS = 250;
 
 type PersistedRecNetSettings = Omit<
@@ -195,6 +196,8 @@ export class RecNetService extends EventEmitter {
   private roomsController: RoomsController;
   private eventsController: EventsController;
   private imageCommentsController: ImageCommentsController;
+  /** Serializes image-comment HTTP calls across overlapping downloads. */
+  private imageCommentRequestGate: Promise<void> = Promise.resolve();
   private lastImageCommentRequestStartedAt = 0;
 
   constructor() {
@@ -2605,25 +2608,36 @@ export class RecNetService extends EventEmitter {
     token?: string,
     options?: { signal?: AbortSignal }
   ): Promise<ImageCommentDto[]> {
-    if (IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS > 0) {
-      const now = Date.now();
-      const waitMs = Math.max(
-        0,
-        this.lastImageCommentRequestStartedAt +
-          IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS -
-          now
-      );
-      if (waitMs > 0) {
-        await this.delay(waitMs, this.currentOperation ?? undefined);
-      }
-    }
+    const previous = this.imageCommentRequestGate;
+    let unlock!: () => void;
+    this.imageCommentRequestGate = new Promise<void>(resolve => {
+      unlock = resolve;
+    });
+    await previous;
 
-    this.lastImageCommentRequestStartedAt = Date.now();
-    return this.imageCommentsController.fetchImageComments(
-      imageId,
-      token,
-      options
-    );
+    try {
+      if (IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS > 0) {
+        const now = Date.now();
+        const waitMs = Math.max(
+          0,
+          this.lastImageCommentRequestStartedAt +
+            IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS -
+            now
+        );
+        if (waitMs > 0) {
+          await this.delay(waitMs, this.currentOperation ?? undefined);
+        }
+      }
+
+      this.lastImageCommentRequestStartedAt = Date.now();
+      return await this.imageCommentsController.fetchImageComments(
+        imageId,
+        token,
+        options
+      );
+    } finally {
+      unlock();
+    }
   }
 
   private async fetchAndSaveImageCommentsMetadata(params: {

@@ -46,6 +46,8 @@ const electronAPI: ElectronAPI = {
   loadAccountsData: (accountId) => ipcRenderer.invoke('load-accounts-data', accountId),
   loadRoomsData: (accountId) => ipcRenderer.invoke('load-rooms-data', accountId),
   loadEventsData: (accountId) => ipcRenderer.invoke('load-events-data', accountId),
+  loadImageCommentsData: (accountId) =>
+    ipcRenderer.invoke('load-image-comments-data', accountId),
 
   getFavorites: () => ipcRenderer.invoke('get-favorites'),
   toggleFavorite: (photoId) => ipcRenderer.invoke('toggle-favorite', photoId),

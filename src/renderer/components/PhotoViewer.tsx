@@ -19,6 +19,7 @@ import {
   Photo,
   AvailableAccount,
   EventDto,
+  ImageCommentDto,
   RoomDto,
   PlayerResult,
 } from '../../shared/types';
@@ -84,6 +85,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     new Map()
   );
   const [eventMap, setEventMap] = useState<Map<string, string>>(new Map());
+  const [imageComments, setImageComments] = useState<ImageCommentDto[]>([]);
   const [feedPhotos, setFeedPhotos] = useState<Photo[]>([]);
   const [profileHistoryPhotos, setProfileHistoryPhotos] = useState<Photo[]>([]);
   const [photoSource, setPhotoSource] = useState<PhotoSource>('photos');
@@ -248,6 +250,27 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
   }, [accountId, electronAPI]);
 
+  const loadImageCommentsData = useCallback(async () => {
+    if (!accountId) {
+      setImageComments([]);
+      return;
+    }
+
+    try {
+      if (electronAPI) {
+        const result = await electronAPI.loadImageCommentsData(accountId);
+        if (result.success && result.data) {
+          setImageComments(result.data as ImageCommentDto[]);
+        } else {
+          setImageComments([]);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load image comments data:', error);
+      setImageComments([]);
+    }
+  }, [accountId, electronAPI]);
+
   const loadPhotos = useCallback(async () => {
     if (!filePath || !accountId) {
       setPhotos([]);
@@ -322,6 +345,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       loadRoomData();
       loadAccountData();
       loadEventData();
+      loadImageCommentsData();
     } else {
       setPhotos([]);
       setFeedPhotos([]);
@@ -329,6 +353,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       setRoomMap(new Map());
       setAccountMap(new Map());
       setEventMap(new Map());
+      setImageComments([]);
     }
   }, [
     filePath,
@@ -337,6 +362,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     loadRoomData,
     loadAccountData,
     loadEventData,
+    loadImageCommentsData,
   ]);
 
   useEffect(() => {
@@ -378,6 +404,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       void loadRoomData();
       void loadAccountData();
       void loadEventData();
+      void loadImageCommentsData();
     }, 5000);
 
     return () => {
@@ -391,6 +418,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     loadRoomData,
     loadAccountData,
     loadEventData,
+    loadImageCommentsData,
   ]);
 
   useEffect(() => {
@@ -402,6 +430,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       void loadRoomData();
       void loadAccountData();
       void loadEventData();
+      void loadImageCommentsData();
     }
   }, [
     isDownloading,
@@ -411,6 +440,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     loadRoomData,
     loadAccountData,
     loadEventData,
+    loadImageCommentsData,
   ]);
 
   const handlePhotoClick = useCallback((photo: Photo) => {
@@ -641,6 +671,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         usernameMap={usernameMap}
         eventMap={eventMap}
         cdnBase={cdnBase}
+        imageComments={imageComments}
       />
     </div>
   );

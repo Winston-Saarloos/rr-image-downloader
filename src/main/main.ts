@@ -27,6 +27,7 @@ import {
 } from '../shared/types';
 import type { DownloadSourceSelection } from '../shared/download-sources';
 import { EventDto } from './models/EventDto';
+import { ImageCommentDto } from './models/ImageCommentDto';
 
 // Keep a global reference of the window object
 let mainWindow: BrowserWindow | null = null;
@@ -134,6 +135,28 @@ const normalizeEventRecord = (event: EventDto): EventDto => ({
   CreatorPlayerId: normalizeId(event.CreatorPlayerId),
   RoomId: normalizeId(event.RoomId),
 });
+
+const normalizeImageCommentRecord = (
+  comment: ImageCommentDto
+): ImageCommentDto => {
+  const cheer =
+    typeof comment.CheerCount === 'number' && Number.isFinite(comment.CheerCount)
+      ? comment.CheerCount
+      : 0;
+  return {
+    ...comment,
+    SavedImageCommentId: normalizeId(comment.SavedImageCommentId),
+    SavedImageId: normalizeId(comment.SavedImageId),
+    PlayerId: normalizeId(comment.PlayerId),
+    Comment:
+      typeof comment.Comment === 'string' ? comment.Comment : String(comment.Comment ?? ''),
+    CreatedAt:
+      typeof comment.CreatedAt === 'string'
+        ? comment.CreatedAt
+        : String(comment.CreatedAt ?? ''),
+    CheerCount: cheer,
+  };
+};
 
 function attachEditableContextMenu(win: BrowserWindow): void {
   win.webContents.on('context-menu', (_event, params) => {
@@ -976,6 +999,35 @@ ipcMain.handle(
       } else {
         return { success: true, data: [] };
       }
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+// Load image comments metadata from JSON file
+ipcMain.handle(
+  'load-image-comments-data',
+  async (
+    event: IpcMainInvokeEvent,
+    accountId: string
+  ): Promise<ApiResponse<ImageCommentDto[]>> => {
+    try {
+      const settings = await recNetService.getSettings();
+      const accountDir = path.join(settings.outputRoot, accountId);
+      const imageCommentsJsonPath = path.join(
+        accountDir,
+        `${accountId}_image_comments.json`
+      );
+
+      if (await fs.pathExists(imageCommentsJsonPath)) {
+        const raw: ImageCommentDto[] = await fs.readJson(imageCommentsJsonPath);
+        const commentsData = Array.isArray(raw)
+          ? raw.map(normalizeImageCommentRecord)
+          : [];
+        return { success: true, data: commentsData };
+      }
+      return { success: true, data: [] };
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }

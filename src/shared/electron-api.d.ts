@@ -10,6 +10,7 @@ import type {
   DownloadPreflightSummary,
   DownloadResult,
   EventDto,
+  ImageCommentDto,
   Photo,
   ProfileHistoryAccessResult,
   ProfileHistoryCollectionResult,
@@ -81,6 +82,9 @@ export interface ElectronAPI {
   loadAccountsData: (accountId: string) => Promise<ApiResponse<PlayerResult[]>>;
   loadRoomsData: (accountId: string) => Promise<ApiResponse<RoomDto[]>>;
   loadEventsData: (accountId: string) => Promise<ApiResponse<EventDto[]>>;
+  loadImageCommentsData: (
+    accountId: string
+  ) => Promise<ApiResponse<ImageCommentDto[]>>;
 
   getFavorites: () => Promise<ApiResponse<string[]>>;
   toggleFavorite: (photoId: string) => Promise<ApiResponse<boolean>>;
