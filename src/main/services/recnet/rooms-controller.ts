@@ -62,32 +62,8 @@ export class RoomsController {
           `Failed to fetch batch of rooms: ${(error as Error).message}`
         );
       }
-
-      if (i + batchSize < roomIds.length) {
-        await this.delayBetweenBatches(options?.signal);
-      }
     }
 
     return results;
-  }
-
-  private delayBetweenBatches(signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted) {
-      return Promise.reject(new Error('Operation cancelled'));
-    }
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      }, 100);
-
-      const onAbort = () => {
-        clearTimeout(timeout);
-        reject(new Error('Operation cancelled'));
-      };
-
-      signal?.addEventListener('abort', onAbort, { once: true });
-    });
   }
 }

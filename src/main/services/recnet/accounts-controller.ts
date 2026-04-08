@@ -56,10 +56,6 @@ export class AccountsController {
           `Failed to fetch batch of accounts: ${(error as Error).message}`
         );
       }
-
-      if (i + batchSize < accountIds.length) {
-        await this.delayBetweenBatches(options?.signal);
-      }
     }
 
     return results;
@@ -112,27 +108,6 @@ export class AccountsController {
     );
     return this.normalizeAccounts(accounts);
   }
-
-  private delayBetweenBatches(signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted) {
-      return Promise.reject(new Error('Operation cancelled'));
-    }
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      }, 100);
-
-      const onAbort = () => {
-        clearTimeout(timeout);
-        reject(new Error('Operation cancelled'));
-      };
-
-      signal?.addEventListener('abort', onAbort, { once: true });
-    });
-  }
-
   private normalizeAccounts(accounts: PlayerResult[]): PlayerResult[] {
     return accounts.map(account => this.normalizeAccount(account));
   }

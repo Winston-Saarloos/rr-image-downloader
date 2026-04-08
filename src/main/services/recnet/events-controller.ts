@@ -56,32 +56,8 @@ export class EventsController {
           `Failed to fetch batch of events: ${(error as Error).message}`
         );
       }
-
-      if (i + batchSize < eventIds.length) {
-        await this.delayBetweenBatches(options?.signal);
-      }
     }
 
     return results;
-  }
-
-  private delayBetweenBatches(signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted) {
-      return Promise.reject(new Error('Operation cancelled'));
-    }
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      }, 100);
-
-      const onAbort = () => {
-        clearTimeout(timeout);
-        reject(new Error('Operation cancelled'));
-      };
-
-      signal?.addEventListener('abort', onAbort, { once: true });
-    });
   }
 }
