@@ -90,6 +90,59 @@ describe('RecNetService - File Saving Functionality', () => {
     }
   });
 
+  describe('Settings persistence', () => {
+    it('does not persist runtime-only throttling settings to disk', async () => {
+      jest.clearAllMocks();
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+
+      const localService = new RecNetService();
+      await localService.updateSettings({
+        outputRoot: testOutputDir,
+        interPageDelayMs: 250,
+        maxConcurrentDownloads: 9,
+        maxPhotosToDownload: 4,
+      });
+
+      const savedSettings = mockedFs.writeJson.mock.calls.at(-1)?.[1] as Record<
+        string,
+        unknown
+      >;
+
+      expect(savedSettings).toMatchObject({
+        outputRoot: testOutputDir,
+        maxPhotosToDownload: 4,
+      });
+      expect(savedSettings).not.toHaveProperty('interPageDelayMs');
+      expect(savedSettings).not.toHaveProperty('maxConcurrentDownloads');
+    });
+
+    it('ignores legacy runtime-only throttling settings from disk', async () => {
+      jest.clearAllMocks();
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(true);
+      (mockedFs.readJson as jest.Mock).mockResolvedValue({
+        outputRoot: testOutputDir,
+        maxPhotosToDownload: 7,
+        interPageDelayMs: 999,
+        maxConcurrentDownloads: 25,
+      });
+
+      const localService = new RecNetService();
+      const settings = await localService.getSettings();
+
+      expect(settings.outputRoot).toBe(testOutputDir);
+      expect(settings.maxPhotosToDownload).toBe(7);
+      expect(settings.interPageDelayMs).toBe(100);
+      expect(settings.maxConcurrentDownloads).toBe(3);
+
+      const rewrittenSettings = mockedFs.writeJson.mock.calls.at(-1)?.[1] as Record<
+        string,
+        unknown
+      >;
+      expect(rewrittenSettings).not.toHaveProperty('interPageDelayMs');
+      expect(rewrittenSettings).not.toHaveProperty('maxConcurrentDownloads');
+    });
+  });
+
   /**
    * Tests for saving photo files to disk
    *

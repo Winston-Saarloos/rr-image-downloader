@@ -49,7 +49,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleDelayChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.trim();
     if (value === '') {
-      await onUpdateSettings({ interPageDelayMs: 0 });
+      await onUpdateSettings({ interPageDelayMs: 100 });
     } else {
       const numValue = parseInt(value);
       if (!isNaN(numValue)) {
@@ -62,7 +62,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleMaxConcurrentChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.trim();
     if (value === '') {
-      await onUpdateSettings({ maxConcurrentDownloads: 30 });
+      await onUpdateSettings({ maxConcurrentDownloads: 3 });
     } else {
       const numValue = parseInt(value);
       if (!isNaN(numValue)) {
@@ -123,6 +123,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {/* Delay Between Pages */}
         <div className="space-y-2">
           <Label htmlFor="request-delay">Request Delay (ms)</Label>
+          <p className="text-xs text-muted-foreground">
+            Resets to 100 when the app is closed and reopened.
+          </p>
           <Input
             id="request-delay"
             type="number"
@@ -139,6 +142,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {/* Concurrent Downloads */}
         <div className="space-y-2">
           <Label htmlFor="concurrent-downloads">Max Concurrent Downloads</Label>
+          <p className="text-xs text-muted-foreground">
+            Resets to 3 when the app is closed and reopened.
+          </p>
           <Input
             id="concurrent-downloads"
             type="number"

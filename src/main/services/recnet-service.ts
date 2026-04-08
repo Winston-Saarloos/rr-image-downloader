@@ -92,8 +92,8 @@ type DownloadBatchTrace = {
 const DEFAULT_SETTINGS: RecNetSettings = {
   outputRoot: 'output',
   cdnBase: DEFAULT_CDN_BASE,
-  interPageDelayMs: 0,
-  maxConcurrentDownloads: 30,
+  interPageDelayMs: 100,
+  maxConcurrentDownloads: 3,
 };
 
 const PHOTO_DOWNLOAD_RETRY_COUNT = 3;
@@ -103,6 +103,12 @@ const PHOTO_DOWNLOAD_TIMEOUT_MS = 15_000;
 const PHOTO_MAX_PAGE_SIZE = 3_000;
 // RecNet API returns 429s for this if requested too frequently.
 const IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS = 250;
+
+type PersistedRecNetSettings = Omit<
+  RecNetSettings,
+  'interPageDelayMs' | 'maxConcurrentDownloads'
+>;
+
 function normalizeRecNetSettings(input: unknown): RecNetSettings {
   const raw =
     input && typeof input === 'object'
@@ -139,6 +145,44 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
   };
 }
 
+function extractPersistedRecNetSettings(
+  input: unknown
+): Partial<PersistedRecNetSettings> {
+  const raw =
+    input && typeof input === 'object'
+      ? (input as Record<string, unknown>)
+      : {};
+
+  return {
+    outputRoot:
+      typeof raw.outputRoot === 'string' && raw.outputRoot.length > 0
+        ? raw.outputRoot
+        : undefined,
+    cdnBase:
+      typeof raw.cdnBase === 'string' && raw.cdnBase.length > 0
+        ? raw.cdnBase
+        : undefined,
+    maxPhotosToDownload:
+      typeof raw.maxPhotosToDownload === 'number' &&
+      Number.isFinite(raw.maxPhotosToDownload) &&
+      raw.maxPhotosToDownload > 0
+        ? Math.floor(raw.maxPhotosToDownload)
+        : undefined,
+  };
+}
+
+function hasLegacyRuntimeOnlySettings(input: unknown): boolean {
+  if (!input || typeof input !== 'object') {
+    return false;
+  }
+
+  const raw = input as Record<string, unknown>;
+  return (
+    Object.prototype.hasOwnProperty.call(raw, 'interPageDelayMs') ||
+    Object.prototype.hasOwnProperty.call(raw, 'maxConcurrentDownloads')
+  );
+}
+
 export class RecNetService extends EventEmitter {
   private settingsPath: string;
   private settings: RecNetSettings;
@@ -171,6 +215,7 @@ export class RecNetService extends EventEmitter {
     });
 
     this.httpClient = new RecNetHttpClient();
+    this.syncHttpClientSettings();
     this.photosController = new PhotosController(this.httpClient);
     this.accountsController = new AccountsController(this.httpClient);
     this.roomsController = new RoomsController(this.httpClient);
@@ -191,13 +236,18 @@ export class RecNetService extends EventEmitter {
         const savedSettings = await fs.readJson(this.settingsPath);
         this.settings = normalizeRecNetSettings({
           ...DEFAULT_SETTINGS,
-          ...savedSettings,
+          ...extractPersistedRecNetSettings(savedSettings),
         });
-        console.log('Settings loaded from disk:', this.settings);
+
+        if (hasLegacyRuntimeOnlySettings(savedSettings)) {
+          await this.saveSettings();
+        }
       }
     } catch (error) {
       console.log('Failed to load settings:', (error as Error).message);
     }
+    this.syncHttpClientSettings();
+    console.log('Settings loaded from disk:', this.settings);
     // Ensure output directory exists
     this.ensureOutputDirectory();
   }
@@ -205,8 +255,9 @@ export class RecNetService extends EventEmitter {
   async saveSettings(): Promise<void> {
     try {
       await fs.ensureDir(path.dirname(this.settingsPath));
-      await fs.writeJson(this.settingsPath, this.settings, { spaces: 2 });
-      console.log('Settings saved to disk:', this.settings);
+      const persistedSettings = this.getPersistedSettingsForDisk();
+      await fs.writeJson(this.settingsPath, persistedSettings, { spaces: 2 });
+      console.log('Settings saved to disk:', persistedSettings);
     } catch (error) {
       console.log('Failed to save settings:', (error as Error).message);
     }
@@ -214,6 +265,18 @@ export class RecNetService extends EventEmitter {
 
   private ensureOutputDirectory(): void {
     fs.ensureDirSync(this.settings.outputRoot);
+  }
+
+  private syncHttpClientSettings(): void {
+    this.httpClient.setRequestDelayMs(this.settings.interPageDelayMs || 100);
+  }
+
+  private getPersistedSettingsForDisk(): PersistedRecNetSettings {
+    return {
+      outputRoot: this.settings.outputRoot,
+      cdnBase: this.settings.cdnBase,
+      maxPhotosToDownload: this.settings.maxPhotosToDownload,
+    };
   }
 
   async getSettings(): Promise<RecNetSettings> {
@@ -229,6 +292,7 @@ export class RecNetService extends EventEmitter {
       ...this.settings,
       ...newSettings,
     });
+    this.syncHttpClientSettings();
     this.ensureOutputDirectory();
     await this.saveSettings();
     return this.settings;
@@ -631,10 +695,6 @@ export class RecNetService extends EventEmitter {
         if (hasMorePhotos) {
           skip += PHOTO_MAX_PAGE_SIZE;
           iteration++;
-
-          if (this.settings.interPageDelayMs) {
-            await this.delay(this.settings.interPageDelayMs, operation);
-          }
         }
       }
 
@@ -953,10 +1013,6 @@ export class RecNetService extends EventEmitter {
         if (hasMoreFeedPhotos) {
           skip += PHOTO_MAX_PAGE_SIZE;
           iteration++;
-
-          if (this.settings.interPageDelayMs) {
-            await this.delay(this.settings.interPageDelayMs, operation);
-          }
         }
       }
 
@@ -1172,7 +1228,6 @@ export class RecNetService extends EventEmitter {
         0
       );
 
-      let delay = 0;
       const promises: Array<Promise<DownloadResultItem>> = [];
       const semaphore = new Semaphore(this.settings.maxConcurrentDownloads);
       let scheduledPhotoCount = 0;
@@ -1186,7 +1241,6 @@ export class RecNetService extends EventEmitter {
 
         scheduledPhotoCount++;
         const scheduledIndex = scheduledPhotoCount;
-        const scheduledDelayMs = delay;
         promises.push(
           new Promise<DownloadResultItem>((resolve, reject) => {
             void (async () => {
@@ -1195,9 +1249,6 @@ export class RecNetService extends EventEmitter {
               const runStartedAt = Date.now();
               let result: DownloadResultItem | undefined;
               try {
-                if (scheduledDelayMs) {
-                  await this.delay(scheduledDelayMs, operation);
-                }
                 const slotWaitStartedAt = Date.now();
                 await semaphore.acquire();
                 const slotWaitMs = Date.now() - slotWaitStartedAt;
@@ -1206,7 +1257,7 @@ export class RecNetService extends EventEmitter {
                   scheduledIndex,
                   photoId,
                   imageName,
-                  scheduledDelayMs,
+                  scheduledDelayMs: 0,
                   slotWaitMs,
                 });
                 try {
@@ -1281,7 +1332,6 @@ export class RecNetService extends EventEmitter {
             })();
           })
         );
-        delay += this.settings.interPageDelayMs || 0;
       }
       const downloadResults: DownloadResultItem[] =
         await Promise.all<DownloadResultItem>(promises);
@@ -1451,7 +1501,6 @@ export class RecNetService extends EventEmitter {
         0
       );
 
-      let delay = 0;
       const promises: Array<Promise<DownloadResultItem>> = [];
       const semaphore = new Semaphore(this.settings.maxConcurrentDownloads);
       let scheduledPhotoCount = 0;
@@ -1465,7 +1514,6 @@ export class RecNetService extends EventEmitter {
 
         scheduledPhotoCount++;
         const scheduledIndex = scheduledPhotoCount;
-        const scheduledDelayMs = delay;
         promises.push(
           new Promise<DownloadResultItem>((resolve, reject) => {
             void (async () => {
@@ -1474,9 +1522,6 @@ export class RecNetService extends EventEmitter {
               const runStartedAt = Date.now();
               let result: DownloadResultItem | undefined;
               try {
-                if (scheduledDelayMs) {
-                  await this.delay(scheduledDelayMs, operation);
-                }
                 const slotWaitStartedAt = Date.now();
                 await semaphore.acquire();
                 const slotWaitMs = Date.now() - slotWaitStartedAt;
@@ -1485,7 +1530,7 @@ export class RecNetService extends EventEmitter {
                   scheduledIndex,
                   photoId,
                   imageName,
-                  scheduledDelayMs,
+                  scheduledDelayMs: 0,
                   slotWaitMs,
                 });
                 try {
@@ -1560,7 +1605,6 @@ export class RecNetService extends EventEmitter {
             })();
           })
         );
-        delay += this.settings.interPageDelayMs || 0;
       }
       const downloadResults: DownloadResultItem[] =
         await Promise.all<DownloadResultItem>(promises);
@@ -1887,7 +1931,6 @@ export class RecNetService extends EventEmitter {
         0
       );
 
-      let delay = 0;
       const promises: Array<Promise<DownloadResultItem>> = [];
       const semaphore = new Semaphore(this.settings.maxConcurrentDownloads);
       let scheduledPhotoCount = 0;
@@ -1902,7 +1945,6 @@ export class RecNetService extends EventEmitter {
 
         scheduledPhotoCount++;
         const scheduledIndex = scheduledPhotoCount;
-        const scheduledDelayMs = delay;
         promises.push(
           new Promise<DownloadResultItem>((resolve, reject) => {
             void (async () => {
@@ -1912,10 +1954,6 @@ export class RecNetService extends EventEmitter {
               let result: DownloadResultItem | undefined;
 
               try {
-                if (scheduledDelayMs) {
-                  await this.delay(scheduledDelayMs, operation);
-                }
-
                 const slotWaitStartedAt = Date.now();
                 await semaphore.acquire();
                 const slotWaitMs = Date.now() - slotWaitStartedAt;
@@ -1924,7 +1962,7 @@ export class RecNetService extends EventEmitter {
                   scheduledIndex,
                   photoId,
                   imageName,
-                  scheduledDelayMs,
+                  scheduledDelayMs: 0,
                   slotWaitMs,
                 });
 
@@ -1991,7 +2029,6 @@ export class RecNetService extends EventEmitter {
             })();
           })
         );
-        delay += this.settings.interPageDelayMs || 0;
       }
 
       const downloadResults = await Promise.all<DownloadResultItem>(promises);
@@ -4081,6 +4118,7 @@ export class RecNetService extends EventEmitter {
       }
 
       this.settings = { ...DEFAULT_SETTINGS };
+      this.syncHttpClientSettings();
       this.currentOperation = null;
       this.progress = this.createProgressState({
         isRunning: false,
