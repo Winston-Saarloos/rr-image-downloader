@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   MapPin,
   Users,
+  User,
   Calendar,
   Heart,
   FolderOpen,
@@ -18,8 +19,8 @@ import {
 } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
 import { Chip } from '../components/ui/chip';
-import { Photo } from '../../shared/types';
-import { format } from 'date-fns';
+import { ImageCommentDto, Photo } from '../../shared/types';
+import { format, isValid, parseISO } from 'date-fns';
 import { DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import { usePhotoMetadata } from '../hooks/usePhotoMetadata';
 import { useFavorites } from '../hooks/useFavorites';
@@ -33,6 +34,7 @@ interface PhotoDetailModalProps {
   usernameMap?: Map<string, string>;
   eventMap?: Map<string, string>;
   cdnBase?: string;
+  imageComments?: ImageCommentDto[];
 }
 
 type OptionalElectronAPI = {
@@ -51,12 +53,34 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   usernameMap = new Map(),
   eventMap = new Map(),
   cdnBase = DEFAULT_CDN_BASE,
+  imageComments = [],
 }) => {
   const { getPhotoRoom, getPhotoTaggedUsers, getPhotoImageUrl, getPhotoEvent } =
     usePhotoMetadata(roomMap, accountMap, eventMap, cdnBase, usernameMap);
   const { isFavorite, toggleFavorite } = useFavorites();
   const electronAPI = (window as Window & { electronAPI?: OptionalElectronAPI })
     .electronAPI;
+
+  const photoComments = useMemo(() => {
+    if (!photo) {
+      return [];
+    }
+    const id = String(photo.Id);
+    const parseTime = (raw: string): number => {
+      if (!raw) {
+        return 0;
+      }
+      const fromIso = parseISO(raw);
+      if (isValid(fromIso)) {
+        return fromIso.getTime();
+      }
+      const fallback = new Date(raw);
+      return isValid(fallback) ? fallback.getTime() : 0;
+    };
+    return imageComments
+      .filter(c => c.SavedImageId === id)
+      .sort((a, b) => parseTime(a.CreatedAt) - parseTime(b.CreatedAt));
+  }, [imageComments, photo]);
 
   if (!photo) return null;
 
@@ -85,6 +109,23 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
     }
     await electronAPI.openPathInExplorer(localFilePath);
   };
+
+  const formatCommentDate = (raw: string): string => {
+    if (!raw) {
+      return '';
+    }
+    const fromIso = parseISO(raw);
+    if (isValid(fromIso)) {
+      return format(fromIso, 'MMMM d, yyyy h:mm a');
+    }
+    const fallback = new Date(raw);
+    if (isValid(fallback)) {
+      return format(fallback, 'MMMM d, yyyy h:mm a');
+    }
+    return raw;
+  };
+
+  const showCommentsSection = commentCount > 0 || photoComments.length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -193,6 +234,96 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
                 <span>{cheerCount}</span>
               </div>
             </div>
+
+            {showCommentsSection && (
+              <div className="pt-2 border-t">
+                <div className="flex items-center gap-2 mb-2">
+                  <MessageCircle className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="font-medium">Comments</span>
+                  <span className="text-sm text-muted-foreground">
+                    {photoComments.length > 0
+                      ? `${photoComments.length}${
+                          commentCount > photoComments.length
+                            ? ` of ${commentCount}`
+                            : ''
+                        }`
+                      : commentCount > 0
+                        ? `${commentCount} on RecNet`
+                        : ''}
+                  </span>
+                </div>
+                {photoComments.length > 0 ? (
+                  <div
+                    className="max-h-[min(40vh,20rem)] overflow-y-auto rounded-lg border border-border/80 bg-background px-2 py-1"
+                    role="region"
+                    aria-label="Image comments"
+                  >
+                    <ul className="divide-y divide-border/60">
+                      {photoComments.map(comment => {
+                        const authorName =
+                          accountMap.get(comment.PlayerId) ||
+                          (comment.PlayerId ? comment.PlayerId : 'Unknown');
+                        const username = usernameMap.get(comment.PlayerId);
+                        const dateLabel = formatCommentDate(comment.CreatedAt);
+                        return (
+                          <li
+                            key={comment.SavedImageCommentId}
+                            className="flex gap-3 py-3 first:pt-2 last:pb-2"
+                          >
+                            <div
+                              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+                              aria-hidden
+                            >
+                              <User className="h-5 w-5" strokeWidth={1.75} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 leading-tight">
+                                <span className="text-sm font-semibold">
+                                  {authorName}
+                                </span>
+                                {username ? (
+                                  <span className="text-xs font-normal text-muted-foreground">
+                                    @{username}
+                                  </span>
+                                ) : null}
+                                {dateLabel ? (
+                                  <>
+                                    <span
+                                      className="text-muted-foreground/70"
+                                      aria-hidden
+                                    >
+                                      ·
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {dateLabel}
+                                    </span>
+                                  </>
+                                ) : null}
+                              </div>
+                              <p className="mt-1 text-sm leading-relaxed text-foreground whitespace-pre-wrap break-words">
+                                {comment.Comment}
+                              </p>
+                              {comment.CheerCount > 0 ? (
+                                <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                  <ThumbsUp className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                                  <span className="tabular-nums">
+                                    {comment.CheerCount}
+                                  </span>
+                                </div>
+                              ) : null}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No saved comments for this image
+                  </p>
+                )}
+              </div>
+            )}
 
             {localFilePath && (
               <div className="flex items-start gap-2">

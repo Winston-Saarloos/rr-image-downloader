@@ -45,6 +45,7 @@ interface DownloadDraft {
     forceAccountsRefresh: boolean;
     forceRoomsRefresh: boolean;
     forceEventsRefresh: boolean;
+    forceImageCommentsRefresh: boolean;
   };
 }
 
@@ -60,6 +61,7 @@ interface DownloadPanelProps {
       forceAccountsRefresh: boolean;
       forceRoomsRefresh: boolean;
       forceEventsRefresh: boolean;
+      forceImageCommentsRefresh: boolean;
     }
   ) => Promise<void>;
   onDraftChange?: (draft: DownloadDraft) => void;
@@ -103,6 +105,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const [forceAccountsRefresh, setForceAccountsRefresh] = useState(false);
   const [forceRoomsRefresh, setForceRoomsRefresh] = useState(false);
   const [forceEventsRefresh, setForceEventsRefresh] = useState(false);
+  const [forceImageCommentsRefresh, setForceImageCommentsRefresh] =
+    useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -131,6 +135,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       setForceAccountsRefresh(false);
       setForceRoomsRefresh(false);
       setForceEventsRefresh(false);
+      setForceImageCommentsRefresh(false);
       setAdvancedOpen(false);
     }
   }, [open]);
@@ -145,6 +150,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
         forceAccountsRefresh,
         forceRoomsRefresh,
         forceEventsRefresh,
+        forceImageCommentsRefresh,
       },
     });
   }, [
@@ -152,6 +158,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     filePath,
     forceAccountsRefresh,
     forceEventsRefresh,
+    forceImageCommentsRefresh,
     forceRoomsRefresh,
     onDraftChange,
     token,
@@ -450,6 +457,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       forceAccountsRefresh,
       forceRoomsRefresh,
       forceEventsRefresh,
+      forceImageCommentsRefresh,
     });
   };
 
@@ -735,8 +743,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             {advancedOpen && (
               <div className="border-t px-3 pb-3 pt-2 space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  User, room, and event details are reused when available.
-                  Toggle below to force a fresh download.
+                  User, room, event, and image comment details are reused when
+                  available. Toggle below to force a fresh download.
                 </p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <Button
@@ -774,6 +782,22 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                     {forceEventsRefresh
                       ? 'Force event data refresh'
                       : 'Use cached event data'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={
+                      forceImageCommentsRefresh ? 'destructive' : 'outline'
+                    }
+                    onClick={() =>
+                      setForceImageCommentsRefresh(value => !value)
+                    }
+                    disabled={isDownloading}
+                    className="justify-start"
+                  >
+                    <RefreshCcw className="mr-2 h-4 w-4" />
+                    {forceImageCommentsRefresh
+                      ? 'Force image comment refresh'
+                      : 'Use cached image comments'}
                   </Button>
                 </div>
               </div>

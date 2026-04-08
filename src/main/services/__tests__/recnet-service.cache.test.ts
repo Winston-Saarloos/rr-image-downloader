@@ -17,9 +17,11 @@ import { RecNetService } from '../recnet-service';
 import { AccountsController } from '../recnet/accounts-controller';
 import { RoomsController } from '../recnet/rooms-controller';
 import { EventsController } from '../recnet/events-controller';
+import { ImageCommentsController } from '../recnet/image-comments-controller';
 import { PlayerResult } from '../../models/PlayerDto';
 import { RoomDto } from '../../models/RoomDto';
 import { EventDto } from '../../models/EventDto';
+import { ImageCommentDto } from '../../models/ImageCommentDto';
 import { ImageDto } from '../../models/ImageDto';
 
 // Mock dependencies
@@ -40,6 +42,7 @@ jest.mock('../recnet/photos-controller');
 jest.mock('../recnet/accounts-controller');
 jest.mock('../recnet/rooms-controller');
 jest.mock('../recnet/events-controller');
+jest.mock('../recnet/image-comments-controller');
 
 const mockedFs = fs as jest.Mocked<typeof fs>;
 
@@ -50,6 +53,7 @@ describe('RecNetService - Caching Functionality', () => {
   let mockAccountsController: jest.Mocked<AccountsController>;
   let mockRoomsController: jest.Mocked<RoomsController>;
   let mockEventsController: jest.Mocked<EventsController>;
+  let mockImageCommentsController: jest.Mocked<ImageCommentsController>;
 
   beforeEach(() => {
     testOutputDir = path.join(__dirname, 'test-output', `test-${Date.now()}`);
@@ -73,12 +77,18 @@ describe('RecNetService - Caching Functionality', () => {
       fetchBulkEvents: jest.fn(),
     } as any;
 
+    mockImageCommentsController = {
+      fetchImageComments: jest.fn(),
+    } as any;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any).accountsController = mockAccountsController;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any).roomsController = mockRoomsController;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any).eventsController = mockEventsController;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any).imageCommentsController = mockImageCommentsController;
   });
 
   afterEach(async () => {
@@ -816,6 +826,230 @@ describe('RecNetService - Caching Functionality', () => {
       );
 
       expect(result.eventsFetched).toBe(1);
+    });
+  });
+
+  describe('fetchAndSaveBulkData - Image Comments Caching', () => {
+    const createMockPhoto = (
+      id: string,
+      commentCount: number
+    ): ImageDto => ({
+      Id: id,
+      Type: 1,
+      Accessibility: 0,
+      AccessibilityLocked: false,
+      ImageName: `${id}.jpg`,
+      Description: '',
+      PlayerId: '',
+      TaggedPlayerIds: [],
+      RoomId: '',
+      PlayerEventId: '',
+      CreatedAt: new Date().toISOString(),
+      CheerCount: 0,
+      CommentCount: commentCount,
+    });
+
+    const createMockComment = (
+      commentId: string,
+      imageId: string
+    ): ImageCommentDto => ({
+      SavedImageCommentId: commentId,
+      SavedImageId: imageId,
+      PlayerId: 'player-1',
+      Comment: `Comment ${commentId}`,
+      CheerCount: 0,
+      CreatedAt: new Date().toISOString(),
+    });
+
+    it('should use cached image comments when per-image counts still match', async () => {
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 2)];
+      const cachedComments: ImageCommentDto[] = [
+        createMockComment('comment-1', 'photo-1'),
+        createMockComment('comment-2', 'photo-1'),
+      ];
+
+      const accountDir = path.join(testOutputDir, testAccountId);
+      const imageCommentsJsonPath = path.join(
+        accountDir,
+        `${testAccountId}_image_comments.json`
+      );
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (p: string) => p === imageCommentsJsonPath
+      );
+      (mockedFs.readJson as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === imageCommentsJsonPath) {
+          return cachedComments;
+        }
+        return [];
+      });
+
+      const result = await service.fetchAndSaveBulkData(testAccountId, photos);
+
+      expect(result.imageCommentsFetched).toBe(0);
+      expect(mockImageCommentsController.fetchImageComments).not.toHaveBeenCalled();
+    });
+
+    it('should refresh cached image comments when the current image count changes', async () => {
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 2)];
+      const cachedComments: ImageCommentDto[] = [
+        createMockComment('comment-1', 'photo-1'),
+      ];
+      const refreshedComments: ImageCommentDto[] = [
+        createMockComment('comment-2', 'photo-1'),
+        createMockComment('comment-3', 'photo-1'),
+      ];
+
+      const accountDir = path.join(testOutputDir, testAccountId);
+      const imageCommentsJsonPath = path.join(
+        accountDir,
+        `${testAccountId}_image_comments.json`
+      );
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (p: string) => p === imageCommentsJsonPath
+      );
+      (mockedFs.readJson as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === imageCommentsJsonPath) {
+          return cachedComments;
+        }
+        return [];
+      });
+      mockImageCommentsController.fetchImageComments.mockResolvedValue(
+        refreshedComments
+      );
+
+      const result = await service.fetchAndSaveBulkData(testAccountId, photos);
+
+      expect(result.imageCommentsFetched).toBe(2);
+      expect(mockImageCommentsController.fetchImageComments).toHaveBeenCalledWith(
+        'photo-1',
+        undefined,
+        undefined
+      );
+
+      const commentWrites = mockedFs.writeJson.mock.calls.filter(
+        ([filePath]) => filePath === imageCommentsJsonPath
+      );
+      expect(commentWrites).not.toHaveLength(0);
+      expect(commentWrites[commentWrites.length - 1][1]).toEqual(refreshedComments);
+    });
+
+    it('should force refresh image comments when forceImageCommentsRefresh is true', async () => {
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 2)];
+      const cachedComments: ImageCommentDto[] = [
+        createMockComment('comment-1', 'photo-1'),
+        createMockComment('comment-2', 'photo-1'),
+      ];
+      const refreshedComments: ImageCommentDto[] = [
+        createMockComment('comment-3', 'photo-1'),
+        createMockComment('comment-4', 'photo-1'),
+      ];
+
+      const accountDir = path.join(testOutputDir, testAccountId);
+      const imageCommentsJsonPath = path.join(
+        accountDir,
+        `${testAccountId}_image_comments.json`
+      );
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (p: string) => p === imageCommentsJsonPath
+      );
+      (mockedFs.readJson as jest.Mock).mockImplementation(async (p: string) => {
+        if (p === imageCommentsJsonPath) {
+          return cachedComments;
+        }
+        return [];
+      });
+      mockImageCommentsController.fetchImageComments.mockResolvedValue(
+        refreshedComments
+      );
+
+      const result = await service.fetchAndSaveBulkData(
+        testAccountId,
+        photos,
+        undefined,
+        { forceImageCommentsRefresh: true }
+      );
+
+      expect(result.imageCommentsFetched).toBe(2);
+      expect(mockImageCommentsController.fetchImageComments).toHaveBeenCalledWith(
+        'photo-1',
+        undefined,
+        undefined
+      );
+    });
+
+    it('should rate limit image comment requests globally within the metadata pass', async () => {
+      const photos: ImageDto[] = [
+        createMockPhoto('photo-1', 1),
+        createMockPhoto('photo-2', 1),
+      ];
+      const delaySpy = jest
+        .spyOn(service as any, 'delay')
+        .mockResolvedValue(undefined);
+      const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+      mockImageCommentsController.fetchImageComments
+        .mockResolvedValueOnce([createMockComment('comment-1', 'photo-1')])
+        .mockResolvedValueOnce([createMockComment('comment-2', 'photo-2')]);
+
+      try {
+        await service.fetchAndSaveBulkData(testAccountId, photos);
+      } finally {
+        dateNowSpy.mockRestore();
+      }
+
+      expect(mockImageCommentsController.fetchImageComments).toHaveBeenCalledTimes(
+        2
+      );
+      expect(delaySpy).toHaveBeenCalledTimes(1);
+      // Matches IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS in recnet-service (fixed clock at 1000).
+      expect(delaySpy.mock.calls[0]?.[0]).toBe(250);
+    });
+
+    it('should fetch commenter accounts after image comments are collected', async () => {
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 1)];
+      const refreshedComments: ImageCommentDto[] = [
+        createMockComment('comment-1', 'photo-1'),
+      ];
+      refreshedComments[0].PlayerId = 'commenter-1';
+
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+      mockImageCommentsController.fetchImageComments.mockResolvedValue(
+        refreshedComments
+      );
+      mockAccountsController.fetchBulkAccounts.mockResolvedValue([
+        {
+          accountId: 'commenter-1',
+          username: 'commenter',
+          displayName: 'Commenter',
+          displayEmoji: '',
+          profileImage: 'profile.jpg',
+          bannerImage: 'banner.jpg',
+          isJunior: false,
+          platforms: 1,
+          personalPronouns: 0,
+          identityFlags: 0,
+          createdAt: new Date().toISOString(),
+          isMetaPlatformBlocked: false,
+        },
+      ]);
+
+      const result = await service.fetchAndSaveBulkData(testAccountId, photos);
+
+      expect(result.accountsFetched).toBe(1);
+      expect(mockAccountsController.fetchBulkAccounts).toHaveBeenCalledWith(
+        ['commenter-1'],
+        undefined,
+        undefined
+      );
+      expect(
+        mockImageCommentsController.fetchImageComments.mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        mockAccountsController.fetchBulkAccounts.mock.invocationCallOrder[0]
+      );
     });
   });
 });

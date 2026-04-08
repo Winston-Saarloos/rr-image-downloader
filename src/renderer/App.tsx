@@ -415,6 +415,7 @@ function App() {
       forceAccountsRefresh = false,
       forceRoomsRefresh = false,
       forceEventsRefresh = false,
+      forceImageCommentsRefresh = false,
     } = refreshOptions;
     const requestState: DownloadRequestState = {
       username,
@@ -425,6 +426,7 @@ function App() {
         forceAccountsRefresh,
         forceRoomsRefresh,
         forceEventsRefresh,
+        forceImageCommentsRefresh,
       },
     };
 
@@ -497,6 +499,12 @@ function App() {
               : 'Using existing event data if present',
             'info'
           );
+          addLog(
+            forceImageCommentsRefresh
+              ? 'Forcing refresh of image comment data for this download'
+              : 'Using existing image comment data if present',
+            'info'
+          );
         }
 
         for (const source of selectedSources) {
@@ -510,6 +518,7 @@ function App() {
                 forceAccountsRefresh,
                 forceRoomsRefresh,
                 forceEventsRefresh,
+                forceImageCommentsRefresh,
               });
 
             if (!collectFeedResult.success) {
@@ -534,6 +543,7 @@ function App() {
               forceAccountsRefresh,
               forceRoomsRefresh,
               forceEventsRefresh,
+              forceImageCommentsRefresh,
             });
 
             if (!collectPhotosResult.success) {

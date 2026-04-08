@@ -17,6 +17,8 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import { RecNetService } from '../recnet-service';
 import { PhotosController } from '../recnet/photos-controller';
+import { ImageCommentsController } from '../recnet/image-comments-controller';
+import { ImageCommentDto } from '../../models/ImageCommentDto';
 import { ImageDto } from '../../models/ImageDto';
 import { GenericResponse } from '../../models/GenericResponse';
 
@@ -41,6 +43,7 @@ jest.mock('../recnet/photos-controller');
 jest.mock('../recnet/accounts-controller');
 jest.mock('../recnet/rooms-controller');
 jest.mock('../recnet/events-controller');
+jest.mock('../recnet/image-comments-controller');
 
 const mockedFs = fs as jest.Mocked<typeof fs>;
 
@@ -49,6 +52,7 @@ describe('RecNetService - File Saving Functionality', () => {
   let testOutputDir: string;
   let testAccountId: string;
   let mockPhotosController: jest.Mocked<PhotosController>;
+  let mockImageCommentsController: jest.Mocked<ImageCommentsController>;
 
   beforeEach(() => {
     testOutputDir = path.join(__dirname, 'test-output', `test-${Date.now()}`);
@@ -64,9 +68,14 @@ describe('RecNetService - File Saving Functionality', () => {
       fetchPlayerPhotos: jest.fn(),
       fetchFeedPhotos: jest.fn(),
     } as any;
+    mockImageCommentsController = {
+      fetchImageComments: jest.fn(),
+    } as any;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any).photosController = mockPhotosController;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any).imageCommentsController = mockImageCommentsController;
   });
 
   afterEach(async () => {
@@ -671,6 +680,62 @@ describe('RecNetService - File Saving Functionality', () => {
       expect(mockedFs.writeJson).toHaveBeenCalledWith(
         eventsJsonPath,
         expect.any(Array),
+        { spaces: 2 }
+      );
+    });
+
+    it('should save image comments to a JSON file when a photo has comments', async () => {
+      const accountDir = path.join(testOutputDir, testAccountId);
+      const imageCommentsJsonPath = path.join(
+        accountDir,
+        `${testAccountId}_image_comments.json`
+      );
+
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+
+      const mockComments: ImageCommentDto[] = [
+        {
+          SavedImageCommentId: 'comment-1',
+          SavedImageId: 'photo-1',
+          PlayerId: 'player-1',
+          Comment: 'Burber.',
+          CheerCount: 0,
+          CreatedAt: new Date().toISOString(),
+        },
+      ];
+
+      mockImageCommentsController.fetchImageComments.mockResolvedValue(
+        mockComments
+      );
+
+      const photos: ImageDto[] = [
+        {
+          Id: 'photo-1',
+          Type: 1,
+          Accessibility: 0,
+          AccessibilityLocked: false,
+          ImageName: 'image.jpg',
+          Description: '',
+          PlayerId: '',
+          TaggedPlayerIds: [],
+          RoomId: '',
+          PlayerEventId: '',
+          CreatedAt: new Date().toISOString(),
+          CheerCount: 0,
+          CommentCount: 1,
+        },
+      ];
+
+      await service.fetchAndSaveBulkData(testAccountId, photos);
+
+      expect(mockImageCommentsController.fetchImageComments).toHaveBeenCalledWith(
+        'photo-1',
+        undefined,
+        undefined
+      );
+      expect(mockedFs.writeJson).toHaveBeenCalledWith(
+        imageCommentsJsonPath,
+        mockComments,
         { spaces: 2 }
       );
     });
