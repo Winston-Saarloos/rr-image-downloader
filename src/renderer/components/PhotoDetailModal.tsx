@@ -199,6 +199,7 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
                   <span className="font-medium">Tagged Users: </span>
                   {taggedUsers.map(({ id, displayName, username }, index) => (
                     <Chip
+                      variant="secondary"
                       className="mr-1 inline-flex flex-col items-start gap-0.5 py-1"
                       key={`${id}-${index}`}
                     >
@@ -223,11 +224,13 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
             )}
 
             <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <MessageCircle className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium">Comments:</span>
-                <span>{commentCount}</span>
-              </div>
+              {photoComments.length === 0 && (
+                <div className="flex items-center gap-2">
+                  <MessageCircle className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium">Comments:</span>
+                  <span>{commentCount}</span>
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <ThumbsUp className="h-4 w-4 text-muted-foreground" />
                 <span className="font-medium">Cheers:</span>
