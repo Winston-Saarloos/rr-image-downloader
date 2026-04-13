@@ -100,7 +100,7 @@ const PHOTO_DOWNLOAD_RETRY_COUNT = 3;
 const PHOTO_DOWNLOAD_MAX_ATTEMPTS = PHOTO_DOWNLOAD_RETRY_COUNT + 1;
 const PHOTO_DOWNLOAD_RETRY_DELAY_MS = 750;
 const PHOTO_DOWNLOAD_TIMEOUT_MS = 15_000;
-const PHOTO_MAX_PAGE_SIZE = 3_000;
+const PHOTO_MAX_PAGE_SIZE = 1_000;
 // RecNet API returns 429s for this if requested too frequently.
 // Serialized globally: one in-flight request and minimum gap between starts.
 const IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS = 250;
