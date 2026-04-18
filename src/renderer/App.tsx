@@ -57,6 +57,9 @@ const EMPTY_DOWNLOAD_STEP = 'Nothing to download';
 const CLEAN_DOWNLOAD_FOLLOW_UP =
   'If you take more photos in Rec Room, come back and run this download again. The app will only grab anything new.';
 
+/** Set to true to allow starting a library move from the debug menu. */
+const LIBRARY_MOVE_ENABLED = false;
+
 function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
     outputRoot: '',
@@ -1130,6 +1133,7 @@ function App() {
           outputExplorerPath={effectiveOutputExplorerPath}
           libraryMode={libraryMode}
           onLibraryModeChange={setLibraryMode}
+          libraryMoveEnabled={LIBRARY_MOVE_ENABLED}
           onOpenLibraryMove={() => setLibraryMoveDialogOpen(true)}
         />
 

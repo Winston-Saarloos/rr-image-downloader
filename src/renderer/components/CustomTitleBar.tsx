@@ -53,6 +53,8 @@ interface CustomTitleBarProps {
   outputExplorerPath: string;
   libraryMode: LibraryMode;
   onLibraryModeChange: (mode: LibraryMode) => void;
+  /** When false, the library move row is shown but the button stays disabled. */
+  libraryMoveEnabled?: boolean;
   onOpenLibraryMove?: () => void;
 }
 
@@ -76,6 +78,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
   outputExplorerPath,
   libraryMode,
   onLibraryModeChange,
+  libraryMoveEnabled = false,
   onOpenLibraryMove,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -255,17 +258,34 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
               }}
             />
             {onOpenLibraryMove && (
-              <div className="rounded-md border p-3 space-y-2">
-                <p className="text-sm font-medium">Library maintenance</p>
+              <div
+                className={`rounded-md border p-3 space-y-2 ${!libraryMoveEnabled ? 'opacity-80' : ''}`}
+              >
+                <p className="text-sm font-medium">Move Photo Library</p>
                 <p className="text-xs text-muted-foreground">
-                  Move the entire photo library to another empty folder (copy,
+                  Move the entire photo library to another folder (copy, move,
                   verify, then remove the old location).
                 </p>
+                {!libraryMoveEnabled && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    Temporarily disabled
+                  </p>
+                )}
                 <Button
                   type="button"
                   variant="secondary"
                   size="sm"
-                  onClick={() => onOpenLibraryMove()}
+                  disabled={!libraryMoveEnabled}
+                  title={
+                    libraryMoveEnabled
+                      ? undefined
+                      : 'Library move is disabled. Enable LIBRARY_MOVE_ENABLED in App.tsx.'
+                  }
+                  onClick={() => {
+                    if (libraryMoveEnabled) {
+                      onOpenLibraryMove();
+                    }
+                  }}
                 >
                   Move photo library…
                 </Button>
