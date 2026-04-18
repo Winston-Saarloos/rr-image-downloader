@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-import { FolderOpen, Settings as SettingsIcon } from 'lucide-react';
-import { Button } from '../components/ui/button';
+import React from 'react';
+import { Settings as SettingsIcon } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import {
@@ -11,11 +10,11 @@ import {
   CardTitle,
 } from '../components/ui/card';
 import { RecNetSettings } from '../../shared/types';
+import { OutputPathPickerGroup } from './OutputPathPickerGroup';
 
 interface SettingsPanelProps {
   settings: RecNetSettings;
   onUpdateSettings: (settings: Partial<RecNetSettings>) => Promise<void>;
-  onOpenLibraryMove?: () => void;
   onLog: (
     message: string,
     type?: 'info' | 'success' | 'error' | 'warning'
@@ -25,29 +24,8 @@ interface SettingsPanelProps {
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   settings,
   onUpdateSettings,
-  onOpenLibraryMove,
   onLog,
 }) => {
-  const [isSelectingFolder, setIsSelectingFolder] = useState(false);
-
-  const handleSelectFolder = async () => {
-    const api = (window as unknown as { electronAPI?: any }).electronAPI;
-    if (!api) return;
-
-    setIsSelectingFolder(true);
-    try {
-      const folder = await api.selectOutputFolder();
-      if (folder) {
-        await onUpdateSettings({ outputRoot: folder });
-        onLog(`Output folder set to: ${folder}`, 'info');
-      }
-    } catch (error) {
-      onLog(`Failed to select folder: ${error}`, 'error');
-    } finally {
-      setIsSelectingFolder(false);
-    }
-  };
-
   const handleDelayChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.trim();
     if (value === '') {
@@ -100,59 +78,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Output Folder */}
-        <div className="space-y-2">
-          <Label htmlFor="output-path">Output Path</Label>
-          <div className="flex gap-2">
-            <Input
-              id="output-path"
-              type="text"
-              value={settings.outputRoot}
-              readOnly
-              className="flex-1"
-            />
-            <Button
-              onClick={handleSelectFolder}
-              disabled={isSelectingFolder}
-              variant="outline"
-              size="icon"
-            >
-              <FolderOpen className="h-4 w-4" />
-            </Button>
-          </div>
-          {(settings.resolvedOutputRoot ?? '').trim() !== '' && (
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">
-                Files are saved under (resolved path)
-              </p>
-              <p className="break-all rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs">
-                {settings.resolvedOutputRoot}
-              </p>
-            </div>
-          )}
-          {settings.legacyDefaultRelativeOutputWarning && (
-            <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
-              <p>
-                You are using the default relative folder name{' '}
-                <span className="font-mono">output</span>. Its real location depends
-                on how the app was started. Choose a permanent folder (for example
-                under Documents or Pictures) with Browse so your photos always save
-                where you expect.
-              </p>
-              {onOpenLibraryMove && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="border-amber-600/40"
-                  onClick={() => onOpenLibraryMove()}
-                >
-                  Move library to a safe folder…
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
+        <OutputPathPickerGroup
+          settings={settings}
+          onUpdateSettings={onUpdateSettings}
+          heading="Output Path"
+          inputId="output-path"
+          showConfigurationCallout
+          calloutContext="settings"
+          onPickerError={msg => onLog(msg, 'error')}
+          onFolderChosen={path =>
+            onLog(`Output folder set to: ${path}`, 'info')
+          }
+        />
 
         {/* Delay Between Pages */}
         <div className="space-y-2">

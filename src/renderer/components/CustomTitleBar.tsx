@@ -250,7 +250,6 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
             <SettingsPanel
               settings={settings}
               onUpdateSettings={onUpdateSettings}
-              onOpenLibraryMove={onOpenLibraryMove}
               onLog={() => {
                 // Logging handled by parent component
               }}

@@ -60,7 +60,6 @@ const CLEAN_DOWNLOAD_FOLLOW_UP =
 function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
     outputRoot: '',
-    legacyRelativeOutputAllowed: false,
     cdnBase: DEFAULT_CDN_BASE,
     interPageDelayMs: 100,
     maxConcurrentDownloads: 3,
@@ -1160,7 +1159,7 @@ function App() {
               showCancel={isDownloading}
               settings={settings}
               libraryMode={libraryMode}
-              onOpenLibraryMove={() => setLibraryMoveDialogOpen(true)}
+              onUpdateSettings={updateSettings}
             />
           </ErrorBoundary>
 

@@ -58,30 +58,18 @@ export function computeResolvedOutputRoot(outputRoot: string): string {
   return path.isAbsolute(t) ? t : path.resolve(process.cwd(), t);
 }
 
-export function isOutputRootConfiguredForWrites(
-  outputRoot: string,
-  legacyRelativeOutputAllowed: boolean
-): boolean {
+export function isOutputRootConfiguredForWrites(outputRoot: string): boolean {
   const root = typeof outputRoot === 'string' ? outputRoot.trim() : '';
   if (!root) {
     return false;
-  }
-  if (legacyRelativeOutputAllowed) {
-    return true;
   }
   return path.isAbsolute(root);
 }
 
 export function describeOutputConfigurationError(settings: {
   outputRoot: string;
-  legacyRelativeOutputAllowed: boolean;
 }): string | null {
-  if (
-    isOutputRootConfiguredForWrites(
-      settings.outputRoot,
-      settings.legacyRelativeOutputAllowed
-    )
-  ) {
+  if (isOutputRootConfiguredForWrites(settings.outputRoot)) {
     return null;
   }
   if (!settings.outputRoot.trim()) {
@@ -169,7 +157,6 @@ type DownloadBatchTrace = {
 
 const DEFAULT_SETTINGS: RecNetSettings = {
   outputRoot: '',
-  legacyRelativeOutputAllowed: false,
   cdnBase: DEFAULT_CDN_BASE,
   interPageDelayMs: 100,
   maxConcurrentDownloads: 3,
@@ -192,7 +179,6 @@ type PersistedRecNetSettings = Omit<
   | 'interPageDelayMs'
   | 'maxConcurrentDownloads'
   | 'resolvedOutputRoot'
-  | 'legacyDefaultRelativeOutputWarning'
   | 'outputPathConfiguredForDownload'
 >;
 
@@ -223,14 +209,8 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
   const outputRoot =
     typeof raw.outputRoot === 'string' ? raw.outputRoot.trim() : '';
 
-  const legacyRelativeOutputAllowed =
-    typeof raw.legacyRelativeOutputAllowed === 'boolean'
-      ? raw.legacyRelativeOutputAllowed
-      : DEFAULT_SETTINGS.legacyRelativeOutputAllowed;
-
   return {
     outputRoot,
-    legacyRelativeOutputAllowed,
     cdnBase:
       typeof raw.cdnBase === 'string' && raw.cdnBase.length > 0
         ? raw.cdnBase
@@ -253,10 +233,6 @@ function extractPersistedRecNetSettings(
     outputRoot:
       typeof raw.outputRoot === 'string' && raw.outputRoot.length > 0
         ? raw.outputRoot
-        : undefined,
-    legacyRelativeOutputAllowed:
-      typeof raw.legacyRelativeOutputAllowed === 'boolean'
-        ? raw.legacyRelativeOutputAllowed
         : undefined,
     cdnBase:
       typeof raw.cdnBase === 'string' && raw.cdnBase.length > 0
@@ -339,25 +315,36 @@ export class RecNetService extends EventEmitter {
       if (await fs.pathExists(this.settingsPath)) {
         const savedSettings = await fs.readJson(this.settingsPath);
         const savedRecord = savedSettings as Record<string, unknown>;
-        const legacyFromDisk =
-          typeof savedRecord.legacyRelativeOutputAllowed === 'boolean'
-            ? savedRecord.legacyRelativeOutputAllowed
-            : true;
 
         this.settings = normalizeRecNetSettings({
           ...DEFAULT_SETTINGS,
           ...extractPersistedRecNetSettings(savedSettings),
-          legacyRelativeOutputAllowed: legacyFromDisk,
         });
 
+        let shouldRewriteDisk = false;
+        const root = this.settings.outputRoot.trim();
+        if (root !== '' && !path.isAbsolute(root)) {
+          this.settings = { ...this.settings, outputRoot: '' };
+          shouldRewriteDisk = true;
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(
+            savedRecord,
+            'legacyRelativeOutputAllowed'
+          )
+        ) {
+          shouldRewriteDisk = true;
+        }
         if (hasLegacyRuntimeOnlySettings(savedSettings)) {
+          shouldRewriteDisk = true;
+        }
+
+        if (shouldRewriteDisk) {
           await this.saveSettings();
         }
       } else {
         this.settings = normalizeRecNetSettings({
           ...DEFAULT_SETTINGS,
-          outputRoot: '',
-          legacyRelativeOutputAllowed: false,
         });
       }
     } catch (error) {
@@ -399,7 +386,6 @@ export class RecNetService extends EventEmitter {
   private getPersistedSettingsForDisk(): PersistedRecNetSettings {
     return {
       outputRoot: this.settings.outputRoot,
-      legacyRelativeOutputAllowed: this.settings.legacyRelativeOutputAllowed,
       cdnBase: this.settings.cdnBase,
       maxPhotosToDownload: this.settings.maxPhotosToDownload,
     };
@@ -466,10 +452,8 @@ export class RecNetService extends EventEmitter {
 
     const srcRoot = this.getResolvedOutputRoot();
     const outputOk =
-      isOutputRootConfiguredForWrites(
-        this.settings.outputRoot,
-        this.settings.legacyRelativeOutputAllowed
-      ) && srcRoot.trim() !== '';
+      isOutputRootConfiguredForWrites(this.settings.outputRoot) &&
+      srcRoot.trim() !== '';
 
     if (!outputOk) {
       const err =
@@ -701,17 +685,12 @@ export class RecNetService extends EventEmitter {
     const resolvedOutputRoot = computeResolvedOutputRoot(
       this.settings.outputRoot
     );
-    const legacyDefaultRelativeOutputWarning =
-      this.settings.legacyRelativeOutputAllowed &&
-      this.settings.outputRoot === 'output';
     const outputPathConfiguredForDownload = isOutputRootConfiguredForWrites(
-      this.settings.outputRoot,
-      this.settings.legacyRelativeOutputAllowed
+      this.settings.outputRoot
     );
     return {
       ...this.settings,
       resolvedOutputRoot,
-      legacyDefaultRelativeOutputWarning,
       outputPathConfiguredForDownload,
     };
   }
@@ -720,31 +699,15 @@ export class RecNetService extends EventEmitter {
     newSettings: Partial<RecNetSettings>
   ): Promise<RecNetSettings> {
     await this.ensureSettingsLoaded();
-    const {
-      resolvedOutputRoot,
-      legacyDefaultRelativeOutputWarning,
-      outputPathConfiguredForDownload,
-      ...rest
-    } = newSettings;
+    const { resolvedOutputRoot, outputPathConfiguredForDownload, ...rest } =
+      newSettings;
     void resolvedOutputRoot;
-    void legacyDefaultRelativeOutputWarning;
     void outputPathConfiguredForDownload;
 
     this.settings = normalizeRecNetSettings({
       ...this.settings,
       ...rest,
     });
-
-    if (
-      rest.outputRoot !== undefined &&
-      this.settings.outputRoot.trim() !== '' &&
-      path.isAbsolute(this.settings.outputRoot.trim())
-    ) {
-      this.settings = {
-        ...this.settings,
-        legacyRelativeOutputAllowed: false,
-      };
-    }
 
     this.syncHttpClientSettings();
     this.ensureOutputDirectory();

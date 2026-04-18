@@ -4,7 +4,6 @@ import {
   ChevronRight,
   Download,
   ExternalLink,
-  FolderOpen,
   HelpCircle,
   Key,
   RefreshCcw,
@@ -44,24 +43,7 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import type { RoomPhotoSort } from '../../shared/types';
-
-/** Matches main-process absolute path rule without Node `path` in the renderer. */
-function isProbablyAbsoluteSavePath(value: string): boolean {
-  const t = value.trim();
-  if (!t) {
-    return false;
-  }
-  if (t.startsWith('\\\\')) {
-    return true;
-  }
-  if (/^[A-Za-z]:[\\/]/.test(t)) {
-    return true;
-  }
-  if (t.startsWith('/')) {
-    return true;
-  }
-  return false;
-}
+import { OutputPathPickerGroup } from './OutputPathPickerGroup';
 
 interface DownloadDraft {
   username: string;
@@ -101,7 +83,7 @@ interface DownloadPanelProps {
   isDownloading?: boolean;
   showCancel?: boolean;
   settings: RecNetSettings;
-  onOpenLibraryMove?: () => void;
+  onUpdateSettings: (partial: Partial<RecNetSettings>) => Promise<void>;
 }
 
 type UsernameStatus = 'idle' | 'checking' | 'found' | 'not-found';
@@ -117,7 +99,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   showCancel = false,
   settings,
   libraryMode = 'user',
-  onOpenLibraryMove,
+  onUpdateSettings,
 }) => {
   const electronAPI = (window as unknown as { electronAPI?: any }).electronAPI;
   const recNetTokenGuideUrl =
@@ -125,7 +107,6 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const [username, setUsername] = useState('');
   const [roomName, setRoomName] = useState('');
   const [token, setToken] = useState('');
-  const [filePath, setFilePath] = useState(settings.outputRoot || '');
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle');
   const [resolvedAccount, setResolvedAccount] = useState<AccountInfo | null>(
     null
@@ -151,10 +132,6 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const tokenValidationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const tokenValidationRequestIdRef = useRef(0);
   const tokenTextareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    setFilePath(settings.outputRoot || '');
-  }, [settings.outputRoot]);
 
   useEffect(() => {
     return () => {
@@ -183,7 +160,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       roomName,
       libraryMode,
       token,
-      filePath,
+      filePath: settings.outputRoot || '',
       downloadSources,
       roomPhotoSort,
       refreshOptions: {
@@ -195,7 +172,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     });
   }, [
     downloadSources,
-    filePath,
+    settings.outputRoot,
     forceAccountsRefresh,
     forceEventsRefresh,
     forceImageCommentsRefresh,
@@ -355,22 +332,6 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     }, 1000);
   };
 
-  const handleSelectFolder = async () => {
-    setFolderError(null);
-    try {
-      if (electronAPI) {
-        const selectedPath = await electronAPI.selectOutputFolder();
-        if (selectedPath) {
-          setFilePath(selectedPath);
-        }
-      }
-    } catch {
-      setFolderError(
-        'Could not open folder picker. Try typing the path manually.'
-      );
-    }
-  };
-
   const handleTokenChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setToken(cleanToken(e.target.value));
   };
@@ -488,7 +449,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
 
   const handleDownload = async () => {
     const identifier = libraryMode === 'room' ? roomName : username;
-    if (!identifier.trim() || !filePath.trim()) {
+    const outputPath = settings.outputRoot || '';
+    if (!identifier.trim() || !outputPath.trim()) {
       return;
     }
     if (libraryMode === 'event') {
@@ -506,7 +468,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     await onDownload(
       identifier,
       cleanedToken,
-      filePath,
+      outputPath,
       downloadSources,
       {
         forceAccountsRefresh,
@@ -518,10 +480,9 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     );
   };
 
-  const outputSavePathAllowed =
-    filePath.trim() !== '' &&
-    (settings.legacyRelativeOutputAllowed === true ||
-      isProbablyAbsoluteSavePath(filePath));
+  const outputSavePathAllowed = Boolean(
+    settings.outputPathConfiguredForDownload
+  );
 
   const isFormValid =
     (libraryMode === 'room'
@@ -771,91 +732,17 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="filepath">
-              Where should the downloaded photos be saved?
-            </Label>
-            <div className="flex gap-2">
-              <Input
-                id="filepath"
-                placeholder="/photos/2024/image.jpg"
-                value={filePath}
-                onChange={e => {
-                  setFilePath(e.target.value);
-                  setFolderError(null);
-                }}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={handleSelectFolder}
-              >
-                <FolderOpen className="h-4 w-4" />
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              All photos and data are saved to the selected folder. New installs
-              require an absolute path—use Browse or paste a full path (for
-              example <span className="font-mono">D:\Photos\RecRoom</span>).
-            </p>
-            {filePath.trim() === settings.outputRoot.trim() &&
-            (settings.resolvedOutputRoot ?? '').trim() !== '' ? (
-              <div className="space-y-1 rounded-md border bg-muted/30 px-2 py-2">
-                <p className="text-xs font-medium text-muted-foreground">
-                  On disk (resolved location)
-                </p>
-                <p className="break-all font-mono text-xs">
-                  {settings.resolvedOutputRoot}
-                </p>
-              </div>
-            ) : filePath.trim() !== '' &&
-              filePath.trim() !== settings.outputRoot.trim() &&
-              isProbablyAbsoluteSavePath(filePath) ? (
-              <div className="space-y-1 rounded-md border bg-muted/30 px-2 py-2">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Will save under (after you start download)
-                </p>
-                <p className="break-all font-mono text-xs">{filePath.trim()}</p>
-              </div>
-            ) : filePath.trim() !== '' &&
-              !settings.legacyRelativeOutputAllowed &&
-              !isProbablyAbsoluteSavePath(filePath) ? (
-              <p className="text-xs text-amber-700 dark:text-amber-300">
-                This path looks relative. Use Browse or enter a full absolute
-                path, unless you upgraded from an older version that already uses
-                a relative output folder.
-              </p>
-            ) : !filePath.trim() ? (
-              <p className="text-xs text-muted-foreground">
-                Choose an output folder to continue.
-              </p>
-            ) : null}
-            {settings.legacyDefaultRelativeOutputWarning && (
-              <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
-                <p>
-                  The default folder name <span className="font-mono">output</span>{' '}
-                  is relative to where the app was launched from, which can change.
-                  Consider moving your library to a permanent folder (Browse) under
-                  Documents or Pictures.
-                </p>
-                {onOpenLibraryMove && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="border-amber-600/40"
-                    onClick={() => {
-                      onOpenLibraryMove();
-                      onOpenChange(false);
-                    }}
-                  >
-                    Move library to a safe folder…
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
+          <OutputPathPickerGroup
+            settings={settings}
+            onUpdateSettings={onUpdateSettings}
+            heading="Where should the downloaded photos be saved?"
+            inputId="filepath"
+            showConfigurationCallout={libraryMode !== 'event'}
+            calloutContext="download"
+            pickerDisabled={isDownloading}
+            onBeforePick={() => setFolderError(null)}
+            onPickerError={setFolderError}
+          />
 
           {folderError && (
             <p className="text-sm text-red-600 dark:text-red-400">
@@ -989,11 +876,11 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
           >
             {libraryMode === 'room'
               ? !outputSavePathAllowed
-                ? 'Enter a room name and set an absolute save folder (Browse) to start.'
-                : 'Enter a room name and choose a save folder to start.'
+                ? 'Enter a room name and choose an output folder with Browse to start.'
+                : 'Enter a room name to start.'
               : !outputSavePathAllowed
-                ? 'Enter a username, set an absolute save folder (Browse), and select at least one download type to start.'
-                : 'Enter a username, choose a save folder, and select at least one download type to start.'}
+                ? 'Enter a username, choose an output folder with Browse, and select at least one download type to start.'
+                : 'Enter a username and select at least one download type to start.'}
           </p>
 
           <div className="flex gap-2">
