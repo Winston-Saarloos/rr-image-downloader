@@ -7,7 +7,8 @@ export interface DownloadSourceSelection {
 export type DownloadSource =
   | 'user-feed'
   | 'user-photos'
-  | 'profile-history';
+  | 'profile-history'
+  | 'room-photos';
 
 export const DEFAULT_DOWNLOAD_SOURCE_SELECTION: DownloadSourceSelection = {
   downloadUserFeed: true,

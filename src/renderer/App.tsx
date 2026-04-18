@@ -15,6 +15,9 @@ import {
   DownloadPreflightSummary,
   DownloadResult,
   UserFacingIncident,
+  LibraryMode,
+  RoomPhotoBatchResult,
+  RoomPhotoSort,
 } from '../shared/types';
 import {
   DownloadSourceSelection,
@@ -34,9 +37,12 @@ import {
 
 interface DownloadRequestState {
   username: string;
+  roomName: string;
+  libraryMode: LibraryMode;
   token: string;
   filePath: string;
   downloadSources: DownloadSourceSelection;
+  roomPhotoSort: RoomPhotoSort;
   refreshOptions: BulkDataRefreshOptions;
 }
 
@@ -73,6 +79,8 @@ function App() {
   });
 
   const [currentAccountId, setCurrentAccountId] = useState<string>('');
+  const [currentRoomId, setCurrentRoomId] = useState<string>('');
+  const [libraryMode, setLibraryMode] = useState<LibraryMode>('user');
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const [debugMenuOpen, setDebugMenuOpen] = useState(false);
@@ -87,6 +95,7 @@ function App() {
   const scrollPositionRef = useRef(0);
   const photoScrollRef = useRef<HTMLDivElement | null>(null);
   const previousProgressRef = useRef<Progress | null>(null);
+  const stopRoomLoopRef = useRef(false);
   const [logs, setLogs] = useState<
     Array<{
       message: string;
@@ -401,7 +410,8 @@ function App() {
     token: string,
     filePath: string,
     downloadSources: DownloadSourceSelection,
-    refreshOptions: BulkDataRefreshOptions = {}
+    refreshOptions: BulkDataRefreshOptions = {},
+    roomPhotoSort: RoomPhotoSort = 0
   ) => {
     const selectedSources = getSelectedDownloadSources(downloadSources);
     if (!username.trim() || !filePath.trim() || selectedSources.length === 0) {
@@ -419,9 +429,12 @@ function App() {
     } = refreshOptions;
     const requestState: DownloadRequestState = {
       username,
+      roomName: libraryMode === 'room' ? username : '',
+      libraryMode,
       token,
       filePath,
       downloadSources,
+      roomPhotoSort,
       refreshOptions: {
         forceAccountsRefresh,
         forceRoomsRefresh,
@@ -433,7 +446,12 @@ function App() {
     setLastDownloadRequest(requestState);
 
     setIsDownloading(true);
-    addLog(`Starting metadata collection for username: ${username}`, 'info');
+    addLog(
+      libraryMode === 'room'
+        ? `Starting room photo collection for room: ${username}`
+        : `Starting metadata collection for username: ${username}`,
+      'info'
+    );
     setProgress({
       isRunning: true,
       phase: 'metadata',
@@ -459,6 +477,88 @@ function App() {
         await window.electronAPI.updateSettings({ outputRoot: filePath });
         setSettings(prev => ({ ...prev, outputRoot: filePath }));
         addLog(`Output path set to: ${filePath}`, 'info');
+
+        if (libraryMode === 'room') {
+          stopRoomLoopRef.current = false;
+          const roomPhotoSortLabel =
+            roomPhotoSort === 1 ? 'most cheered first' : 'newest first';
+          addLog(`Searching for room: ${username}`, 'info');
+          const roomResult = await window.electronAPI.lookupRoomByName({
+            roomName: username,
+            token: token.trim() || undefined,
+          });
+          if (!roomResult.success || !roomResult.data) {
+            throw new Error(roomResult.error || 'Room not found');
+          }
+
+          const room = roomResult.data;
+          const roomId = room.RoomId.toString();
+          setCurrentRoomId(roomId);
+          addLog(
+            `Found room: ${room.Name} (ID: ${roomId}). Fetching ${roomPhotoSortLabel}.`,
+            'success'
+          );
+
+          let startSkip: number | undefined = undefined;
+          let batchIndex = 0;
+          let latestBatch: RoomPhotoBatchResult | null = null;
+          while (!stopRoomLoopRef.current) {
+            batchIndex++;
+            addLog(`Collecting room photo batch ${batchIndex}...`, 'info');
+            const batchResult: {
+              success: boolean;
+              data?: RoomPhotoBatchResult;
+              error?: string;
+            } = await window.electronAPI.downloadRoomPhotoBatch({
+              roomName: username,
+              token: token.trim() || undefined,
+              startSkip,
+              batchPages: 5,
+              pageSize: 100,
+              sort: roomPhotoSort,
+              forceAccountsRefresh,
+              forceRoomsRefresh,
+              forceEventsRefresh,
+              forceImageCommentsRefresh,
+            });
+
+            if (!batchResult.success || !batchResult.data) {
+              throw new Error(
+                batchResult.error || 'Failed to download room photo batch'
+              );
+            }
+
+            const batchData = batchResult.data;
+            latestBatch = batchData;
+            startSkip = batchData.nextSkip;
+            addResult('Room Photos Batch', batchData, 'success');
+            addLog(
+              `Room batch ${batchIndex} complete: ${batchData.newPhotosAdded} new metadata record(s), ${batchData.downloadStats.newDownloads} downloaded.`,
+              batchData.downloadStats.failedDownloads > 0
+                ? 'warning'
+                : 'success'
+            );
+
+            if (!batchData.hasMore) {
+              break;
+            }
+          }
+
+          if (latestBatch) {
+            addLog(
+              stopRoomLoopRef.current
+                ? 'Room photo gathering stopped.'
+                : 'Room photo gathering complete.',
+              stopRoomLoopRef.current ? 'warning' : 'success'
+            );
+            setCleanCompletionProgress(
+              stopRoomLoopRef.current
+                ? 'Stopped room photo gathering'
+                : 'Completed room photo gathering'
+            );
+          }
+          return;
+        }
 
         // Search for account by username
         addLog(`Searching for account: ${username}`, 'info');
@@ -888,12 +988,14 @@ function App() {
       return;
     }
 
+    setLibraryMode(retryRequest.libraryMode);
     await handleDownload(
       retryRequest.username,
       retryRequest.token,
       retryRequest.filePath,
       retryRequest.downloadSources,
-      retryRequest.refreshOptions
+      retryRequest.refreshOptions,
+      retryRequest.roomPhotoSort
     );
   }, [handleDownload, isDownloading, retryRequest]);
 
@@ -902,6 +1004,15 @@ function App() {
       // Only update if not downloading (to avoid conflicts)
       if (!isDownloading) {
         setCurrentAccountId(accountId || '');
+      }
+    },
+    [isDownloading]
+  );
+
+  const handleViewerRoomChange = useCallback(
+    (roomId?: string) => {
+      if (!isDownloading) {
+        setCurrentRoomId(roomId || '');
       }
     },
     [isDownloading]
@@ -920,6 +1031,7 @@ function App() {
   }, []);
 
   const handleCancelDownload = async () => {
+    stopRoomLoopRef.current = true;
     try {
       if (window.electronAPI) {
         const cancelled = await window.electronAPI.cancelOperation();
@@ -998,6 +1110,8 @@ function App() {
           onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
           onOpenOutputFolder={handleOpenPathInExplorer}
           outputRoot={settings.outputRoot}
+          libraryMode={libraryMode}
+          onLibraryModeChange={setLibraryMode}
         />
 
         <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden pt-14">
@@ -1025,6 +1139,7 @@ function App() {
               isDownloading={isDownloading || !!pendingPreflight}
               showCancel={isDownloading}
               settings={settings}
+              libraryMode={libraryMode}
             />
           </ErrorBoundary>
 
@@ -1067,9 +1182,20 @@ function App() {
             <ErrorBoundary sectionName="Photo viewer">
               <PhotoViewer
                 filePath={settings.outputRoot}
-                accountId={isDownloading ? currentAccountId : undefined}
+                accountId={
+                  libraryMode === 'user' && isDownloading
+                    ? currentAccountId
+                    : undefined
+                }
+                roomId={
+                  libraryMode === 'room' && isDownloading
+                    ? currentRoomId
+                    : undefined
+                }
+                libraryMode={libraryMode}
                 isDownloading={isDownloading}
                 onAccountChange={handleViewerAccountChange}
+                onRoomChange={handleViewerRoomChange}
                 onScrollPositionChange={handlePhotoScroll}
                 scrollContainerRef={photoScrollRef}
                 headerMode={headerMode}

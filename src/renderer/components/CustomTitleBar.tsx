@@ -13,7 +13,15 @@ import { SettingsPanel } from './SettingsPanel';
 import { LogPanel } from './LogPanel';
 import { ResultsPanel } from './ResultsPanel';
 import { RecNetSettings } from '../../shared/types';
+import type { LibraryMode } from '../../shared/types';
 import packageJson from '../../../package.json';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface CustomTitleBarProps {
   onDownloadClick: () => void;
@@ -42,6 +50,8 @@ interface CustomTitleBarProps {
   onOpenDownloadPanel?: () => void;
   onOpenOutputFolder?: (folderPath: string) => void | Promise<void>;
   outputRoot: string;
+  libraryMode: LibraryMode;
+  onLibraryModeChange: (mode: LibraryMode) => void;
 }
 
 export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
@@ -62,6 +72,8 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
   onOpenDownloadPanel,
   onOpenOutputFolder,
   outputRoot,
+  libraryMode,
+  onLibraryModeChange,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
   const resultsSectionRef = useRef<HTMLDivElement | null>(null);
@@ -121,6 +133,27 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
         className="h-10 bg-background border-b border-border flex items-center justify-between px-2 fixed top-0 left-0 right-0 z-50"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
+        <div
+          className="flex items-center gap-2"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <Select
+            value={libraryMode}
+            onValueChange={(value: LibraryMode) => onLibraryModeChange(value)}
+          >
+            <SelectTrigger className="h-8 w-[150px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="user">User Photos</SelectItem>
+              <SelectItem value="room">Room Photos</SelectItem>
+              <SelectItem value="event" disabled>
+                Event Photos
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         {/* Center - Icon and App Name */}
         <div className="flex items-center gap-2 absolute left-1/2 transform -translate-x-1/2 pointer-events-none">
           <img
@@ -150,7 +183,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
               size="icon"
               className="h-8 w-8"
               onClick={onStatsClick}
-              disabled={!currentAccountId}
+              disabled={libraryMode !== 'user' || !currentAccountId}
               aria-label="Stats"
             >
               <BarChart3 className="h-4 w-4" />

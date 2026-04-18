@@ -21,9 +21,12 @@ import {
   RecNetSettings,
   Progress,
   AccountInfo,
+  AvailableRoom,
   Photo,
   PlayerResult,
   RoomDto,
+  RoomPhotoBatchResult,
+  RoomPhotoSort,
 } from '../shared/types';
 import type { DownloadSourceSelection } from '../shared/download-sources';
 import { EventDto } from './models/EventDto';
@@ -66,6 +69,24 @@ interface ValidateProfileHistoryAccessParams {
 interface BuildDownloadPreflightParams {
   accountId: string;
   downloadSources: DownloadSourceSelection;
+}
+
+interface LookupRoomParams {
+  roomName: string;
+  token?: string;
+}
+
+interface DownloadRoomPhotoBatchParams {
+  roomName: string;
+  token?: string;
+  startSkip?: number;
+  batchPages?: number;
+  pageSize?: number;
+  sort?: RoomPhotoSort;
+  forceAccountsRefresh?: boolean;
+  forceRoomsRefresh?: boolean;
+  forceEventsRefresh?: boolean;
+  forceImageCommentsRefresh?: boolean;
 }
 
 interface ApiResponse<T> {
@@ -530,6 +551,39 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'lookup-room-by-name',
+  async (
+    event: IpcMainInvokeEvent,
+    params: LookupRoomParams
+  ): Promise<ApiResponse<RoomDto>> => {
+    try {
+      const result = await recNetService.lookupRoomByName(
+        params.roomName,
+        params.token
+      );
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'download-room-photo-batch',
+  async (
+    event: IpcMainInvokeEvent,
+    params: DownloadRoomPhotoBatchParams
+  ): Promise<ApiResponse<RoomPhotoBatchResult>> => {
+    try {
+      const result = await recNetService.downloadRoomPhotoBatch(params);
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
   'validate-profile-history-access',
   async (
     event: IpcMainInvokeEvent,
@@ -915,6 +969,173 @@ ipcMain.handle(
     try {
       const accounts = await recNetService.listAvailableAccounts();
       return { success: true, data: accounts };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'list-available-rooms',
+  async (): Promise<ApiResponse<AvailableRoom[]>> => {
+    try {
+      const rooms = await recNetService.listAvailableRooms();
+      return { success: true, data: rooms };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-room-photos',
+  async (
+    event: IpcMainInvokeEvent,
+    roomId: string
+  ): Promise<ApiResponse<Photo[]>> => {
+    try {
+      const settings = await recNetService.getSettings();
+      const roomDir = path.join(settings.outputRoot, 'rooms', roomId);
+      const jsonPath = path.join(roomDir, `${roomId}_photos.json`);
+
+      if (!(await fs.pathExists(jsonPath))) {
+        return { success: true, data: [] };
+      }
+
+      const rawPhotos: Photo[] = await fs.readJson(jsonPath);
+      const photos = Array.isArray(rawPhotos)
+        ? rawPhotos.map(normalizePhotoRecord)
+        : [];
+      const photosDir = path.join(roomDir, 'photos');
+      const photoFileIds = new Set<string>();
+
+      if (await fs.pathExists(photosDir)) {
+        const files = await fs.readdir(photosDir);
+        for (const file of files) {
+          const id = path.parse(file).name;
+          if (id) {
+            photoFileIds.add(id);
+          }
+        }
+      }
+
+      const photosWithFiles = photos
+        .filter(photo => photo.Id && photoFileIds.has(photo.Id.toString()))
+        .map(photo => ({
+          ...photo,
+          localFilePath: path.join(photosDir, `${photo.Id}.jpg`),
+        }));
+
+      return { success: true, data: photosWithFiles };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-room-accounts-data',
+  async (
+    event: IpcMainInvokeEvent,
+    roomId: string
+  ): Promise<ApiResponse<PlayerResult[]>> => {
+    try {
+      const settings = await recNetService.getSettings();
+      const jsonPath = path.join(
+        settings.outputRoot,
+        'rooms',
+        roomId,
+        `${roomId}_accounts.json`
+      );
+      if (!(await fs.pathExists(jsonPath))) {
+        return { success: true, data: [] };
+      }
+      const data: PlayerResult[] = (await fs.readJson(jsonPath)).map(
+        normalizePlayerRecord
+      );
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-room-rooms-data',
+  async (
+    event: IpcMainInvokeEvent,
+    roomId: string
+  ): Promise<ApiResponse<RoomDto[]>> => {
+    try {
+      const settings = await recNetService.getSettings();
+      const jsonPath = path.join(
+        settings.outputRoot,
+        'rooms',
+        roomId,
+        `${roomId}_rooms.json`
+      );
+      if (!(await fs.pathExists(jsonPath))) {
+        return { success: true, data: [] };
+      }
+      const data: RoomDto[] = (await fs.readJson(jsonPath)).map(
+        normalizeRoomRecord
+      );
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-room-events-data',
+  async (
+    event: IpcMainInvokeEvent,
+    roomId: string
+  ): Promise<ApiResponse<EventDto[]>> => {
+    try {
+      const settings = await recNetService.getSettings();
+      const jsonPath = path.join(
+        settings.outputRoot,
+        'rooms',
+        roomId,
+        `${roomId}_events.json`
+      );
+      if (!(await fs.pathExists(jsonPath))) {
+        return { success: true, data: [] };
+      }
+      const data: EventDto[] = (await fs.readJson(jsonPath)).map(
+        normalizeEventRecord
+      );
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-room-image-comments-data',
+  async (
+    event: IpcMainInvokeEvent,
+    roomId: string
+  ): Promise<ApiResponse<ImageCommentDto[]>> => {
+    try {
+      const settings = await recNetService.getSettings();
+      const jsonPath = path.join(
+        settings.outputRoot,
+        'rooms',
+        roomId,
+        `${roomId}_image_comments.json`
+      );
+      if (!(await fs.pathExists(jsonPath))) {
+        return { success: true, data: [] };
+      }
+      const raw: ImageCommentDto[] = await fs.readJson(jsonPath);
+      const data = Array.isArray(raw)
+        ? raw.map(normalizeImageCommentRecord)
+        : [];
+      return { success: true, data };
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }

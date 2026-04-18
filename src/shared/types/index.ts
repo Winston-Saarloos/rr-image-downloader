@@ -23,6 +23,9 @@ export interface BulkDataRefreshOptions {
   forceImageCommentsRefresh?: boolean;
 }
 
+export type LibraryMode = 'user' | 'room' | 'event';
+export type RoomPhotoSort = 0 | 1;
+
 export interface Progress {
   isRunning: boolean;
   phase:
@@ -160,6 +163,43 @@ export interface DownloadResult {
   profileHistoryDirectory?: string;
   profileHistoryManifestPath?: string;
   processedCount: number;
+  downloadStats: DownloadStats;
+  downloadResults: DownloadResultItem[];
+  totalResults: number;
+  guidance?: string[];
+}
+
+export interface AvailableRoom {
+  roomId: string;
+  name: string;
+  photoCount: number;
+  hasPhotos: boolean;
+  displayLabel?: string;
+  updatedAt?: string;
+}
+
+export interface RoomPhotoBatchResult {
+  roomId: string;
+  roomName: string;
+  roomPhotoSort: RoomPhotoSort;
+  roomDirectory: string;
+  photosDirectory: string;
+  metadataPath: string;
+  startSkip: number;
+  nextSkip: number;
+  pageSize: number;
+  batchPages: number;
+  pagesFetched: number;
+  photosFetched: number;
+  newPhotosAdded: number;
+  totalPhotos: number;
+  hasMore: boolean;
+  relatedMetadata: {
+    accountsFetched: number;
+    roomsFetched: number;
+    eventsFetched: number;
+    imageCommentsFetched: number;
+  };
   downloadStats: DownloadStats;
   downloadResults: DownloadResultItem[];
   totalResults: number;

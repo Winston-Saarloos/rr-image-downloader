@@ -18,6 +18,7 @@ import {
 import {
   Photo,
   AvailableAccount,
+  AvailableRoom,
   EventDto,
   ImageCommentDto,
   RoomDto,
@@ -28,12 +29,17 @@ import { PhotoGrid } from './PhotoGrid';
 import { PhotoDetailModal } from './PhotoDetailModal';
 import { AccountSelect } from './AccountSelect';
 import { useFavorites } from '../hooks/useFavorites';
+import { RoomSelect } from './RoomSelect';
+import type { LibraryMode } from '../../shared/types';
 
 interface PhotoViewerProps {
   filePath: string;
   accountId?: string;
+  roomId?: string;
+  libraryMode?: LibraryMode;
   isDownloading?: boolean;
   onAccountChange?: (accountId: string | undefined) => void;
+  onRoomChange?: (roomId: string | undefined) => void;
   onScrollPositionChange?: (scrollTop: number) => void;
   scrollContainerRef?: React.RefObject<HTMLDivElement>;
   headerMode?: 'full' | 'compact' | 'hidden';
@@ -49,8 +55,11 @@ type PhotoSource = 'photos' | 'feed' | 'profile-history';
 export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   filePath,
   accountId: propAccountId,
+  roomId: propRoomId,
+  libraryMode = 'user',
   isDownloading = false,
   onAccountChange,
+  onRoomChange,
   onScrollPositionChange,
   scrollContainerRef,
   headerMode = 'full',
@@ -75,9 +84,13 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [availableAccounts, setAvailableAccounts] = useState<
     AvailableAccount[]
   >([]);
+  const [availableRooms, setAvailableRooms] = useState<AvailableRoom[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<
     string | undefined
   >(propAccountId);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(
+    propRoomId
+  );
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [roomMap, setRoomMap] = useState<Map<string, string>>(new Map());
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
@@ -110,8 +123,12 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
 
   // Use propAccountId if provided, otherwise use selectedAccountId
   const accountId = propAccountId || selectedAccountId;
+  const roomId = propRoomId || selectedRoomId;
+  const activeLibraryId = libraryMode === 'room' ? roomId : accountId;
   const basePhotos =
-    photoSource === 'feed'
+    libraryMode === 'room'
+      ? photos
+      : photoSource === 'feed'
       ? feedPhotos
       : photoSource === 'profile-history'
         ? profileHistoryPhotos
@@ -124,7 +141,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   }, [basePhotos, showFavoritesOnly, favorites]);
 
   const activeViewLabel =
-    photoSource === 'feed'
+    libraryMode === 'room'
+      ? 'room photos'
+      : photoSource === 'feed'
       ? 'feed photos'
       : photoSource === 'profile-history'
         ? 'profile picture history'
@@ -133,7 +152,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const hasFeedPhotos = feedPhotos.length > 0;
   const hasProfileHistoryPhotos = profileHistoryPhotos.length > 0;
   const hasPhotoSections =
-    hasUserPhotos || hasFeedPhotos || hasProfileHistoryPhotos;
+    libraryMode === 'room'
+      ? hasUserPhotos
+      : hasUserPhotos || hasFeedPhotos || hasProfileHistoryPhotos;
 
   const loadAvailableAccounts = useCallback(async () => {
     setLoadingAccounts(true);
@@ -160,15 +181,40 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
   }, [electronAPI, selectedAccountId, propAccountId, onAccountChange]);
 
+  const loadAvailableRooms = useCallback(async () => {
+    setLoadingAccounts(true);
+    try {
+      if (electronAPI) {
+        const result = await electronAPI.listAvailableRooms();
+        if (result.success && result.data) {
+          setAvailableRooms(result.data);
+          if (!selectedRoomId && !propRoomId && result.data.length > 0) {
+            const firstRoomId = result.data[0].roomId;
+            setSelectedRoomId(firstRoomId);
+            setPhotoSource('photos');
+            onRoomChange?.(firstRoomId);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load available rooms:', error);
+    } finally {
+      setLoadingAccounts(false);
+    }
+  }, [electronAPI, onRoomChange, propRoomId, selectedRoomId]);
+
   const loadRoomData = useCallback(async () => {
-    if (!accountId) {
+    if (!activeLibraryId) {
       setRoomMap(new Map());
       return;
     }
 
     try {
       if (electronAPI) {
-        const result = await electronAPI.loadRoomsData(accountId);
+        const result =
+          libraryMode === 'room'
+            ? await electronAPI.loadRoomRoomsData(activeLibraryId)
+            : await electronAPI.loadRoomsData(activeLibraryId);
         if (result.success && result.data) {
           const rooms = result.data as RoomDto[];
           const roomMapping = new Map<string, string>();
@@ -186,10 +232,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       console.error('Failed to load room data:', error);
       setRoomMap(new Map());
     }
-  }, [accountId, electronAPI]);
+  }, [activeLibraryId, electronAPI, libraryMode]);
 
   const loadAccountData = useCallback(async () => {
-    if (!accountId) {
+    if (!activeLibraryId) {
       setAccountMap(new Map());
       setUsernameMap(new Map());
       return;
@@ -197,7 +243,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
 
     try {
       if (electronAPI) {
-        const result = await electronAPI.loadAccountsData(accountId);
+        const result =
+          libraryMode === 'room'
+            ? await electronAPI.loadRoomAccountsData(activeLibraryId)
+            : await electronAPI.loadAccountsData(activeLibraryId);
         if (result.success && result.data) {
           const accounts = result.data as PlayerResult[];
           const accountMapping = new Map<string, string>();
@@ -218,17 +267,20 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       setAccountMap(new Map());
       setUsernameMap(new Map());
     }
-  }, [accountId, electronAPI]);
+  }, [activeLibraryId, electronAPI, libraryMode]);
 
   const loadEventData = useCallback(async () => {
-    if (!accountId) {
+    if (!activeLibraryId) {
       setEventMap(new Map());
       return;
     }
 
     try {
       if (electronAPI) {
-        const result = await electronAPI.loadEventsData(accountId);
+        const result =
+          libraryMode === 'room'
+            ? await electronAPI.loadRoomEventsData(activeLibraryId)
+            : await electronAPI.loadEventsData(activeLibraryId);
         if (result.success && result.data) {
           const eventMapping = new Map<string, string>();
           const events = result.data as EventDto[];
@@ -248,17 +300,20 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       console.error('Failed to load event data:', error);
       setEventMap(new Map());
     }
-  }, [accountId, electronAPI]);
+  }, [activeLibraryId, electronAPI, libraryMode]);
 
   const loadImageCommentsData = useCallback(async () => {
-    if (!accountId) {
+    if (!activeLibraryId) {
       setImageComments([]);
       return;
     }
 
     try {
       if (electronAPI) {
-        const result = await electronAPI.loadImageCommentsData(accountId);
+        const result =
+          libraryMode === 'room'
+            ? await electronAPI.loadRoomImageCommentsData(activeLibraryId)
+            : await electronAPI.loadImageCommentsData(activeLibraryId);
         if (result.success && result.data) {
           setImageComments(result.data as ImageCommentDto[]);
         } else {
@@ -269,10 +324,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       console.error('Failed to load image comments data:', error);
       setImageComments([]);
     }
-  }, [accountId, electronAPI]);
+  }, [activeLibraryId, electronAPI, libraryMode]);
 
   const loadPhotos = useCallback(async () => {
-    if (!filePath || !accountId) {
+    if (!filePath || !activeLibraryId) {
       setPhotos([]);
       setFeedPhotos([]);
       setProfileHistoryPhotos([]);
@@ -283,11 +338,26 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     setLoadError(null);
     try {
       if (electronAPI) {
+        if (libraryMode === 'room') {
+          const roomPhotosResult = await electronAPI.loadRoomPhotos(
+            activeLibraryId
+          );
+          setPhotos(
+            roomPhotosResult.success && roomPhotosResult.data
+              ? roomPhotosResult.data
+              : []
+          );
+          setFeedPhotos([]);
+          setProfileHistoryPhotos([]);
+          onPhotosLoadSuccessRef.current?.();
+          return;
+        }
+
         const [photosResult, feedPhotosResult, profileHistoryResult] =
           await Promise.all([
-          electronAPI.loadPhotos(accountId),
-          electronAPI.loadFeedPhotos(accountId),
-          electronAPI.loadProfileHistoryPhotos(accountId),
+          electronAPI.loadPhotos(activeLibraryId),
+          electronAPI.loadFeedPhotos(activeLibraryId),
+          electronAPI.loadProfileHistoryPhotos(activeLibraryId),
         ]);
 
         if (photosResult.success && photosResult.data) {
@@ -322,14 +392,18 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [filePath, accountId, electronAPI]);
+  }, [filePath, activeLibraryId, electronAPI, libraryMode]);
 
   // Load available accounts on mount and when filePath changes
   useEffect(() => {
     if (filePath) {
-      loadAvailableAccounts();
+      if (libraryMode === 'room') {
+        loadAvailableRooms();
+      } else if (libraryMode === 'user') {
+        loadAvailableAccounts();
+      }
     }
-  }, [filePath, loadAvailableAccounts]);
+  }, [filePath, libraryMode, loadAvailableAccounts, loadAvailableRooms]);
 
   // Update selectedAccountId when propAccountId changes
   useEffect(() => {
@@ -340,7 +414,14 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   }, [propAccountId]);
 
   useEffect(() => {
-    if (filePath && accountId) {
+    if (propRoomId !== undefined) {
+      setSelectedRoomId(propRoomId);
+      setPhotoSource('photos');
+    }
+  }, [propRoomId]);
+
+  useEffect(() => {
+    if (filePath && activeLibraryId) {
       loadPhotos();
       loadRoomData();
       loadAccountData();
@@ -357,7 +438,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
   }, [
     filePath,
-    accountId,
+    activeLibraryId,
     loadPhotos,
     loadRoomData,
     loadAccountData,
@@ -366,10 +447,14 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   ]);
 
   useEffect(() => {
-    if (!accountId) {
+    if (!activeLibraryId) {
       return;
     }
 
+    if (libraryMode === 'room') {
+      setPhotoSource('photos');
+      return;
+    }
     if (photoSource === 'photos' && photos.length > 0) {
       return;
     }
@@ -391,11 +476,18 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     if (profileHistoryPhotos.length > 0) {
       setPhotoSource('profile-history');
     }
-  }, [accountId, feedPhotos.length, photoSource, photos.length, profileHistoryPhotos.length]);
+  }, [
+    activeLibraryId,
+    feedPhotos.length,
+    libraryMode,
+    photoSource,
+    photos.length,
+    profileHistoryPhotos.length,
+  ]);
 
   // Reload photos + metadata periodically during download so names resolve
   useEffect(() => {
-    if (!isDownloading || !accountId || !filePath) {
+    if (!isDownloading || !activeLibraryId || !filePath) {
       return;
     }
 
@@ -412,7 +504,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     };
   }, [
     isDownloading,
-    accountId,
+    activeLibraryId,
     filePath,
     loadPhotos,
     loadRoomData,
@@ -425,7 +517,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     const wasDownloading = wasDownloadingRef.current;
     wasDownloadingRef.current = isDownloading;
 
-    if (wasDownloading && !isDownloading && accountId && filePath) {
+    if (wasDownloading && !isDownloading && activeLibraryId && filePath) {
       void loadPhotos();
       void loadRoomData();
       void loadAccountData();
@@ -434,7 +526,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
   }, [
     isDownloading,
-    accountId,
+    activeLibraryId,
     filePath,
     loadPhotos,
     loadRoomData,
@@ -460,6 +552,12 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
   };
 
+  const handleRoomChange = (newRoomId: string) => {
+    setSelectedRoomId(newRoomId);
+    setPhotoSource('photos');
+    onRoomChange?.(newRoomId);
+  };
+
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden">
       <div
@@ -471,7 +569,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       >
         {showFullControls && (
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            {availableAccounts.length > 0 && (
+            {libraryMode === 'user' && availableAccounts.length > 0 && (
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <AccountSelect
                   availableAccounts={availableAccounts}
@@ -488,12 +586,32 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                 )}
               </div>
             )}
+            {libraryMode === 'room' && availableRooms.length > 0 && (
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <RoomSelect
+                  availableRooms={availableRooms}
+                  value={roomId}
+                  onValueChange={handleRoomChange}
+                  disabled={!!propRoomId}
+                />
+                {propRoomId && (
+                  <span className="text-sm text-muted-foreground">
+                    (Downloading...)
+                  </span>
+                )}
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-3 md:justify-end">
               {hasPhotoSections && (
                 <>
                   <span className="text-sm text-muted-foreground">Viewing</span>
-                  {hasUserPhotos && (
+                  {libraryMode === 'room' && hasUserPhotos && (
+                    <Button size="sm" variant="default">
+                      Room Photos ({photos.length})
+                    </Button>
+                  )}
+                  {libraryMode === 'user' && hasUserPhotos && (
                     <Button
                       size="sm"
                       variant={photoSource === 'photos' ? 'default' : 'outline'}
@@ -502,7 +620,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                       My Photos ({photos.length})
                     </Button>
                   )}
-                  {hasFeedPhotos && (
+                  {libraryMode === 'user' && hasFeedPhotos && (
                     <Button
                       size="sm"
                       variant={photoSource === 'feed' ? 'default' : 'outline'}
@@ -511,7 +629,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                       Feed ({feedPhotos.length})
                     </Button>
                   )}
-                  {hasProfileHistoryPhotos && (
+                  {libraryMode === 'user' && hasProfileHistoryPhotos && (
                     <Button
                       size="sm"
                       variant={
@@ -602,9 +720,13 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           <div className="text-center py-12 text-muted-foreground">
             <p>Loading accounts...</p>
           </div>
-        ) : !accountId && availableAccounts.length === 0 ? (
+        ) : libraryMode === 'user' && !accountId && availableAccounts.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <p>No accounts with metadata found. Download photos to get started.</p>
+          </div>
+        ) : libraryMode === 'room' && !roomId && availableRooms.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <p>No rooms with metadata found. Download room photos to get started.</p>
           </div>
         ) : loading ? (
           <div className="text-center py-12 text-muted-foreground">
@@ -642,7 +764,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           </div>
         ) : activePhotos.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>No {activeViewLabel} available for this account.</p>
+            <p>
+              No {activeViewLabel} available for this{' '}
+              {libraryMode === 'room' ? 'room' : 'account'}.
+            </p>
           </div>
         ) : (
           <PhotoGrid

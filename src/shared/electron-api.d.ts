@@ -6,6 +6,7 @@ import type {
   AccountInfo,
   ApiResponse,
   AvailableAccount,
+  AvailableRoom,
   CollectionResult,
   DownloadPreflightSummary,
   DownloadResult,
@@ -18,6 +19,8 @@ import type {
   Progress,
   RecNetSettings,
   RoomDto,
+  RoomPhotoBatchResult,
+  RoomPhotoSort,
 } from './types';
 import type { DownloadSourceSelection } from './download-sources';
 
@@ -59,6 +62,22 @@ export interface ElectronAPI {
     username: string;
     token: string;
   }) => Promise<ApiResponse<ProfileHistoryAccessResult>>;
+  lookupRoomByName: (params: {
+    roomName: string;
+    token?: string;
+  }) => Promise<ApiResponse<RoomDto>>;
+  downloadRoomPhotoBatch: (params: {
+    roomName: string;
+    token?: string;
+    startSkip?: number;
+    batchPages?: number;
+    pageSize?: number;
+    sort?: RoomPhotoSort;
+    forceAccountsRefresh?: boolean;
+    forceRoomsRefresh?: boolean;
+    forceEventsRefresh?: boolean;
+    forceImageCommentsRefresh?: boolean;
+  }) => Promise<ApiResponse<RoomPhotoBatchResult>>;
 
   selectOutputFolder: () => Promise<string | null>;
   getSettings: () => Promise<RecNetSettings>;
@@ -79,11 +98,19 @@ export interface ElectronAPI {
   loadFeedPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
   loadProfileHistoryPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
   listAvailableAccounts: () => Promise<ApiResponse<AvailableAccount[]>>;
+  listAvailableRooms: () => Promise<ApiResponse<AvailableRoom[]>>;
   loadAccountsData: (accountId: string) => Promise<ApiResponse<PlayerResult[]>>;
   loadRoomsData: (accountId: string) => Promise<ApiResponse<RoomDto[]>>;
   loadEventsData: (accountId: string) => Promise<ApiResponse<EventDto[]>>;
   loadImageCommentsData: (
     accountId: string
+  ) => Promise<ApiResponse<ImageCommentDto[]>>;
+  loadRoomPhotos: (roomId: string) => Promise<ApiResponse<Photo[]>>;
+  loadRoomAccountsData: (roomId: string) => Promise<ApiResponse<PlayerResult[]>>;
+  loadRoomRoomsData: (roomId: string) => Promise<ApiResponse<RoomDto[]>>;
+  loadRoomEventsData: (roomId: string) => Promise<ApiResponse<EventDto[]>>;
+  loadRoomImageCommentsData: (
+    roomId: string
   ) => Promise<ApiResponse<ImageCommentDto[]>>;
 
   getFavorites: () => Promise<ApiResponse<string[]>>;
