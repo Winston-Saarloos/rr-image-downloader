@@ -153,9 +153,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
             <SelectContent>
               <SelectItem value="user">User Photos</SelectItem>
               <SelectItem value="room">Room Photos</SelectItem>
-              <SelectItem value="event" disabled>
-                Event Photos
-              </SelectItem>
+              <SelectItem value="event">Event Photos</SelectItem>
             </SelectContent>
           </Select>
         </div>

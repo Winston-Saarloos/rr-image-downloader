@@ -6,10 +6,14 @@ import type {
   AccountInfo,
   ApiResponse,
   AvailableAccount,
+  AvailableEvent,
+  AvailableEventCreator,
   AvailableRoom,
   CollectionResult,
   DownloadPreflightSummary,
   DownloadResult,
+  EventDiscoveryResult,
+  EventPhotoBatchResult,
   EventDto,
   ImageCommentDto,
   Photo,
@@ -80,6 +84,15 @@ export interface ElectronAPI {
     forceEventsRefresh?: boolean;
     forceImageCommentsRefresh?: boolean;
   }) => Promise<ApiResponse<RoomPhotoBatchResult>>;
+  discoverEventsForUsername: (params: {
+    username: string;
+    token?: string;
+  }) => Promise<ApiResponse<EventDiscoveryResult>>;
+  downloadEventPhotos: (params: {
+    creatorAccountId: string;
+    eventIds: string[];
+    token?: string;
+  }) => Promise<ApiResponse<EventPhotoBatchResult>>;
 
   selectOutputFolder: () => Promise<string | null>;
   getSettings: () => Promise<RecNetSettings>;
@@ -111,6 +124,12 @@ export interface ElectronAPI {
   loadProfileHistoryPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
   listAvailableAccounts: () => Promise<ApiResponse<AvailableAccount[]>>;
   listAvailableRooms: () => Promise<ApiResponse<AvailableRoom[]>>;
+  listAvailableEvents: (
+    creatorAccountId?: string
+  ) => Promise<ApiResponse<AvailableEvent[]>>;
+  listAvailableEventCreators: () => Promise<
+    ApiResponse<AvailableEventCreator[]>
+  >;
   loadAccountsData: (accountId: string) => Promise<ApiResponse<PlayerResult[]>>;
   loadRoomsData: (accountId: string) => Promise<ApiResponse<RoomDto[]>>;
   loadEventsData: (accountId: string) => Promise<ApiResponse<EventDto[]>>;
@@ -124,6 +143,29 @@ export interface ElectronAPI {
   loadRoomImageCommentsData: (
     roomId: string
   ) => Promise<ApiResponse<ImageCommentDto[]>>;
+  loadEventAlbumPhotos: (params: {
+    creatorAccountId: string;
+    eventId: string;
+  }) => Promise<ApiResponse<Photo[]>>;
+  loadEventAlbumAccountsData: (params: {
+    creatorAccountId: string;
+    eventId: string;
+  }) => Promise<ApiResponse<PlayerResult[]>>;
+  loadEventAlbumRoomsData: (params: {
+    creatorAccountId: string;
+    eventId: string;
+  }) => Promise<ApiResponse<RoomDto[]>>;
+  loadEventAlbumEventsData: (params: {
+    creatorAccountId: string;
+    eventId: string;
+  }) => Promise<ApiResponse<EventDto[]>>;
+  loadEventAlbumImageCommentsData: (params: {
+    creatorAccountId: string;
+    eventId: string;
+  }) => Promise<ApiResponse<ImageCommentDto[]>>;
+  loadEventAlbumsForCreator: (
+    creatorAccountId: string
+  ) => Promise<ApiResponse<AvailableEvent[]>>;
 
   getFavorites: () => Promise<ApiResponse<string[]>>;
   toggleFavorite: (photoId: string) => Promise<ApiResponse<boolean>>;

@@ -5,7 +5,17 @@ import React, {
   useRef,
   useMemo,
 } from 'react';
-import { Search, Filter, ArrowUpDown, Heart } from 'lucide-react';
+import {
+  Search,
+  Filter,
+  ArrowUpDown,
+  Heart,
+  ArrowLeft,
+  Calendar,
+  Download,
+  Image as ImageIcon,
+  Users,
+} from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import {
@@ -18,6 +28,8 @@ import {
 import {
   Photo,
   AvailableAccount,
+  AvailableEvent,
+  AvailableEventCreator,
   AvailableRoom,
   EventDto,
   ImageCommentDto,
@@ -30,20 +42,24 @@ import { PhotoDetailModal } from './PhotoDetailModal';
 import { AccountSelect } from './AccountSelect';
 import { useFavorites } from '../hooks/useFavorites';
 import { RoomSelect } from './RoomSelect';
-import type { LibraryMode } from '../../shared/types';
+import type { EventDownloadIntent, LibraryMode } from '../../shared/types';
+import { EventCoverImage } from './EventCoverImage';
 
 interface PhotoViewerProps {
   filePath: string;
   accountId?: string;
   roomId?: string;
+  eventCreatorId?: string;
   libraryMode?: LibraryMode;
   isDownloading?: boolean;
   onAccountChange?: (accountId: string | undefined) => void;
   onRoomChange?: (roomId: string | undefined) => void;
+  onEventCreatorChange?: (creatorAccountId: string | undefined) => void;
   onScrollPositionChange?: (scrollTop: number) => void;
   scrollContainerRef?: React.RefObject<HTMLDivElement>;
   headerMode?: 'full' | 'compact' | 'hidden';
   onOpenActivityMenu?: () => void;
+  onOpenDownloadPanel?: (intent?: EventDownloadIntent) => void;
   onRevealOutputFolder?: () => void;
   onPhotosLoadError?: (message: string) => void;
   onPhotosLoadSuccess?: () => void;
@@ -56,14 +72,17 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   filePath,
   accountId: propAccountId,
   roomId: propRoomId,
+  eventCreatorId: propEventCreatorId,
   libraryMode = 'user',
   isDownloading = false,
   onAccountChange,
   onRoomChange,
+  onEventCreatorChange,
   onScrollPositionChange,
   scrollContainerRef,
   headerMode = 'full',
   onOpenActivityMenu,
+  onOpenDownloadPanel,
   onRevealOutputFolder,
   onPhotosLoadError,
   onPhotosLoadSuccess,
@@ -85,12 +104,22 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     AvailableAccount[]
   >([]);
   const [availableRooms, setAvailableRooms] = useState<AvailableRoom[]>([]);
+  const [availableEvents, setAvailableEvents] = useState<AvailableEvent[]>([]);
+  const [availableEventCreators, setAvailableEventCreators] = useState<
+    AvailableEventCreator[]
+  >([]);
+  const [selectedEvent, setSelectedEvent] = useState<AvailableEvent | null>(
+    null
+  );
   const [selectedAccountId, setSelectedAccountId] = useState<
     string | undefined
   >(propAccountId);
   const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(
     propRoomId
   );
+  const [selectedEventCreatorId, setSelectedEventCreatorId] = useState<
+    string | undefined
+  >(propEventCreatorId);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [roomMap, setRoomMap] = useState<Map<string, string>>(new Map());
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map());
@@ -103,6 +132,11 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [profileHistoryPhotos, setProfileHistoryPhotos] = useState<Photo[]>([]);
   const [photoSource, setPhotoSource] = useState<PhotoSource>('photos');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [eventAlbumScrollTop, setEventAlbumScrollTop] = useState(0);
+  const [eventAlbumGridSize, setEventAlbumGridSize] = useState({
+    width: 0,
+    height: 700,
+  });
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
   const wasDownloadingRef = useRef(false);
   const onPhotosLoadErrorRef = useRef(onPhotosLoadError);
@@ -124,9 +158,15 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   // Use propAccountId if provided, otherwise use selectedAccountId
   const accountId = propAccountId || selectedAccountId;
   const roomId = propRoomId || selectedRoomId;
-  const activeLibraryId = libraryMode === 'room' ? roomId : accountId;
-  const basePhotos =
+  const eventCreatorId = propEventCreatorId || selectedEventCreatorId;
+  const activeLibraryId =
     libraryMode === 'room'
+      ? roomId
+      : libraryMode === 'event'
+        ? selectedEvent?.eventId
+        : accountId;
+  const basePhotos =
+    libraryMode === 'room' || libraryMode === 'event'
       ? photos
       : photoSource === 'feed'
       ? feedPhotos
@@ -143,6 +183,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const activeViewLabel =
     libraryMode === 'room'
       ? 'room photos'
+      : libraryMode === 'event'
+        ? 'event photos'
       : photoSource === 'feed'
       ? 'feed photos'
       : photoSource === 'profile-history'
@@ -154,6 +196,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const hasPhotoSections =
     libraryMode === 'room'
       ? hasUserPhotos
+      : libraryMode === 'event'
+        ? hasUserPhotos
       : hasUserPhotos || hasFeedPhotos || hasProfileHistoryPhotos;
 
   const loadAvailableAccounts = useCallback(async () => {
@@ -203,7 +247,91 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     }
   }, [electronAPI, onRoomChange, propRoomId, selectedRoomId]);
 
+  const loadAvailableEventCreators = useCallback(async () => {
+    try {
+      if (electronAPI) {
+        const result = await electronAPI.listAvailableEventCreators();
+        if (result.success && result.data) {
+          setAvailableEventCreators(result.data);
+          if (
+            libraryMode === 'event' &&
+            !selectedEventCreatorId &&
+            !propEventCreatorId &&
+            result.data.length > 0
+          ) {
+            const firstCreatorId = result.data[0].creatorAccountId;
+            setSelectedEventCreatorId(firstCreatorId);
+            onEventCreatorChange?.(firstCreatorId);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load available event creators:', error);
+      setAvailableEventCreators([]);
+    }
+  }, [
+    electronAPI,
+    libraryMode,
+    onEventCreatorChange,
+    propEventCreatorId,
+    selectedEventCreatorId,
+  ]);
+
+  const loadAvailableEvents = useCallback(async () => {
+    setLoadingAccounts(true);
+    try {
+      if (electronAPI) {
+        const creatorId = eventCreatorId || selectedEventCreatorId;
+        const result = creatorId
+          ? await electronAPI.loadEventAlbumsForCreator(creatorId)
+          : await electronAPI.listAvailableEvents();
+        if (result.success && result.data) {
+          setAvailableEvents(result.data);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load available events:', error);
+      setAvailableEvents([]);
+    } finally {
+      setLoadingAccounts(false);
+    }
+  }, [
+    electronAPI,
+    eventCreatorId,
+    selectedEventCreatorId,
+  ]);
+
   const loadRoomData = useCallback(async () => {
+    if (libraryMode === 'event') {
+      if (!selectedEvent) {
+        setRoomMap(new Map());
+        return;
+      }
+      try {
+        if (electronAPI) {
+          const result = await electronAPI.loadEventAlbumRoomsData({
+            creatorAccountId: selectedEvent.creatorAccountId,
+            eventId: selectedEvent.eventId,
+          });
+          if (result.success && result.data) {
+            const rooms = result.data as RoomDto[];
+            const roomMapping = new Map<string, string>();
+            rooms.forEach(room => {
+              if (room.RoomId) {
+                const roomId = String(room.RoomId);
+                const roomName = room.Name || roomId;
+                roomMapping.set(roomId, roomName);
+              }
+            });
+            setRoomMap(roomMapping);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load room data:', error);
+        setRoomMap(new Map());
+      }
+      return;
+    }
     if (!activeLibraryId) {
       setRoomMap(new Map());
       return;
@@ -232,9 +360,43 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       console.error('Failed to load room data:', error);
       setRoomMap(new Map());
     }
-  }, [activeLibraryId, electronAPI, libraryMode]);
+  }, [activeLibraryId, electronAPI, libraryMode, selectedEvent]);
 
   const loadAccountData = useCallback(async () => {
+    if (libraryMode === 'event') {
+      if (!selectedEvent) {
+        setAccountMap(new Map());
+        setUsernameMap(new Map());
+        return;
+      }
+      try {
+        if (electronAPI) {
+          const result = await electronAPI.loadEventAlbumAccountsData({
+            creatorAccountId: selectedEvent.creatorAccountId,
+            eventId: selectedEvent.eventId,
+          });
+          if (result.success && result.data) {
+            const accounts = result.data as PlayerResult[];
+            const accountMapping = new Map<string, string>();
+            const usernameMapping = new Map<string, string>();
+            accounts.forEach(account => {
+              const id = String(account.accountId);
+              const displayName =
+                account.displayName || account.username || id;
+              accountMapping.set(id, displayName);
+              usernameMapping.set(id, account.username || '');
+            });
+            setAccountMap(accountMapping);
+            setUsernameMap(usernameMapping);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load account data:', error);
+        setAccountMap(new Map());
+        setUsernameMap(new Map());
+      }
+      return;
+    }
     if (!activeLibraryId) {
       setAccountMap(new Map());
       setUsernameMap(new Map());
@@ -267,9 +429,36 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       setAccountMap(new Map());
       setUsernameMap(new Map());
     }
-  }, [activeLibraryId, electronAPI, libraryMode]);
+  }, [activeLibraryId, electronAPI, libraryMode, selectedEvent]);
 
   const loadEventData = useCallback(async () => {
+    if (libraryMode === 'event') {
+      const eventMapping = new Map<string, string>();
+      availableEvents.forEach(event => {
+        eventMapping.set(event.eventId, event.name);
+      });
+      if (selectedEvent && electronAPI) {
+        try {
+          const result = await electronAPI.loadEventAlbumEventsData({
+            creatorAccountId: selectedEvent.creatorAccountId,
+            eventId: selectedEvent.eventId,
+          });
+          if (result.success && result.data) {
+            const events = result.data as EventDto[];
+            events.forEach(ev => {
+              if (ev.PlayerEventId) {
+                const id = String(ev.PlayerEventId);
+                eventMapping.set(id, ev.Name || id);
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Failed to load event album events data:', error);
+        }
+      }
+      setEventMap(eventMapping);
+      return;
+    }
     if (!activeLibraryId) {
       setEventMap(new Map());
       return;
@@ -300,9 +489,32 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       console.error('Failed to load event data:', error);
       setEventMap(new Map());
     }
-  }, [activeLibraryId, electronAPI, libraryMode]);
+  }, [activeLibraryId, availableEvents, electronAPI, libraryMode, selectedEvent]);
 
   const loadImageCommentsData = useCallback(async () => {
+    if (libraryMode === 'event') {
+      if (!selectedEvent) {
+        setImageComments([]);
+        return;
+      }
+      try {
+        if (electronAPI) {
+          const result = await electronAPI.loadEventAlbumImageCommentsData({
+            creatorAccountId: selectedEvent.creatorAccountId,
+            eventId: selectedEvent.eventId,
+          });
+          if (result.success && result.data) {
+            setImageComments(result.data as ImageCommentDto[]);
+          } else {
+            setImageComments([]);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load image comments data:', error);
+        setImageComments([]);
+      }
+      return;
+    }
     if (!activeLibraryId) {
       setImageComments([]);
       return;
@@ -324,10 +536,10 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       console.error('Failed to load image comments data:', error);
       setImageComments([]);
     }
-  }, [activeLibraryId, electronAPI, libraryMode]);
+  }, [activeLibraryId, electronAPI, libraryMode, selectedEvent]);
 
   const loadPhotos = useCallback(async () => {
-    if (!filePath || !activeLibraryId) {
+    if (!filePath || (!activeLibraryId && libraryMode !== 'event')) {
       setPhotos([]);
       setFeedPhotos([]);
       setProfileHistoryPhotos([]);
@@ -338,6 +550,29 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     setLoadError(null);
     try {
       if (electronAPI) {
+        if (libraryMode === 'event') {
+          if (!selectedEvent) {
+            setPhotos([]);
+            setFeedPhotos([]);
+            setProfileHistoryPhotos([]);
+            return;
+          }
+
+          const eventPhotosResult = await electronAPI.loadEventAlbumPhotos({
+            creatorAccountId: selectedEvent.creatorAccountId,
+            eventId: selectedEvent.eventId,
+          });
+          setPhotos(
+            eventPhotosResult.success && eventPhotosResult.data
+              ? eventPhotosResult.data
+              : []
+          );
+          setFeedPhotos([]);
+          setProfileHistoryPhotos([]);
+          onPhotosLoadSuccessRef.current?.();
+          return;
+        }
+
         if (libraryMode === 'room') {
           const roomPhotosResult = await electronAPI.loadRoomPhotos(
             activeLibraryId
@@ -392,18 +627,28 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [filePath, activeLibraryId, electronAPI, libraryMode]);
+  }, [filePath, activeLibraryId, electronAPI, libraryMode, selectedEvent]);
 
   // Load available accounts on mount and when filePath changes
   useEffect(() => {
     if (filePath) {
       if (libraryMode === 'room') {
         loadAvailableRooms();
+      } else if (libraryMode === 'event') {
+        loadAvailableEventCreators();
+        loadAvailableEvents();
       } else if (libraryMode === 'user') {
         loadAvailableAccounts();
       }
     }
-  }, [filePath, libraryMode, loadAvailableAccounts, loadAvailableRooms]);
+  }, [
+    filePath,
+    libraryMode,
+    loadAvailableAccounts,
+    loadAvailableEventCreators,
+    loadAvailableEvents,
+    loadAvailableRooms,
+  ]);
 
   // Update selectedAccountId when propAccountId changes
   useEffect(() => {
@@ -419,6 +664,52 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       setPhotoSource('photos');
     }
   }, [propRoomId]);
+
+  useEffect(() => {
+    if (propEventCreatorId !== undefined) {
+      setSelectedEventCreatorId(propEventCreatorId);
+      setSelectedEvent(null);
+      setPhotoSource('photos');
+    }
+  }, [propEventCreatorId]);
+
+  useEffect(() => {
+    if (libraryMode !== 'event' || selectedEvent) {
+      return;
+    }
+
+    const node = activeScrollRef.current;
+    if (!node) {
+      return;
+    }
+
+    const updateSize = () => {
+      setEventAlbumGridSize({
+        width: node.clientWidth,
+        height: node.clientHeight || 700,
+      });
+    };
+    const handleScroll = () => {
+      setEventAlbumScrollTop(node.scrollTop);
+      onScrollPositionChange?.(node.scrollTop);
+    };
+
+    updateSize();
+    handleScroll();
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(node);
+    node.addEventListener('scroll', handleScroll);
+    return () => {
+      resizeObserver.disconnect();
+      node.removeEventListener('scroll', handleScroll);
+    };
+  }, [
+    activeScrollRef,
+    libraryMode,
+    onScrollPositionChange,
+    selectedEvent,
+    availableEvents.length,
+  ]);
 
   useEffect(() => {
     if (filePath && activeLibraryId) {
@@ -439,6 +730,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   }, [
     filePath,
     activeLibraryId,
+    selectedEvent?.creatorAccountId,
+    selectedEvent?.eventId,
     loadPhotos,
     loadRoomData,
     loadAccountData,
@@ -451,7 +744,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       return;
     }
 
-    if (libraryMode === 'room') {
+    if (libraryMode === 'room' || libraryMode === 'event') {
       setPhotoSource('photos');
       return;
     }
@@ -497,6 +790,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       void loadAccountData();
       void loadEventData();
       void loadImageCommentsData();
+      if (libraryMode === 'event') {
+        void loadAvailableEvents();
+      }
     }, 5000);
 
     return () => {
@@ -511,6 +807,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     loadAccountData,
     loadEventData,
     loadImageCommentsData,
+    loadAvailableEvents,
+    libraryMode,
   ]);
 
   useEffect(() => {
@@ -523,6 +821,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       void loadAccountData();
       void loadEventData();
       void loadImageCommentsData();
+      if (libraryMode === 'event') {
+        void loadAvailableEvents();
+      }
     }
   }, [
     isDownloading,
@@ -533,6 +834,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     loadAccountData,
     loadEventData,
     loadImageCommentsData,
+    loadAvailableEvents,
+    libraryMode,
   ]);
 
   const handlePhotoClick = useCallback((photo: Photo) => {
@@ -557,6 +860,86 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
     setPhotoSource('photos');
     onRoomChange?.(newRoomId);
   };
+
+  const handleEventCreatorChange = (newCreatorId: string) => {
+    setSelectedEventCreatorId(newCreatorId);
+    setSelectedEvent(null);
+    setAvailableEvents([]);
+    setPhotos([]);
+    setEventAlbumScrollTop(0);
+    onEventCreatorChange?.(newCreatorId);
+  };
+
+  const handleEventOpen = (event: AvailableEvent) => {
+    if (!event.isDownloaded) {
+      return;
+    }
+    setSelectedEvent(event);
+    setSelectedEventCreatorId(event.creatorAccountId);
+    onEventCreatorChange?.(event.creatorAccountId);
+  };
+
+  const handleBackToEvents = () => {
+    setSelectedEvent(null);
+    setPhotos([]);
+  };
+
+  const formatEventDate = (event: AvailableEvent): string => {
+    if (!event.startTime) {
+      return 'Date unknown';
+    }
+    return new Date(event.startTime).toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  };
+
+  const EVENT_ALBUM_MIN_WIDTH = 260;
+  const EVENT_ALBUM_ROW_HEIGHT = 360;
+  const EVENT_ALBUM_GAP = 16;
+  const eventAlbumColumns = Math.max(
+    1,
+    Math.floor(
+      (eventAlbumGridSize.width + EVENT_ALBUM_GAP) /
+        (EVENT_ALBUM_MIN_WIDTH + EVENT_ALBUM_GAP)
+    )
+  );
+  const eventAlbumRows = Math.ceil(availableEvents.length / eventAlbumColumns);
+  const eventAlbumStartRow = Math.max(
+    0,
+    Math.floor(eventAlbumScrollTop / (EVENT_ALBUM_ROW_HEIGHT + EVENT_ALBUM_GAP)) -
+      1
+  );
+  const eventAlbumEndRow = Math.min(
+    eventAlbumRows,
+    Math.ceil(
+      (eventAlbumScrollTop + eventAlbumGridSize.height) /
+        (EVENT_ALBUM_ROW_HEIGHT + EVENT_ALBUM_GAP)
+    ) + 1
+  );
+  const visibleEventAlbums = useMemo(
+    () =>
+      availableEvents.slice(
+        eventAlbumStartRow * eventAlbumColumns,
+        Math.min(availableEvents.length, eventAlbumEndRow * eventAlbumColumns)
+      ),
+    [
+      availableEvents,
+      eventAlbumColumns,
+      eventAlbumEndRow,
+      eventAlbumStartRow,
+    ]
+  );
+  const eventAlbumPaddingTop =
+    eventAlbumStartRow * (EVENT_ALBUM_ROW_HEIGHT + EVENT_ALBUM_GAP);
+  const eventAlbumPaddingBottom = Math.max(
+    0,
+    (eventAlbumRows - eventAlbumEndRow) *
+      (EVENT_ALBUM_ROW_HEIGHT + EVENT_ALBUM_GAP)
+  );
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden">
@@ -595,6 +978,35 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                   disabled={!!propRoomId}
                 />
                 {propRoomId && (
+                  <span className="text-sm text-muted-foreground">
+                    (Downloading...)
+                  </span>
+                )}
+              </div>
+            )}
+            {libraryMode === 'event' && availableEventCreators.length > 0 && (
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <Select
+                  value={eventCreatorId}
+                  onValueChange={handleEventCreatorChange}
+                  disabled={!!propEventCreatorId}
+                >
+                  <SelectTrigger className="w-full sm:w-[280px]">
+                    <SelectValue placeholder="Choose event creator" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableEventCreators.map(creator => (
+                      <SelectItem
+                        key={creator.creatorAccountId}
+                        value={creator.creatorAccountId}
+                      >
+                        {creator.displayLabel} ({creator.downloadedEventCount}/
+                        {creator.eventCount})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {propEventCreatorId && (
                   <span className="text-sm text-muted-foreground">
                     (Downloading...)
                   </span>
@@ -661,7 +1073,8 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           </div>
         )}
 
-        {(showFullControls || headerMode === 'compact') && (
+        {(showFullControls || headerMode === 'compact') &&
+          !(libraryMode === 'event' && !selectedEvent) && (
           <div className="flex flex-col gap-4 sm:flex-row">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transform text-muted-foreground" />
@@ -716,7 +1129,102 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       </div>
 
       <div className="flex-1 min-h-0">
-        {loadingAccounts ? (
+        {libraryMode === 'event' && !selectedEvent ? (
+          loadingAccounts ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <p>Loading events...</p>
+            </div>
+          ) : availableEvents.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <p>No event albums found. Download event photos to get started.</p>
+            </div>
+          ) : (
+            <div
+              ref={activeScrollRef}
+              className="h-full overflow-auto px-3 pb-4 sm:px-4 lg:px-6"
+            >
+              <div
+                style={{
+                  paddingTop: eventAlbumPaddingTop,
+                  paddingBottom: eventAlbumPaddingBottom,
+                }}
+              >
+                <div
+                  className="grid gap-4"
+                  style={{
+                    gridTemplateColumns: `repeat(${eventAlbumColumns}, minmax(0, 1fr))`,
+                  }}
+                >
+                {visibleEventAlbums.map(event => (
+                    <div
+                      key={`${event.creatorAccountId}-${event.eventId}`}
+                      className={`overflow-hidden rounded-md border bg-card transition ${
+                        event.isDownloaded
+                          ? 'cursor-pointer hover:shadow-md'
+                          : 'border-dashed opacity-65'
+                      }`}
+                      onClick={() => handleEventOpen(event)}
+                    >
+                      <div className="aspect-video bg-muted">
+                        <EventCoverImage event={event} cdnBase={cdnBase} />
+                      </div>
+                      <div className="space-y-3 p-4">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">
+                            {event.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {event.isDownloaded
+                              ? 'Album downloaded'
+                              : 'Photos not downloaded'}
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-1 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3.5 w-3.5" />
+                            {formatEventDate(event)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Users className="h-3.5 w-3.5" />
+                            {event.attendeeCount} attending
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <ImageIcon className="h-3.5 w-3.5" />
+                            {event.photoCount > 0
+                              ? `${event.downloadedPhotoCount}/${event.photoCount} photos`
+                              : 'Photo count unknown'}
+                          </span>
+                        </div>
+                        {!event.isDownloaded && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="w-full"
+                            onClick={clickEvent => {
+                              clickEvent.stopPropagation();
+                              const creator = availableEventCreators.find(
+                                c => c.creatorAccountId === event.creatorAccountId
+                              );
+                              onOpenDownloadPanel?.({
+                                kind: 'eventAlbum',
+                                creatorAccountId: event.creatorAccountId,
+                                eventId: event.eventId,
+                                username: creator?.username,
+                              });
+                            }}
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            Download
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                ))}
+                </div>
+              </div>
+            </div>
+          )
+        ) : loadingAccounts ? (
           <div className="text-center py-12 text-muted-foreground">
             <p>Loading accounts...</p>
           </div>
@@ -764,26 +1272,51 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           </div>
         ) : activePhotos.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
+            {libraryMode === 'event' && selectedEvent && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mb-4"
+                onClick={handleBackToEvents}
+              >
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back to events
+              </Button>
+            )}
             <p>
               No {activeViewLabel} available for this{' '}
-              {libraryMode === 'room' ? 'room' : 'account'}.
+              {libraryMode === 'room'
+                ? 'room'
+                : libraryMode === 'event'
+                  ? 'event'
+                  : 'account'}
             </p>
           </div>
         ) : (
-          <PhotoGrid
-            photos={activePhotos}
-            onPhotoClick={handlePhotoClick}
-            groupBy={groupBy}
-            searchQuery={searchQuery}
-            sortBy={sortBy}
-            roomMap={roomMap}
-            accountMap={accountMap}
-            eventMap={eventMap}
-            cdnBase={cdnBase}
-            onScrollPositionChange={onScrollPositionChange}
-            scrollContainerRef={activeScrollRef}
-            accountId={accountId}
-          />
+          <div className="flex h-full min-h-0 flex-col gap-3">
+            {libraryMode === 'event' && selectedEvent && (
+              <div className="px-3 sm:px-4 lg:px-6">
+                <Button size="sm" variant="outline" onClick={handleBackToEvents}>
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Back to events
+                </Button>
+              </div>
+            )}
+            <PhotoGrid
+              photos={activePhotos}
+              onPhotoClick={handlePhotoClick}
+              groupBy={groupBy}
+              searchQuery={searchQuery}
+              sortBy={sortBy}
+              roomMap={roomMap}
+              accountMap={accountMap}
+              eventMap={eventMap}
+              cdnBase={cdnBase}
+              onScrollPositionChange={onScrollPositionChange}
+              scrollContainerRef={activeScrollRef}
+              accountId={accountId}
+            />
+          </div>
         )}
       </div>
 

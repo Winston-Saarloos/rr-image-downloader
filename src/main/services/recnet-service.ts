@@ -17,7 +17,11 @@ import {
   DownloadStats,
   AccountInfo,
   BulkDataRefreshOptions,
+  AvailableEvent,
+  AvailableEventCreator,
   AvailableRoom,
+  EventDiscoveryResult,
+  EventPhotoBatchResult,
   RoomPhotoBatchResult,
   RoomPhotoSort,
   LibraryMoveProgress,
@@ -139,6 +143,22 @@ type RoomFolderMetaV1 = {
   cache?: Record<string, unknown>;
 };
 
+type EventFolderMetaV1 = {
+  schemaVersion: 1;
+  creatorAccountId: string;
+  eventId: string;
+  name: string;
+  imageName?: string | null;
+  startTime?: string;
+  endTime?: string;
+  attendeeCount: number;
+  photoCount: number;
+  downloadedPhotoCount: number;
+  hasPhotos: boolean;
+  isDownloaded: boolean;
+  updatedAt: string;
+};
+
 type BulkDataStorageContext = {
   directory: string;
   fileStem: string;
@@ -170,6 +190,8 @@ const PHOTO_MAX_PAGE_SIZE = 1_000;
 const ROOM_PHOTO_DEFAULT_PAGE_SIZE = 100;
 const ROOM_PHOTO_DEFAULT_BATCH_PAGES = 5;
 const ROOM_PHOTO_DEFAULT_SORT: RoomPhotoSort = 0;
+const EVENT_DISCOVERY_PAGE_SIZE = 50;
+const EVENT_PHOTO_PAGE_SIZE = 100;
 // RecNet API returns 429s for this if requested too frequently.
 // Serialized globally: one in-flight request and minimum gap between starts.
 const IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS = 250;
@@ -2499,7 +2521,7 @@ export class RecNetService extends EventEmitter {
     operation?: CurrentOperation
   ): Promise<DownloadResultItem> {
     const photoId = this.normalizeId(photo.Id);
-    const imageName = photo.ImageName;
+    const imageName = this.normalizeImageName(photo.ImageName) || '';
     const photoUrl = buildCdnImageUrl(this.settings.cdnBase, imageName);
 
     if (!photoId || !imageName) {
@@ -2640,7 +2662,7 @@ export class RecNetService extends EventEmitter {
     operation?: CurrentOperation
   ): Promise<DownloadResultItem> {
     const photoId = this.sanitizeFileStem(this.normalizeId(photo.Id));
-    const imageName = photo.ImageName;
+    const imageName = this.normalizeImageName(photo.ImageName) || '';
     const photoUrl = buildCdnImageUrl(this.settings.cdnBase, imageName);
 
     if (!photoId || !imageName) {
@@ -2742,6 +2764,75 @@ export class RecNetService extends EventEmitter {
         retries: Math.max(0, attemptsUsed - 1),
       };
     }
+  }
+
+  private applyDownloadResultToStats(
+    stats: DownloadStats,
+    result?: DownloadResultItem
+  ): void {
+    const status = result?.status;
+    if (status === 'downloaded') {
+      stats.newDownloads++;
+      stats.retryAttempts += (result?.attempts || 1) - 1;
+      if (result?.recoveredAfterRetry) {
+        stats.recoveredAfterRetry++;
+      }
+    } else if (status?.startsWith('already_exists')) {
+      stats.alreadyDownloaded++;
+    } else if (status === 'failed' || status === 'error') {
+      stats.failedDownloads++;
+      stats.retryAttempts += (result?.attempts || 1) - 1;
+    } else if (status === 'cancelled') {
+      stats.skipped++;
+    }
+  }
+
+  private async countJpgFiles(directory: string): Promise<number> {
+    if (!(await fs.pathExists(directory))) {
+      return 0;
+    }
+
+    const files = await fs.readdir(directory);
+    return files.filter(file => path.extname(file).toLowerCase() === '.jpg')
+      .length;
+  }
+
+  private async pathExistsWithContent(filePath: string): Promise<boolean> {
+    try {
+      if (!(await fs.pathExists(filePath))) {
+        return false;
+      }
+
+      const stats = await fs.stat(filePath);
+      return stats.isFile() && stats.size > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  private async downloadEventCoverImage(
+    event: EventDto,
+    eventDir: string,
+    token?: string,
+    operation?: CurrentOperation
+  ): Promise<string | undefined> {
+    const imageName = this.normalizeImageName(event.ImageName);
+    if (!imageName) {
+      return undefined;
+    }
+
+    const imagePath = path.join(eventDir, 'event-image.jpg');
+    if (await this.pathExistsWithContent(imagePath)) {
+      return imagePath;
+    }
+
+    const attempt = await this.downloadPhotoWithRetry(imageName, token, operation);
+    if (attempt.response?.success && attempt.response.value) {
+      await fs.writeFile(imagePath, Buffer.from(attempt.response.value));
+      return imagePath;
+    }
+
+    return undefined;
   }
 
   private async downloadProfileHistoryImage(
@@ -2935,6 +3026,19 @@ export class RecNetService extends EventEmitter {
     return '';
   }
 
+  private normalizeImageName(value: unknown): string | null {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === 'null') {
+      return null;
+    }
+
+    return trimmed;
+  }
+
   private toBigIntSafe(value: unknown): bigint | null {
     const normalized = this.normalizeId(value);
     if (!normalized || !/^-?\d+$/.test(normalized)) {
@@ -3060,6 +3164,121 @@ export class RecNetService extends EventEmitter {
     return path.join(this.getRoomsRoot(), this.sanitizeFileStem(roomId));
   }
 
+  private getEventsRoot(): string {
+    return path.join(this.getResolvedOutputRoot(), 'events');
+  }
+
+  private getCreatorEventsDirectory(creatorAccountId: string): string {
+    return path.join(
+      this.getEventsRoot(),
+      this.sanitizeFileStem(this.normalizeId(creatorAccountId))
+    );
+  }
+
+  private getEventDirectory(
+    creatorAccountId: string,
+    eventId: string
+  ): string {
+    return path.join(
+      this.getCreatorEventsDirectory(creatorAccountId),
+      this.sanitizeFileStem(this.normalizeId(eventId))
+    );
+  }
+
+  private async readEventFolderMeta(
+    eventDir: string
+  ): Promise<EventFolderMetaV1 | null> {
+    try {
+      const metaPath = this.getFolderMetaPath(eventDir);
+      if (!(await fs.pathExists(metaPath))) {
+        return null;
+      }
+      const parsed = (await fs.readJson(
+        metaPath
+      )) as Partial<EventFolderMetaV1>;
+      if (!parsed || parsed.schemaVersion !== 1 || !parsed.eventId) {
+        return null;
+      }
+      return parsed as EventFolderMetaV1;
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeEventFolderMeta(
+    eventDir: string,
+    event: EventDto,
+    patch: Partial<EventFolderMetaV1> = {}
+  ): Promise<EventFolderMetaV1> {
+    const existing = await this.readEventFolderMeta(eventDir);
+    const eventId = this.normalizeId(event.PlayerEventId);
+    const creatorAccountId = this.normalizeId(event.CreatorPlayerId);
+    const next: EventFolderMetaV1 = {
+      schemaVersion: 1,
+      creatorAccountId,
+      eventId,
+      name: event.Name || eventId,
+      imageName: this.normalizeImageName(event.ImageName),
+      startTime: event.StartTime,
+      endTime: event.EndTime,
+      attendeeCount:
+        typeof event.AttendeeCount === 'number' ? event.AttendeeCount : 0,
+      photoCount: existing?.photoCount ?? 0,
+      downloadedPhotoCount: existing?.downloadedPhotoCount ?? 0,
+      hasPhotos: existing?.hasPhotos ?? false,
+      isDownloaded: existing?.isDownloaded ?? false,
+      updatedAt: new Date().toISOString(),
+      ...patch,
+    };
+
+    await fs.ensureDir(eventDir);
+    await fs.writeJson(this.getFolderMetaPath(eventDir), next, { spaces: 2 });
+    return next;
+  }
+
+  private async readCreatorEventsManifest(
+    creatorAccountId: string
+  ): Promise<EventDto[]> {
+    const creatorDir = this.getCreatorEventsDirectory(creatorAccountId);
+    const manifestPath = path.join(creatorDir, 'events.json');
+    if (!(await fs.pathExists(manifestPath))) {
+      return [];
+    }
+
+    const raw = (await fs.readJson(manifestPath)) as EventDto[];
+    return Array.isArray(raw) ? this.normalizeEvents(raw) : [];
+  }
+
+  private eventToAvailableEvent(
+    event: EventDto,
+    meta?: EventFolderMetaV1 | null
+  ): AvailableEvent {
+    const creatorAccountId = this.normalizeId(event.CreatorPlayerId);
+    const eventId = this.normalizeId(event.PlayerEventId);
+    const downloadedPhotoCount = meta?.downloadedPhotoCount ?? 0;
+    const photoCount = meta?.photoCount ?? downloadedPhotoCount;
+
+    return {
+      creatorAccountId,
+      eventId,
+      name: event.Name || meta?.name || eventId,
+      imageName:
+        this.normalizeImageName(event.ImageName) ??
+        this.normalizeImageName(meta?.imageName),
+      startTime: event.StartTime || meta?.startTime,
+      endTime: event.EndTime || meta?.endTime,
+      attendeeCount:
+        typeof event.AttendeeCount === 'number'
+          ? event.AttendeeCount
+          : meta?.attendeeCount ?? 0,
+      photoCount,
+      downloadedPhotoCount,
+      hasPhotos: meta?.hasPhotos ?? downloadedPhotoCount > 0,
+      isDownloaded: meta?.isDownloaded ?? downloadedPhotoCount > 0,
+      updatedAt: meta?.updatedAt,
+    };
+  }
+
   private async readRoomFolderMeta(
     roomDir: string
   ): Promise<RoomFolderMetaV1 | null> {
@@ -3167,6 +3386,7 @@ export class RecNetService extends EventEmitter {
       ...event,
       PlayerEventId: this.normalizeId(event.PlayerEventId),
       CreatorPlayerId: this.normalizeId(event.CreatorPlayerId),
+      ImageName: this.normalizeImageName(event.ImageName),
       RoomId: this.normalizeId(event.RoomId),
     }));
   }
@@ -3637,6 +3857,8 @@ export class RecNetService extends EventEmitter {
         return 'profile picture history';
       case 'room-photos':
         return 'room photos';
+      case 'event-photos':
+        return 'event photos';
       default:
         return source;
     }
@@ -4659,6 +4881,586 @@ export class RecNetService extends EventEmitter {
       return await this.accountsController.searchAccounts(username, token);
     } catch (error) {
       throw new Error(`Failed to search accounts: ${(error as Error).message}`);
+    }
+  }
+
+  async discoverEventsForUsername(
+    username: string,
+    token?: string
+  ): Promise<EventDiscoveryResult> {
+    await this.ensureSettingsLoaded();
+    const cleanedUsername = username.trim();
+    if (!cleanedUsername) {
+      throw new Error('Username is required.');
+    }
+
+    const account = await this.lookupAccountByUsername(cleanedUsername, token);
+    const creatorAccountId = this.normalizeId(account.accountId);
+    if (!creatorAccountId) {
+      throw new Error('Account not found.');
+    }
+
+    const creatorDir = this.getCreatorEventsDirectory(creatorAccountId);
+    await fs.ensureDir(creatorDir);
+
+    const events: EventDto[] = [];
+    let skip = 0;
+    while (true) {
+      const page = this.normalizeEvents(
+        await this.eventsController.fetchCreatorEvents(
+          creatorAccountId,
+          { skip, take: EVENT_DISCOVERY_PAGE_SIZE },
+          token
+        )
+      );
+      events.push(...page);
+      if (page.length < EVENT_DISCOVERY_PAGE_SIZE) {
+        break;
+      }
+      skip += EVENT_DISCOVERY_PAGE_SIZE;
+    }
+
+    const dedupedEvents = Array.from(
+      new Map(events.map(event => [event.PlayerEventId, event])).values()
+    ).sort((a, b) => {
+      const timeA = a.StartTime ? new Date(a.StartTime).getTime() : 0;
+      const timeB = b.StartTime ? new Date(b.StartTime).getTime() : 0;
+      return timeB - timeA;
+    });
+
+    await fs.writeJson(path.join(creatorDir, 'events.json'), dedupedEvents, {
+      spaces: 2,
+    });
+    await fs.writeJson(
+      path.join(creatorDir, 'creator.json'),
+      this.normalizeAccounts([account as PlayerResult])[0],
+      { spaces: 2 }
+    );
+
+    const availableEvents: AvailableEvent[] = [];
+    for (const event of dedupedEvents) {
+      const eventDir = this.getEventDirectory(
+        creatorAccountId,
+        event.PlayerEventId
+      );
+      const meta = await this.writeEventFolderMeta(eventDir, event);
+      availableEvents.push(this.eventToAvailableEvent(event, meta));
+    }
+
+    return {
+      creatorAccountId,
+      username: account.username || cleanedUsername,
+      displayName: account.displayName,
+      events: availableEvents,
+    };
+  }
+
+  async listAvailableEvents(
+    creatorAccountId?: string
+  ): Promise<AvailableEvent[]> {
+    await this.ensureSettingsLoaded();
+    const eventsRoot = this.getEventsRoot();
+    const available: AvailableEvent[] = [];
+
+    if (!(await fs.pathExists(eventsRoot))) {
+      return available;
+    }
+
+    const creatorIds = creatorAccountId
+      ? [this.sanitizeFileStem(this.normalizeId(creatorAccountId))]
+      : (await fs.readdir(eventsRoot, { withFileTypes: true }))
+          .filter(entry => entry.isDirectory())
+          .map(entry => entry.name);
+
+    for (const id of creatorIds) {
+      const events = await this.readCreatorEventsManifest(id);
+      for (const event of events) {
+        const eventDir = this.getEventDirectory(id, event.PlayerEventId);
+        const meta = await this.readEventFolderMeta(eventDir);
+        const availableEvent = this.eventToAvailableEvent(event, meta);
+        const localImagePath = path.join(eventDir, 'event-image.jpg');
+        if (await this.pathExistsWithContent(localImagePath)) {
+          availableEvent.localImagePath = localImagePath;
+        }
+        available.push(availableEvent);
+      }
+    }
+
+    return available.sort((a, b) => {
+      const timeA = a.startTime ? new Date(a.startTime).getTime() : 0;
+      const timeB = b.startTime ? new Date(b.startTime).getTime() : 0;
+      return timeB - timeA;
+    });
+  }
+
+  async listAvailableEventCreators(): Promise<AvailableEventCreator[]> {
+    await this.ensureSettingsLoaded();
+    const eventsRoot = this.getEventsRoot();
+    const creators: AvailableEventCreator[] = [];
+
+    if (!(await fs.pathExists(eventsRoot))) {
+      return creators;
+    }
+
+    const entries = await fs.readdir(eventsRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const creatorAccountId = entry.name;
+      const creatorDir = path.join(eventsRoot, creatorAccountId);
+      const creatorPath = path.join(creatorDir, 'creator.json');
+      let creator: Partial<PlayerResult> | null = null;
+      if (await fs.pathExists(creatorPath)) {
+        try {
+          creator = (await fs.readJson(creatorPath)) as Partial<PlayerResult>;
+        } catch {
+          creator = null;
+        }
+      }
+
+      const events = await this.listAvailableEvents(creatorAccountId);
+      if (events.length === 0) {
+        continue;
+      }
+
+      const displayName = (creator?.displayName || '').trim();
+      const username = (creator?.username || '').trim();
+      const displayLabel =
+        displayName && username
+          ? `${displayName} (@${username})`
+          : displayName || (username ? `@${username}` : creatorAccountId);
+
+      const updatedAtValues = events
+        .map(event => event.updatedAt)
+        .filter((value): value is string => !!value)
+        .sort();
+
+      creators.push({
+        creatorAccountId,
+        username: username || undefined,
+        displayName: displayName || undefined,
+        displayLabel,
+        eventCount: events.length,
+        downloadedEventCount: events.filter(event => event.isDownloaded).length,
+        photoCount: events.reduce(
+          (sum, event) => sum + event.downloadedPhotoCount,
+          0
+        ),
+        updatedAt: updatedAtValues[updatedAtValues.length - 1],
+      });
+    }
+
+    return creators.sort((a, b) =>
+      a.displayLabel.localeCompare(b.displayLabel, undefined, {
+        sensitivity: 'base',
+        numeric: true,
+      })
+    );
+  }
+
+  async loadEventAlbumsForCreator(
+    creatorAccountId: string
+  ): Promise<AvailableEvent[]> {
+    return this.listAvailableEvents(creatorAccountId);
+  }
+
+  async loadEventAlbumPhotos(params: {
+    creatorAccountId: string;
+    eventId: string;
+  }): Promise<Photo[]> {
+    await this.ensureSettingsLoaded();
+    const creatorAccountId = this.normalizeId(params.creatorAccountId);
+    const eventId = this.normalizeId(params.eventId);
+    if (!creatorAccountId || !eventId) {
+      return [];
+    }
+
+    const eventDir = this.getEventDirectory(creatorAccountId, eventId);
+    const photosJsonPath = path.join(eventDir, `${eventId}_photos.json`);
+    if (!(await fs.pathExists(photosJsonPath))) {
+      return [];
+    }
+
+    const photos = this.normalizePhotos((await fs.readJson(photosJsonPath)) as Photo[]);
+    const photosDir = path.join(eventDir, 'photos');
+    const photoFileIds = new Set<string>();
+    if (await fs.pathExists(photosDir)) {
+      for (const file of await fs.readdir(photosDir)) {
+        const id = path.parse(file).name;
+        if (id) {
+          photoFileIds.add(id);
+        }
+      }
+    }
+
+    return photos
+      .filter(photo => photo.Id && photoFileIds.has(this.normalizeId(photo.Id)))
+      .map(photo => ({
+        ...photo,
+        localFilePath: path.join(photosDir, `${this.sanitizeFileStem(photo.Id)}.jpg`),
+      }));
+  }
+
+  async loadEventAlbumAccountsData(params: {
+    creatorAccountId: string;
+    eventId: string;
+  }): Promise<PlayerResult[]> {
+    await this.ensureSettingsLoaded();
+    const creatorAccountId = this.normalizeId(params.creatorAccountId);
+    const eventId = this.normalizeId(params.eventId);
+    if (!creatorAccountId || !eventId) {
+      return [];
+    }
+    const eventDir = this.getEventDirectory(creatorAccountId, eventId);
+    const jsonPath = path.join(eventDir, `${eventId}_accounts.json`);
+    if (!(await fs.pathExists(jsonPath))) {
+      return [];
+    }
+    try {
+      const raw = (await fs.readJson(jsonPath)) as PlayerResult[];
+      return Array.isArray(raw) ? this.normalizeAccounts(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async loadEventAlbumRoomsData(params: {
+    creatorAccountId: string;
+    eventId: string;
+  }): Promise<RoomDto[]> {
+    await this.ensureSettingsLoaded();
+    const creatorAccountId = this.normalizeId(params.creatorAccountId);
+    const eventId = this.normalizeId(params.eventId);
+    if (!creatorAccountId || !eventId) {
+      return [];
+    }
+    const eventDir = this.getEventDirectory(creatorAccountId, eventId);
+    const jsonPath = path.join(eventDir, `${eventId}_rooms.json`);
+    if (!(await fs.pathExists(jsonPath))) {
+      return [];
+    }
+    try {
+      const raw = (await fs.readJson(jsonPath)) as RoomDto[];
+      return Array.isArray(raw) ? this.normalizeRooms(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async loadEventAlbumEventsData(params: {
+    creatorAccountId: string;
+    eventId: string;
+  }): Promise<EventDto[]> {
+    await this.ensureSettingsLoaded();
+    const creatorAccountId = this.normalizeId(params.creatorAccountId);
+    const eventId = this.normalizeId(params.eventId);
+    if (!creatorAccountId || !eventId) {
+      return [];
+    }
+    const eventDir = this.getEventDirectory(creatorAccountId, eventId);
+    const jsonPath = path.join(eventDir, `${eventId}_events.json`);
+    if (!(await fs.pathExists(jsonPath))) {
+      return [];
+    }
+    try {
+      const raw = (await fs.readJson(jsonPath)) as EventDto[];
+      return Array.isArray(raw) ? this.normalizeEvents(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async loadEventAlbumImageCommentsData(params: {
+    creatorAccountId: string;
+    eventId: string;
+  }): Promise<ImageCommentDto[]> {
+    await this.ensureSettingsLoaded();
+    const creatorAccountId = this.normalizeId(params.creatorAccountId);
+    const eventId = this.normalizeId(params.eventId);
+    if (!creatorAccountId || !eventId) {
+      return [];
+    }
+    const eventDir = this.getEventDirectory(creatorAccountId, eventId);
+    const jsonPath = path.join(eventDir, `${eventId}_image_comments.json`);
+    if (!(await fs.pathExists(jsonPath))) {
+      return [];
+    }
+    try {
+      const raw = (await fs.readJson(jsonPath)) as ImageCommentDto[];
+      return Array.isArray(raw) ? this.normalizeImageComments(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async downloadEventPhotos(params: {
+    creatorAccountId: string;
+    eventIds: string[];
+    token?: string;
+  }): Promise<EventPhotoBatchResult> {
+    await this.ensureSettingsLoaded();
+    const operation = this.startOperation();
+    const creatorAccountId = this.normalizeId(params.creatorAccountId);
+    const eventIds = Array.from(
+      new Set((params.eventIds || []).map(id => this.normalizeId(id)).filter(Boolean))
+    );
+    if (!creatorAccountId || eventIds.length === 0) {
+      throw new Error('Choose at least one event to download.');
+    }
+
+    const eventsDirectory = this.getCreatorEventsDirectory(creatorAccountId);
+    const downloadStats: DownloadStats = {
+      totalPhotos: 0,
+      alreadyDownloaded: 0,
+      newDownloads: 0,
+      failedDownloads: 0,
+      skipped: 0,
+      retryAttempts: 0,
+      recoveredAfterRetry: 0,
+    };
+    const downloadResults: DownloadResultItem[] = [];
+    const downloadedEvents: AvailableEvent[] = [];
+    let photosFetched = 0;
+
+    try {
+      await fs.ensureDir(eventsDirectory);
+      const manifest = await this.readCreatorEventsManifest(creatorAccountId);
+      const eventsById = new Map(
+        manifest.map(event => [this.normalizeId(event.PlayerEventId), event])
+      );
+
+      this.resetProgressIssueState();
+      this.updateSourceProgress(
+        'metadata',
+        'event-photos',
+        'Preparing event photo download...',
+        0,
+        eventIds.length,
+        0
+      );
+
+      for (let eventIndex = 0; eventIndex < eventIds.length; eventIndex++) {
+        if (operation.cancelled) {
+          throw this.createOperationCancelledError();
+        }
+
+        const eventId = eventIds[eventIndex];
+        const event = eventsById.get(eventId);
+        if (!event) {
+          downloadStats.failedDownloads++;
+          downloadResults.push({
+            photoId: eventId,
+            status: 'failed',
+            reason: 'Event metadata was not found. Refresh events and try again.',
+          });
+          continue;
+        }
+
+        const eventDir = this.getEventDirectory(creatorAccountId, eventId);
+        const photosDir = path.join(eventDir, 'photos');
+        const metadataPath = path.join(eventDir, `${eventId}_photos.json`);
+        await fs.ensureDir(eventDir);
+        await fs.ensureDir(photosDir);
+        await this.writeEventFolderMeta(eventDir, event);
+        const localImagePath = await this.downloadEventCoverImage(
+          event,
+          eventDir,
+          params.token,
+          operation
+        );
+
+        const eventPhotos: Photo[] = [];
+        let skip = 0;
+        while (true) {
+          if (operation.cancelled) {
+            throw this.createOperationCancelledError();
+          }
+
+          const page = this.normalizePhotos(
+            await this.runMetadataRequestWithRetry({
+              label: `event ${eventId} photos page ${Math.floor(skip / EVENT_PHOTO_PAGE_SIZE) + 1}`,
+              source: 'event-photos',
+              operationRef: operation,
+              pageLabel: event.Name || eventId,
+              recentActivity: `Collected event photos for ${event.Name || eventId}.`,
+              operation: () =>
+                this.photosController.fetchPlayerEventPhotos(
+                  eventId,
+                  { skip, take: EVENT_PHOTO_PAGE_SIZE },
+                  params.token,
+                  { signal: operation.controller.signal }
+                ),
+            })
+          );
+          eventPhotos.push(...page);
+          photosFetched += page.length;
+          if (page.length < EVENT_PHOTO_PAGE_SIZE) {
+            break;
+          }
+          skip += EVENT_PHOTO_PAGE_SIZE;
+        }
+
+        const normalizedEventPhotos = Array.from(
+          new Map(eventPhotos.map(photo => [photo.Id, photo])).values()
+        );
+        await fs.writeJson(metadataPath, normalizedEventPhotos, { spaces: 2 });
+        downloadStats.totalPhotos += normalizedEventPhotos.length;
+
+        const eventBulkContextPhoto: ImageDto = {
+          Id: 'stm-event-bulk-context',
+          Type: 1,
+          Accessibility: 1,
+          AccessibilityLocked: false,
+          ImageName: '',
+          Description: '',
+          PlayerId: this.normalizeId(event.CreatorPlayerId),
+          TaggedPlayerIds: [],
+          RoomId: this.normalizeId(event.RoomId),
+          PlayerEventId: this.normalizeId(event.PlayerEventId),
+          CreatedAt: new Date().toISOString(),
+          CheerCount: 0,
+          CommentCount: 0,
+        };
+        const hasBulkContextIds =
+          !!eventBulkContextPhoto.PlayerId ||
+          !!eventBulkContextPhoto.RoomId ||
+          !!eventBulkContextPhoto.PlayerEventId;
+        const photosForBulk = hasBulkContextIds
+          ? this.normalizePhotos([
+              ...normalizedEventPhotos,
+              eventBulkContextPhoto,
+            ])
+          : normalizedEventPhotos;
+
+        try {
+          const bulkData = await this.fetchAndSaveBulkData(
+            creatorAccountId,
+            photosForBulk,
+            params.token,
+            {},
+            'event-photos',
+            { directory: eventDir, fileStem: eventId, writeOwnerMeta: false }
+          );
+          console.log(
+            `Fetched (event ${eventId}) ${bulkData.accountsFetched} accounts, ${bulkData.roomsFetched} rooms, ${bulkData.eventsFetched} events, and ${bulkData.imageCommentsFetched} image comment record(s)`
+          );
+        } catch (error) {
+          console.log(
+            `Warning: Failed to fetch bulk data for event ${eventId}: ${(error as Error).message}`
+          );
+        }
+
+        const trace = this.createDownloadBatchTrace(
+          `event-${eventId}-photo-downloads`,
+          normalizedEventPhotos.length
+        );
+        const semaphore = new Semaphore(this.settings.maxConcurrentDownloads);
+        let processedCount = 0;
+        this.updateSourceProgress(
+          'download',
+          'event-photos',
+          `Downloading ${event.Name || eventId} photos...`,
+          eventIndex,
+          eventIds.length,
+          Math.round((eventIndex / eventIds.length) * 100),
+          { activeItemLabel: event.Name || eventId }
+        );
+
+        const promises = normalizedEventPhotos.map((photo, index) =>
+          (async (): Promise<DownloadResultItem> => {
+            await semaphore.acquire();
+            const scheduledIndex = index + 1;
+            const runStartedAt = Date.now();
+            const photoId = this.normalizeId(photo.Id);
+            const imageName = photo.ImageName;
+            trace.inFlight++;
+            this.logDownloadWorkerStart(trace, {
+              scheduledIndex,
+              photoId,
+              imageName,
+              scheduledDelayMs: 0,
+              slotWaitMs: 0,
+            });
+            let result: DownloadResultItem | undefined;
+            try {
+              this.setDownloadItemActivity(
+                'event-photos',
+                imageName || photoId || `image ${scheduledIndex}`
+              );
+              result = await this.downloadImageToDirectory(
+                photo,
+                photosDir,
+                params.token,
+                operation
+              );
+              this.applyDownloadResultToStats(downloadStats, result);
+              return result;
+            } finally {
+              trace.inFlight = Math.max(0, trace.inFlight - 1);
+              trace.completed++;
+              this.logDownloadWorkerFinish(trace, {
+                scheduledIndex,
+                photoId,
+                imageName,
+                result,
+                runDurationMs: Date.now() - runStartedAt,
+              });
+              semaphore.release();
+              if (this.currentOperation === operation) {
+                processedCount++;
+                this.setDownloadResultActivity('event-photos', result);
+                this.updateSourceProgress(
+                  'download',
+                  'event-photos',
+                  `Downloading ${event.Name || eventId} photos...`,
+                  processedCount,
+                  normalizedEventPhotos.length
+                );
+              }
+            }
+          })()
+        );
+        downloadResults.push(...(await Promise.all(promises)));
+
+        const downloadedPhotoCount = await this.countJpgFiles(photosDir);
+        const meta = await this.writeEventFolderMeta(eventDir, event, {
+          photoCount: normalizedEventPhotos.length,
+          downloadedPhotoCount,
+          hasPhotos: normalizedEventPhotos.length > 0,
+          isDownloaded:
+            normalizedEventPhotos.length > 0 &&
+            downloadedPhotoCount >= normalizedEventPhotos.length,
+        });
+        const availableEvent = this.eventToAvailableEvent(event, meta);
+        if (localImagePath) {
+          availableEvent.localImagePath = localImagePath;
+        }
+        downloadedEvents.push(availableEvent);
+        this.logDownloadBatchSummary(trace, downloadStats);
+      }
+
+      this.setOperationComplete();
+      return {
+        creatorAccountId,
+        eventIds,
+        eventsDirectory,
+        eventsProcessed: downloadedEvents.length,
+        photosFetched,
+        downloadedEvents,
+        downloadStats,
+        downloadResults,
+        totalResults: downloadResults.length,
+        guidance: this.buildDownloadGuidance('event photos', downloadStats),
+      };
+    } catch (error) {
+      if (!this.isOperationCancelledError(error)) {
+        this.setOperationFailed((error as Error).message);
+      }
+      throw error;
+    } finally {
+      this.finishOperation(operation);
     }
   }
 

@@ -62,6 +62,22 @@ export class PhotosController {
     );
   }
 
+  async fetchPlayerEventPhotos(
+    eventId: string,
+    params: { skip: number; take: number },
+    token?: string,
+    options?: RecNetRequestOptions
+  ): Promise<ImageDto[]> {
+    const { skip, take } = params;
+    const url = `https://apim.rec.net/apis/api/images/v1/playerevent/${encodeURIComponent(eventId)}?skip=${skip}&take=${take}`;
+
+    return this.http.requestOrThrow<ImageDto[]>(
+      { url, method: 'GET' },
+      token,
+      options
+    );
+  }
+
   // I am suspicious of this endpoint. It returns old photos from 2018 but stops at Dec 2021.
   // It should have more recent entries.
   async fetchProfilePhotoHistory(

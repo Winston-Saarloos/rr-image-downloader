@@ -8,7 +8,8 @@ export type DownloadSource =
   | 'user-feed'
   | 'user-photos'
   | 'profile-history'
-  | 'room-photos';
+  | 'room-photos'
+  | 'event-photos';
 
 export const DEFAULT_DOWNLOAD_SOURCE_SELECTION: DownloadSourceSelection = {
   downloadUserFeed: true,

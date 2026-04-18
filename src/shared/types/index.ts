@@ -34,6 +34,21 @@ export interface BulkDataRefreshOptions {
 export type LibraryMode = 'user' | 'room' | 'event';
 export type RoomPhotoSort = 0 | 1;
 
+/** Open download flow from an event album tile (event library mode). */
+export type EventDownloadIntent = {
+  kind: 'eventAlbum';
+  creatorAccountId: string;
+  eventId: string;
+  username?: string;
+};
+
+/** Seed the download dialog when opening from an event tile (no output path yet). */
+export interface EventDownloadPanelPrefill {
+  creatorAccountId: string;
+  eventIds: string[];
+  usernameHint?: string;
+}
+
 export type LibraryMovePhase =
   | 'validating'
   | 'preflight'
@@ -228,6 +243,33 @@ export interface AvailableRoom {
   updatedAt?: string;
 }
 
+export interface AvailableEvent {
+  creatorAccountId: string;
+  eventId: string;
+  name: string;
+  imageName?: string | null;
+  localImagePath?: string;
+  startTime?: string;
+  endTime?: string;
+  attendeeCount: number;
+  photoCount: number;
+  downloadedPhotoCount: number;
+  hasPhotos: boolean;
+  isDownloaded: boolean;
+  updatedAt?: string;
+}
+
+export interface AvailableEventCreator {
+  creatorAccountId: string;
+  username?: string;
+  displayName?: string;
+  displayLabel: string;
+  eventCount: number;
+  downloadedEventCount: number;
+  photoCount: number;
+  updatedAt?: string;
+}
+
 export interface RoomPhotoBatchResult {
   roomId: string;
   roomName: string;
@@ -250,6 +292,26 @@ export interface RoomPhotoBatchResult {
     eventsFetched: number;
     imageCommentsFetched: number;
   };
+  downloadStats: DownloadStats;
+  downloadResults: DownloadResultItem[];
+  totalResults: number;
+  guidance?: string[];
+}
+
+export interface EventDiscoveryResult {
+  creatorAccountId: string;
+  username: string;
+  displayName?: string;
+  events: AvailableEvent[];
+}
+
+export interface EventPhotoBatchResult {
+  creatorAccountId: string;
+  eventIds: string[];
+  eventsDirectory: string;
+  eventsProcessed: number;
+  photosFetched: number;
+  downloadedEvents: AvailableEvent[];
   downloadStats: DownloadStats;
   downloadResults: DownloadResultItem[];
   totalResults: number;
