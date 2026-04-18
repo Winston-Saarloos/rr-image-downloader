@@ -20,6 +20,8 @@ import {
   AvailableRoom,
   RoomPhotoBatchResult,
   RoomPhotoSort,
+  LibraryMoveProgress,
+  LibraryMoveResult,
 } from '../../shared/types';
 import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import {
@@ -40,6 +42,12 @@ import { ImageCommentsController } from './recnet/image-comments-controller';
 import { PhotosController } from './recnet/photos-controller';
 import { RoomsController } from './recnet/rooms-controller';
 import { Semaphore } from '../utils/semaphore';
+import {
+  LibraryMoveCancelledError,
+  pathsEffectivelyEqual,
+  removePartialLibraryCopy,
+  runLibraryMove,
+} from './library-move';
 
 /** Absolute directory used for reads/writes; empty if `outputRoot` is unset. */
 export function computeResolvedOutputRoot(outputRoot: string): string {
@@ -280,6 +288,8 @@ export class RecNetService extends EventEmitter {
   private settings: RecNetSettings;
   private settingsLoaded: Promise<void>;
   private currentOperation: CurrentOperation | null = null;
+  private libraryMoveInProgress = false;
+  private libraryMoveAbort: AbortController | null = null;
   private progress: Progress;
   private httpClient: RecNetHttpClient;
   private photosController: PhotosController;
@@ -397,7 +407,293 @@ export class RecNetService extends EventEmitter {
 
   async getOutputConfigurationError(): Promise<string | null> {
     await this.ensureSettingsLoaded();
+    if (this.libraryMoveInProgress) {
+      return 'Photo library move in progress. Wait for it to finish or cancel it.';
+    }
     return describeOutputConfigurationError(this.settings);
+  }
+
+  isLibraryMoveInProgress(): boolean {
+    return this.libraryMoveInProgress;
+  }
+
+  cancelLibraryMove(): boolean {
+    if (this.libraryMoveAbort && !this.libraryMoveAbort.signal.aborted) {
+      this.libraryMoveAbort.abort();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Copy library to an absolute empty folder, verify, update settings, then remove the old root.
+   */
+  async moveLibraryTo(
+    destAbsolute: string,
+    onProgress: (p: LibraryMoveProgress) => void
+  ): Promise<LibraryMoveResult> {
+    await this.ensureSettingsLoaded();
+
+    const logMove = (line: string) => {
+      console.log(`[LibraryMove] ${line}`);
+    };
+
+    if (this.libraryMoveInProgress) {
+      logMove('Rejected: a library move is already in progress.');
+      return {
+        success: false,
+        previousRoot: '',
+        newRoot: '',
+        filesCopied: 0,
+        bytesCopied: 0,
+        error: 'A library move is already in progress.',
+        operationLog: ['Rejected: a library move is already in progress.'],
+      };
+    }
+    if (this.currentOperation) {
+      logMove('Rejected: another operation is running.');
+      return {
+        success: false,
+        previousRoot: '',
+        newRoot: '',
+        filesCopied: 0,
+        bytesCopied: 0,
+        error:
+          'Another operation is running. Cancel it before moving the library.',
+        operationLog: ['Rejected: another operation is running.'],
+      };
+    }
+
+    const srcRoot = this.getResolvedOutputRoot();
+    const outputOk =
+      isOutputRootConfiguredForWrites(
+        this.settings.outputRoot,
+        this.settings.legacyRelativeOutputAllowed
+      ) && srcRoot.trim() !== '';
+
+    if (!outputOk) {
+      const err =
+        describeOutputConfigurationError(this.settings) ??
+        'No output library folder is configured.';
+      logMove(`Rejected before start: ${err}`);
+      return {
+        success: false,
+        previousRoot: '',
+        newRoot: '',
+        filesCopied: 0,
+        bytesCopied: 0,
+        error: err,
+        operationLog: [`Rejected: ${err}`],
+      };
+    }
+
+    const destRoot = path.resolve(destAbsolute.trim());
+    if (!path.isAbsolute(destRoot)) {
+      logMove('Rejected: destination must be an absolute path.');
+      return {
+        success: false,
+        previousRoot: srcRoot,
+        newRoot: '',
+        filesCopied: 0,
+        bytesCopied: 0,
+        error: 'Destination must be an absolute path.',
+        operationLog: ['Rejected: destination must be an absolute path.'],
+      };
+    }
+
+    if (pathsEffectivelyEqual(srcRoot, destRoot)) {
+      logMove('Rejected: source and destination are the same folder.');
+      return {
+        success: false,
+        previousRoot: srcRoot,
+        newRoot: destRoot,
+        filesCopied: 0,
+        bytesCopied: 0,
+        error: 'Source and destination are the same folder.',
+        operationLog: ['Rejected: source and destination are the same folder.'],
+      };
+    }
+
+    this.libraryMoveInProgress = true;
+    this.libraryMoveAbort = new AbortController();
+    const signal = this.libraryMoveAbort.signal;
+
+    let outcome: Awaited<ReturnType<typeof runLibraryMove>> | null = null;
+    let copyAndVerifySucceeded = false;
+
+    try {
+      outcome = await runLibraryMove({
+        srcRoot,
+        destRoot,
+        signal,
+        onProgress,
+      });
+      copyAndVerifySucceeded = true;
+
+      let workingLog = [...outcome.operationLog];
+
+      const pushOrchestrationLog = (line: string) => {
+        workingLog = [...workingLog, line];
+        logMove(line);
+      };
+
+      const emitOrchestration = (
+        partial: Partial<LibraryMoveProgress> & Pick<LibraryMoveProgress, 'phase'>
+      ) => {
+        onProgress({
+          phase: partial.phase,
+          bytesDone: partial.bytesDone ?? outcome!.bytesCopied,
+          bytesTotal: partial.bytesTotal ?? outcome!.bytesCopied,
+          filesDone: partial.filesDone ?? outcome!.filesCopied,
+          filesTotal: partial.filesTotal ?? outcome!.filesCopied,
+          currentLabel: partial.currentLabel ?? '',
+          done: partial.done ?? false,
+          error: partial.error,
+          sourceDeleteWarning: partial.sourceDeleteWarning,
+          operationLog: [...workingLog],
+        });
+      };
+
+      pushOrchestrationLog(`Settings: saving new library path "${destRoot}".`);
+      emitOrchestration({
+        phase: 'saving_settings',
+        currentLabel: 'Updating app settings to the new library folder…',
+      });
+      await this.updateSettings({ outputRoot: destRoot });
+      pushOrchestrationLog('Settings: saved successfully.');
+
+      emitOrchestration({
+        phase: 'removing_old',
+        currentLabel: 'Removing the old library folder…',
+      });
+
+      let sourceDeleteWarning: string | undefined;
+      try {
+        if (
+          !pathsEffectivelyEqual(srcRoot, destRoot) &&
+          (await fs.pathExists(srcRoot))
+        ) {
+          pushOrchestrationLog(`Old library: deleting "${srcRoot}"…`);
+          await fs.remove(srcRoot);
+          pushOrchestrationLog('Old library: removed successfully.');
+        } else {
+          pushOrchestrationLog(
+            'Old library: skipped delete (same path or source already absent).'
+          );
+        }
+      } catch (err) {
+        sourceDeleteWarning = `Library is now at ${destRoot}, but the old folder could not be fully removed: ${(err as Error).message}`;
+        pushOrchestrationLog(
+          `Old library: delete failed — ${(err as Error).message}`
+        );
+      }
+
+      emitOrchestration({
+        phase: 'complete',
+        currentLabel: sourceDeleteWarning
+          ? 'Move finished with a warning about the old folder.'
+          : 'Move finished.',
+        done: true,
+        sourceDeleteWarning,
+      });
+
+      logMove(
+        sourceDeleteWarning
+          ? `Finished with warning: ${sourceDeleteWarning}`
+          : 'Finished successfully.'
+      );
+
+      return {
+        success: true,
+        previousRoot: outcome.previousRoot,
+        newRoot: outcome.newRoot,
+        filesCopied: outcome.filesCopied,
+        bytesCopied: outcome.bytesCopied,
+        sourceDeleteWarning,
+        operationLog: workingLog,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      if (error instanceof LibraryMoveCancelledError) {
+        logMove('Cancelled by user; cleaning up partial destination data…');
+        try {
+          await removePartialLibraryCopy(
+            destRoot,
+            outcome?.topLevelDestNames ?? []
+          );
+          if (
+            !(outcome?.topLevelDestNames?.length) &&
+            (await fs.pathExists(destRoot))
+          ) {
+            const kids = await fs.readdir(destRoot);
+            for (const k of kids) {
+              await fs.remove(path.join(destRoot, k));
+            }
+          }
+          logMove('Cancel cleanup: destination partial copy removed where possible.');
+        } catch {
+          logMove('Cancel cleanup: some destination files may remain.');
+          // ignore cleanup failure
+        }
+        const cancelLog = [
+          ...(outcome?.operationLog ?? []),
+          'Cancelled: partial data under the destination was removed where possible.',
+        ];
+        return {
+          success: false,
+          previousRoot: srcRoot,
+          newRoot: destRoot,
+          filesCopied: 0,
+          bytesCopied: 0,
+          error:
+            'Library move was cancelled. Partial files under the destination may have been removed.',
+          operationLog: cancelLog,
+        };
+      }
+
+      if (!copyAndVerifySucceeded) {
+        logMove(`Copy/verify failed: ${message}; cleaning destination…`);
+        try {
+          if (await fs.pathExists(destRoot)) {
+            const kids = await fs.readdir(destRoot);
+            for (const k of kids) {
+              await fs.remove(path.join(destRoot, k));
+            }
+          }
+          logMove('Failure cleanup: emptied destination folder where possible.');
+        } catch {
+          logMove('Failure cleanup: could not fully empty destination.');
+          // ignore
+        }
+      } else {
+        logMove(
+          `After copy/verify failure on commit: ${message} (new folder may still hold files).`
+        );
+      }
+
+      const failLog = [
+        ...(outcome?.operationLog ?? []),
+        copyAndVerifySucceeded
+          ? `Failed after successful copy: ${message}`
+          : `Failed during copy or verify: ${message}`,
+      ];
+
+      return {
+        success: false,
+        previousRoot: srcRoot,
+        newRoot: destRoot,
+        filesCopied: outcome?.filesCopied ?? 0,
+        bytesCopied: outcome?.bytesCopied ?? 0,
+        error: copyAndVerifySucceeded
+          ? `${message} Your files are still under the new folder; settings may not have updated. Try choosing that folder in Settings.`
+          : message,
+        operationLog: failLog,
+      };
+    } finally {
+      this.libraryMoveInProgress = false;
+      this.libraryMoveAbort = null;
+    }
   }
 
   async getSettings(): Promise<RecNetSettings> {

@@ -6,6 +6,7 @@ import { PhotoViewer } from './components/PhotoViewer';
 import { ProgressDisplay } from './components/ProgressDisplay';
 import { StatsDialog } from './components/StatsDialog';
 import { CustomTitleBar } from './components/CustomTitleBar';
+import { LibraryMoveDialog } from './components/LibraryMoveDialog';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DEFAULT_CDN_BASE } from '../shared/cdnUrl';
 import {
@@ -85,6 +86,7 @@ function App() {
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const [debugMenuOpen, setDebugMenuOpen] = useState(false);
+  const [libraryMoveDialogOpen, setLibraryMoveDialogOpen] = useState(false);
   const [resultsScrollRequestId, setResultsScrollRequestId] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [headerMode, setHeaderMode] = useState<'full' | 'compact' | 'hidden'>(
@@ -1102,6 +1104,13 @@ function App() {
     <FavoritesProvider>
       <div className="min-h-screen bg-background">
         {/* Custom Title Bar */}
+        <LibraryMoveDialog
+          open={libraryMoveDialogOpen}
+          onOpenChange={setLibraryMoveDialogOpen}
+          settings={settings}
+          onCompleted={loadSettings}
+        />
+
         <CustomTitleBar
           onDownloadClick={() => setDownloadPanelOpen(true)}
           onStatsClick={() => setStatsDialogOpen(true)}
@@ -1122,6 +1131,7 @@ function App() {
           outputExplorerPath={effectiveOutputExplorerPath}
           libraryMode={libraryMode}
           onLibraryModeChange={setLibraryMode}
+          onOpenLibraryMove={() => setLibraryMoveDialogOpen(true)}
         />
 
         <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden pt-14">
@@ -1150,6 +1160,7 @@ function App() {
               showCancel={isDownloading}
               settings={settings}
               libraryMode={libraryMode}
+              onOpenLibraryMove={() => setLibraryMoveDialogOpen(true)}
             />
           </ErrorBoundary>
 

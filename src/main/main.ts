@@ -27,6 +27,7 @@ import {
   RoomDto,
   RoomPhotoBatchResult,
   RoomPhotoSort,
+  LibraryMoveResult,
 } from '../shared/types';
 import type { DownloadSourceSelection } from '../shared/download-sources';
 import { EventDto } from './models/EventDto';
@@ -664,6 +665,37 @@ ipcMain.handle(
     return await recNetService.updateSettings(settings);
   }
 );
+
+ipcMain.handle(
+  'library-move-start',
+  async (
+    _event: IpcMainInvokeEvent,
+    dest: string
+  ): Promise<ApiResponse<LibraryMoveResult>> => {
+    try {
+      const result = await recNetService.moveLibraryTo(dest, progress => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          return;
+        }
+        mainWindow.webContents.send('library-move-progress', progress);
+      });
+      if (result.success) {
+        return { success: true, data: result };
+      }
+      return {
+        success: false,
+        error: result.error ?? 'Library move failed.',
+        data: result,
+      };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle('library-move-cancel', (): boolean => {
+  return recNetService.cancelLibraryMove();
+});
 
 // Progress tracking
 ipcMain.handle('get-progress', async (): Promise<Progress> => {

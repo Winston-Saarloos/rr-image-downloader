@@ -101,6 +101,7 @@ interface DownloadPanelProps {
   isDownloading?: boolean;
   showCancel?: boolean;
   settings: RecNetSettings;
+  onOpenLibraryMove?: () => void;
 }
 
 type UsernameStatus = 'idle' | 'checking' | 'found' | 'not-found';
@@ -116,6 +117,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   showCancel = false,
   settings,
   libraryMode = 'user',
+  onOpenLibraryMove,
 }) => {
   const electronAPI = (window as unknown as { electronAPI?: any }).electronAPI;
   const recNetTokenGuideUrl =
@@ -830,11 +832,27 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               </p>
             ) : null}
             {settings.legacyDefaultRelativeOutputWarning && (
-              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
-                The default folder name <span className="font-mono">output</span>{' '}
-                is relative to where the app was launched from, which can change.
-                Consider moving your library to a permanent folder (Browse) under
-                Documents or Pictures.
+              <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+                <p>
+                  The default folder name <span className="font-mono">output</span>{' '}
+                  is relative to where the app was launched from, which can change.
+                  Consider moving your library to a permanent folder (Browse) under
+                  Documents or Pictures.
+                </p>
+                {onOpenLibraryMove && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="border-amber-600/40"
+                    onClick={() => {
+                      onOpenLibraryMove();
+                      onOpenChange(false);
+                    }}
+                  >
+                    Move library to a safe folder…
+                  </Button>
+                )}
               </div>
             )}
           </div>

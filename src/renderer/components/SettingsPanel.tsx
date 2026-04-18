@@ -15,6 +15,7 @@ import { RecNetSettings } from '../../shared/types';
 interface SettingsPanelProps {
   settings: RecNetSettings;
   onUpdateSettings: (settings: Partial<RecNetSettings>) => Promise<void>;
+  onOpenLibraryMove?: () => void;
   onLog: (
     message: string,
     type?: 'info' | 'success' | 'error' | 'warning'
@@ -24,6 +25,7 @@ interface SettingsPanelProps {
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   settings,
   onUpdateSettings,
+  onOpenLibraryMove,
   onLog,
 }) => {
   const [isSelectingFolder, setIsSelectingFolder] = useState(false);
@@ -129,12 +131,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           )}
           {settings.legacyDefaultRelativeOutputWarning && (
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
-              You are using the default relative folder name{' '}
-              <span className="font-mono">output</span>. Its real location depends
-              on how the app was started. Choose a permanent folder (for example
-              under Documents or Pictures) with Browse so your photos always save
-              where you expect.
+            <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+              <p>
+                You are using the default relative folder name{' '}
+                <span className="font-mono">output</span>. Its real location depends
+                on how the app was started. Choose a permanent folder (for example
+                under Documents or Pictures) with Browse so your photos always save
+                where you expect.
+              </p>
+              {onOpenLibraryMove && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="border-amber-600/40"
+                  onClick={() => onOpenLibraryMove()}
+                >
+                  Move library to a safe folder…
+                </Button>
+              )}
             </div>
           )}
         </div>

@@ -53,6 +53,7 @@ interface CustomTitleBarProps {
   outputExplorerPath: string;
   libraryMode: LibraryMode;
   onLibraryModeChange: (mode: LibraryMode) => void;
+  onOpenLibraryMove?: () => void;
 }
 
 export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
@@ -75,6 +76,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
   outputExplorerPath,
   libraryMode,
   onLibraryModeChange,
+  onOpenLibraryMove,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
   const resultsSectionRef = useRef<HTMLDivElement | null>(null);
@@ -248,10 +250,28 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
             <SettingsPanel
               settings={settings}
               onUpdateSettings={onUpdateSettings}
+              onOpenLibraryMove={onOpenLibraryMove}
               onLog={() => {
                 // Logging handled by parent component
               }}
             />
+            {onOpenLibraryMove && (
+              <div className="rounded-md border p-3 space-y-2">
+                <p className="text-sm font-medium">Library maintenance</p>
+                <p className="text-xs text-muted-foreground">
+                  Move the entire photo library to another empty folder (copy,
+                  verify, then remove the old location).
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onOpenLibraryMove()}
+                >
+                  Move photo library…
+                </Button>
+              </div>
+            )}
             <LogPanel logs={logs} onClearLogs={onClearLogs} />
             <div ref={resultsSectionRef}>
               <ResultsPanel

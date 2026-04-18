@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ElectronAPI } from '../shared/electron-api';
+import type { LibraryMoveProgress } from '../shared/types';
 
 const electronAPI: ElectronAPI = {
   collectPhotos: (params) => ipcRenderer.invoke('collect-photos', params),
@@ -23,6 +24,21 @@ const electronAPI: ElectronAPI = {
 
   getSettings: () => ipcRenderer.invoke('get-settings'),
   updateSettings: (settings) => ipcRenderer.invoke('update-settings', settings),
+
+  startLibraryMove: (dest: string) =>
+    ipcRenderer.invoke('library-move-start', dest),
+  cancelLibraryMove: () => ipcRenderer.invoke('library-move-cancel'),
+
+  onLibraryMoveProgress: (
+    callback: (event: unknown, progress: LibraryMoveProgress) => void
+  ) => {
+    ipcRenderer.on('library-move-progress', callback);
+  },
+  removeLibraryMoveProgressListener: (
+    callback: (event: unknown, progress: LibraryMoveProgress) => void
+  ) => {
+    ipcRenderer.removeListener('library-move-progress', callback);
+  },
 
   getProgress: () => ipcRenderer.invoke('get-progress'),
   cancelOperation: () => ipcRenderer.invoke('cancel-operation'),

@@ -43,6 +43,48 @@ export interface BulkDataRefreshOptions {
 export type LibraryMode = 'user' | 'room' | 'event';
 export type RoomPhotoSort = 0 | 1;
 
+export type LibraryMovePhase =
+  | 'validating'
+  | 'preflight'
+  | 'copy'
+  | 'verify'
+  /** Copy and per-file verification finished; settings update / cleanup not started yet. */
+  | 'verified'
+  | 'saving_settings'
+  | 'removing_old'
+  | 'complete';
+
+/** Progress events from main during `library-move-start` (via preload). */
+export interface LibraryMoveProgress {
+  phase: LibraryMovePhase;
+  bytesDone: number;
+  bytesTotal: number;
+  filesDone: number;
+  filesTotal: number;
+  currentLabel: string;
+  done: boolean;
+  /** Set when `done` is true and the move failed. */
+  error?: string;
+  /** Non-fatal: library is on new path but old folder could not be removed. */
+  sourceDeleteWarning?: string;
+  /** Human-readable milestones for the current move (newest entries last). */
+  operationLog?: string[];
+}
+
+export interface LibraryMoveResult {
+  success: boolean;
+  /** Absolute path the library was moved from (resolved source root). */
+  previousRoot: string;
+  /** Absolute path the library now lives under. */
+  newRoot: string;
+  filesCopied: number;
+  bytesCopied: number;
+  error?: string;
+  sourceDeleteWarning?: string;
+  /** Summary of major steps and outcomes (for UI or support). */
+  operationLog?: string[];
+}
+
 export interface Progress {
   isRunning: boolean;
   phase:
