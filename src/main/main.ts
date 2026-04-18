@@ -21,7 +21,11 @@ import {
   RecNetSettings,
   Progress,
   AccountInfo,
+  AvailableEvent,
+  AvailableEventCreator,
   AvailableRoom,
+  EventDiscoveryResult,
+  EventPhotoBatchResult,
   Photo,
   PlayerResult,
   RoomDto,
@@ -37,6 +41,21 @@ import { ImageCommentDto } from './models/ImageCommentDto';
 let mainWindow: BrowserWindow | null = null;
 let recNetService: RecNetService;
 const isDev = process.argv.includes('--dev');
+
+const MAIN_WINDOW_MIN_WIDTH = 850;
+const MAIN_WINDOW_MIN_HEIGHT = 600;
+
+function enforceMainWindowMinimumSize(win: BrowserWindow): void {
+  if (win.isDestroyed()) {
+    return;
+  }
+  const { width, height } = win.getBounds();
+  const nextWidth = Math.max(MAIN_WINDOW_MIN_WIDTH, width);
+  const nextHeight = Math.max(MAIN_WINDOW_MIN_HEIGHT, height);
+  if (nextWidth !== width || nextHeight !== height) {
+    win.setSize(nextWidth, nextHeight, false);
+  }
+}
 
 interface CollectPhotosParams {
   accountId: string;
@@ -88,6 +107,22 @@ interface DownloadRoomPhotoBatchParams {
   forceRoomsRefresh?: boolean;
   forceEventsRefresh?: boolean;
   forceImageCommentsRefresh?: boolean;
+}
+
+interface DiscoverEventsForUsernameParams {
+  username: string;
+  token?: string;
+}
+
+interface DownloadEventPhotosParams {
+  creatorAccountId: string;
+  eventIds: string[];
+  token?: string;
+}
+
+interface LoadEventAlbumPhotosParams {
+  creatorAccountId: string;
+  eventId: string;
 }
 
 interface ApiResponse<T> {
@@ -210,11 +245,11 @@ function attachEditableContextMenu(win: BrowserWindow): void {
 
 function createWindow(): void {
   // Create the browser window
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1000,
     height: 700,
-    minWidth: 800,
-    minHeight: 600,
+    minWidth: MAIN_WINDOW_MIN_WIDTH,
+    minHeight: MAIN_WINDOW_MIN_HEIGHT,
     frame: false, // Remove default title bar for custom header
     webPreferences: {
       nodeIntegration: false,
@@ -224,55 +259,56 @@ function createWindow(): void {
     icon: path.join(__dirname, '../../public/favicon.ico'),
     title: 'Rec Room Photo Downloader',
   });
+  mainWindow = win;
+
+  win.setMinimumSize(MAIN_WINDOW_MIN_WIDTH, MAIN_WINDOW_MIN_HEIGHT);
+  enforceMainWindowMinimumSize(win);
+  win.on('resize', () => enforceMainWindowMinimumSize(win));
 
   // Load the app
   if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
+    win.loadURL('http://localhost:3000');
   } else {
     // Use app.getAppPath() in production to get the correct app directory
     const appPath = app.getAppPath();
     const indexPath = path.join(appPath, 'index.html');
     console.log('Loading index.html from:', indexPath); // Debug log
-    mainWindow.loadFile(indexPath).catch(error => {
+    win.loadFile(indexPath).catch(error => {
       console.error('Error loading index.html:', error);
       // Fallback: try alternative path
-      if (mainWindow) {
-        const altPath = path.join(__dirname, '../../index.html');
-        console.log('Trying alternative path:', altPath);
-        mainWindow.loadFile(altPath).catch(fallbackError => {
-          console.error('Fallback path also failed:', fallbackError);
-        });
-      }
+      const altPath = path.join(__dirname, '../../index.html');
+      console.log('Trying alternative path:', altPath);
+      win.loadFile(altPath).catch(fallbackError => {
+        console.error('Fallback path also failed:', fallbackError);
+      });
     });
   }
 
   // Add error handlers to debug loading issues
-  if (mainWindow) {
-    mainWindow.webContents.on(
-      'did-fail-load',
-      (event, errorCode, errorDescription, validatedURL) => {
-        console.error('Failed to load:', {
-          errorCode,
-          errorDescription,
-          validatedURL,
-        });
-      }
-    );
+  win.webContents.on(
+    'did-fail-load',
+    (event, errorCode, errorDescription, validatedURL) => {
+      console.error('Failed to load:', {
+        errorCode,
+        errorDescription,
+        validatedURL,
+      });
+    }
+  );
 
-    mainWindow.webContents.on('dom-ready', () => {
-      console.log('DOM ready');
-    });
-  }
+  win.webContents.on('dom-ready', () => {
+    console.log('DOM ready');
+  });
 
   // Open DevTools in development
   if (isDev) {
-    mainWindow.webContents.openDevTools();
+    win.webContents.openDevTools();
   }
 
-  attachEditableContextMenu(mainWindow);
+  attachEditableContextMenu(win);
 
   // Handle window closed
-  mainWindow.on('closed', () => {
+  win.on('closed', () => {
     mainWindow = null;
   });
 }
@@ -613,6 +649,47 @@ ipcMain.handle(
         return { success: false, error: outputErr };
       }
       const result = await recNetService.downloadRoomPhotoBatch(params);
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'discover-events-for-username',
+  async (
+    event: IpcMainInvokeEvent,
+    params: DiscoverEventsForUsernameParams
+  ): Promise<ApiResponse<EventDiscoveryResult>> => {
+    try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
+      const result = await recNetService.discoverEventsForUsername(
+        params.username,
+        params.token
+      );
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'download-event-photos',
+  async (
+    event: IpcMainInvokeEvent,
+    params: DownloadEventPhotosParams
+  ): Promise<ApiResponse<EventPhotoBatchResult>> => {
+    try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
+      const result = await recNetService.downloadEventPhotos(params);
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -1072,6 +1149,33 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'list-available-events',
+  async (
+    event: IpcMainInvokeEvent,
+    creatorAccountId?: string
+  ): Promise<ApiResponse<AvailableEvent[]>> => {
+    try {
+      const events = await recNetService.listAvailableEvents(creatorAccountId);
+      return { success: true, data: events };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'list-available-event-creators',
+  async (): Promise<ApiResponse<AvailableEventCreator[]>> => {
+    try {
+      const creators = await recNetService.listAvailableEventCreators();
+      return { success: true, data: creators };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
   'load-room-photos',
   async (
     event: IpcMainInvokeEvent,
@@ -1240,6 +1344,97 @@ ipcMain.handle(
         ? raw.map(normalizeImageCommentRecord)
         : [];
       return { success: true, data };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-event-album-photos',
+  async (
+    event: IpcMainInvokeEvent,
+    params: LoadEventAlbumPhotosParams
+  ): Promise<ApiResponse<Photo[]>> => {
+    try {
+      const photos = await recNetService.loadEventAlbumPhotos(params);
+      return { success: true, data: photos };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-event-album-accounts-data',
+  async (
+    event: IpcMainInvokeEvent,
+    params: LoadEventAlbumPhotosParams
+  ): Promise<ApiResponse<PlayerResult[]>> => {
+    try {
+      const data = await recNetService.loadEventAlbumAccountsData(params);
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-event-album-rooms-data',
+  async (
+    event: IpcMainInvokeEvent,
+    params: LoadEventAlbumPhotosParams
+  ): Promise<ApiResponse<RoomDto[]>> => {
+    try {
+      const data = await recNetService.loadEventAlbumRoomsData(params);
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-event-album-events-data',
+  async (
+    event: IpcMainInvokeEvent,
+    params: LoadEventAlbumPhotosParams
+  ): Promise<ApiResponse<EventDto[]>> => {
+    try {
+      const data = await recNetService.loadEventAlbumEventsData(params);
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-event-album-image-comments-data',
+  async (
+    event: IpcMainInvokeEvent,
+    params: LoadEventAlbumPhotosParams
+  ): Promise<ApiResponse<ImageCommentDto[]>> => {
+    try {
+      const data = await recNetService.loadEventAlbumImageCommentsData(params);
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'load-event-albums-for-creator',
+  async (
+    event: IpcMainInvokeEvent,
+    creatorAccountId: string
+  ): Promise<ApiResponse<AvailableEvent[]>> => {
+    try {
+      const events =
+        await recNetService.loadEventAlbumsForCreator(creatorAccountId);
+      return { success: true, data: events };
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }

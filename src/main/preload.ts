@@ -19,6 +19,10 @@ const electronAPI: ElectronAPI = {
   lookupRoomByName: (params) => ipcRenderer.invoke('lookup-room-by-name', params),
   downloadRoomPhotoBatch: (params) =>
     ipcRenderer.invoke('download-room-photo-batch', params),
+  discoverEventsForUsername: (params) =>
+    ipcRenderer.invoke('discover-events-for-username', params),
+  downloadEventPhotos: (params) =>
+    ipcRenderer.invoke('download-event-photos', params),
 
   selectOutputFolder: () => ipcRenderer.invoke('select-output-folder'),
 
@@ -63,6 +67,10 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke('load-profile-history-photos', accountId),
   listAvailableAccounts: () => ipcRenderer.invoke('list-available-accounts'),
   listAvailableRooms: () => ipcRenderer.invoke('list-available-rooms'),
+  listAvailableEvents: (creatorAccountId) =>
+    ipcRenderer.invoke('list-available-events', creatorAccountId),
+  listAvailableEventCreators: () =>
+    ipcRenderer.invoke('list-available-event-creators'),
   loadAccountsData: (accountId) => ipcRenderer.invoke('load-accounts-data', accountId),
   loadRoomsData: (accountId) => ipcRenderer.invoke('load-rooms-data', accountId),
   loadEventsData: (accountId) => ipcRenderer.invoke('load-events-data', accountId),
@@ -77,6 +85,18 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke('load-room-events-data', roomId),
   loadRoomImageCommentsData: (roomId) =>
     ipcRenderer.invoke('load-room-image-comments-data', roomId),
+  loadEventAlbumPhotos: (params) =>
+    ipcRenderer.invoke('load-event-album-photos', params),
+  loadEventAlbumAccountsData: (params) =>
+    ipcRenderer.invoke('load-event-album-accounts-data', params),
+  loadEventAlbumRoomsData: (params) =>
+    ipcRenderer.invoke('load-event-album-rooms-data', params),
+  loadEventAlbumEventsData: (params) =>
+    ipcRenderer.invoke('load-event-album-events-data', params),
+  loadEventAlbumImageCommentsData: (params) =>
+    ipcRenderer.invoke('load-event-album-image-comments-data', params),
+  loadEventAlbumsForCreator: (creatorAccountId) =>
+    ipcRenderer.invoke('load-event-albums-for-creator', creatorAccountId),
 
   getFavorites: () => ipcRenderer.invoke('get-favorites'),
   toggleFavorite: (photoId) => ipcRenderer.invoke('toggle-favorite', photoId),

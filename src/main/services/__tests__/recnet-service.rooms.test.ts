@@ -3,7 +3,9 @@ import * as path from 'path';
 import { RecNetService } from '../recnet-service';
 import { PhotosController } from '../recnet/photos-controller';
 import { RoomsController } from '../recnet/rooms-controller';
+import { EventsController } from '../recnet/events-controller';
 import { ImageDto } from '../../models/ImageDto';
+import { EventDto } from '../../models/EventDto';
 import { GenericResponse } from '../../models/GenericResponse';
 
 jest.mock('fs-extra', () => {
@@ -32,6 +34,7 @@ describe('RecNetService - Room Photo Batches', () => {
   let service: RecNetService;
   let mockPhotosController: jest.Mocked<PhotosController>;
   let mockRoomsController: jest.Mocked<RoomsController>;
+  let mockEventsController: jest.Mocked<EventsController>;
   const outputRoot = path.join(__dirname, 'test-output', 'rooms');
 
   const createRoom = () =>
@@ -58,6 +61,28 @@ describe('RecNetService - Room Photo Batches', () => {
     CommentCount: 0,
   });
 
+  const createEvent = (id = 'event-1'): EventDto => ({
+    PlayerEventId: id,
+    CreatorPlayerId: 'creator-1',
+    ImageName: 'event-cover.jpg',
+    RoomId: '2754290',
+    SubRoomId: null,
+    ClubId: null,
+    Name: 'Friday Meetup',
+    Description: '',
+    StartTime: '2026-04-20T09:00:00Z',
+    EndTime: '2026-04-20T11:00:00Z',
+    AttendeeCount: 30,
+    State: 0,
+    AccessibilityLevel: 1,
+    IsMultiInstance: false,
+    SupportMultiInstanceRoomChat: false,
+    BroadcastingRoomInstanceId: null,
+    DefaultBroadcastPermissions: 0,
+    CanRequestBroadcastPermissions: 0,
+    RecurrenceSchedule: null,
+  });
+
   beforeEach(async () => {
     jest.clearAllMocks();
     service = new RecNetService();
@@ -80,13 +105,19 @@ describe('RecNetService - Room Photo Batches', () => {
       fetchFeedPhotos: jest.fn(),
       fetchProfilePhotoHistory: jest.fn(),
       fetchRoomPhotos: jest.fn(),
+      fetchPlayerEventPhotos: jest.fn(),
     } as any;
     mockRoomsController = {
       lookupRoomByName: jest.fn(),
       fetchBulkRooms: jest.fn(),
     } as any;
+    mockEventsController = {
+      fetchCreatorEvents: jest.fn(),
+      fetchBulkEvents: jest.fn(),
+    } as any;
     (service as any).photosController = mockPhotosController;
     (service as any).roomsController = mockRoomsController;
+    (service as any).eventsController = mockEventsController;
 
     (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
     (mockedFs.ensureDir as jest.Mock).mockResolvedValue(undefined);
@@ -228,5 +259,105 @@ describe('RecNetService - Room Photo Batches', () => {
       }),
       { spaces: 2 }
     );
+  });
+
+  it('discovers creator events under outputRoot/events/<creatorId>', async () => {
+    const event = { ...createEvent(), ImageName: 'null' };
+    jest.spyOn(service, 'lookupAccountByUsername').mockResolvedValue({
+      accountId: 'creator-1',
+      username: 'winston',
+      displayName: 'Winston',
+      profileImage: '',
+    } as any);
+    mockEventsController.fetchCreatorEvents
+      .mockResolvedValueOnce([event])
+      .mockResolvedValueOnce([]);
+
+    const result = await service.discoverEventsForUsername('winston');
+
+    const creatorDir = path.join(outputRoot, 'events', 'creator-1');
+    const eventDir = path.join(creatorDir, 'event-1');
+    expect(result.creatorAccountId).toBe('creator-1');
+    expect(result.events).toHaveLength(1);
+    expect(mockEventsController.fetchCreatorEvents).toHaveBeenCalledWith(
+      'creator-1',
+      { skip: 0, take: 50 },
+      undefined
+    );
+    expect(mockedFs.writeJson).toHaveBeenCalledWith(
+      path.join(creatorDir, 'events.json'),
+      [expect.objectContaining({ ImageName: null })],
+      { spaces: 2 }
+    );
+    expect(mockedFs.writeJson).toHaveBeenCalledWith(
+      path.join(eventDir, 'folder-meta.json'),
+      expect.objectContaining({
+        creatorAccountId: 'creator-1',
+        eventId: 'event-1',
+        imageName: null,
+        name: 'Friday Meetup',
+      }),
+      { spaces: 2 }
+    );
+  });
+
+  it('downloads selected event photos into event album folders', async () => {
+    const event = createEvent();
+    const eventDir = path.join(outputRoot, 'events', 'creator-1', 'event-1');
+    const photosDir = path.join(eventDir, 'photos');
+    const manifestPath = path.join(outputRoot, 'events', 'creator-1', 'events.json');
+
+    (mockedFs.pathExists as jest.Mock).mockImplementation(async filePath => {
+      return filePath === manifestPath || filePath === photosDir;
+    });
+    (mockedFs.readJson as jest.Mock).mockImplementation(async filePath => {
+      if (filePath === manifestPath) {
+        return [event];
+      }
+      return null;
+    });
+    (mockedFs.readdir as jest.Mock).mockResolvedValue(['photo-1.jpg']);
+    mockPhotosController.fetchPlayerEventPhotos.mockResolvedValueOnce([
+      createPhoto('photo-1'),
+    ]);
+
+    const result = await service.downloadEventPhotos({
+      creatorAccountId: 'creator-1',
+      eventIds: ['event-1'],
+    });
+
+    expect(mockPhotosController.fetchPlayerEventPhotos).toHaveBeenCalledWith(
+      'event-1',
+      { skip: 0, take: 100 },
+      undefined,
+      expect.any(Object)
+    );
+    expect(mockedFs.writeJson).toHaveBeenCalledWith(
+      path.join(eventDir, 'event-1_photos.json'),
+      expect.arrayContaining([expect.objectContaining({ Id: 'photo-1' })]),
+      { spaces: 2 }
+    );
+    expect(mockedFs.writeFile).toHaveBeenCalledWith(
+      path.join(photosDir, 'photo-1.jpg'),
+      expect.any(Buffer)
+    );
+    expect(result.downloadStats.newDownloads).toBe(1);
+    expect(result.downloadedEvents[0]).toEqual(
+      expect.objectContaining({
+        eventId: 'event-1',
+        downloadedPhotoCount: 1,
+        isDownloaded: true,
+      })
+    );
+
+    expect(service.fetchAndSaveBulkData).toHaveBeenCalled();
+    const bulkCall = (service.fetchAndSaveBulkData as jest.Mock).mock.calls.find(
+      (call: unknown[]) => call[0] === 'creator-1'
+    );
+    expect(bulkCall).toBeDefined();
+    expect(bulkCall![0]).toBe('creator-1');
+    const photosForBulk = bulkCall![1] as { Id: string }[];
+    expect(photosForBulk.some(p => p.Id === 'photo-1')).toBe(true);
+    expect(photosForBulk.some(p => p.Id === 'stm-event-bulk-context')).toBe(true);
   });
 });

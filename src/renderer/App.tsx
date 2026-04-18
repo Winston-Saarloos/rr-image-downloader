@@ -19,10 +19,14 @@ import {
   LibraryMode,
   RoomPhotoBatchResult,
   RoomPhotoSort,
+  EventPhotoBatchResult,
+  EventDownloadIntent,
+  EventDownloadPanelPrefill,
 } from '../shared/types';
 import {
   DownloadSourceSelection,
   getSelectedDownloadSources,
+  DEFAULT_DOWNLOAD_SOURCE_SELECTION,
 } from '../shared/download-sources';
 import { FavoritesProvider } from './contexts/FavoritesContext';
 import {
@@ -44,6 +48,8 @@ interface DownloadRequestState {
   filePath: string;
   downloadSources: DownloadSourceSelection;
   roomPhotoSort: RoomPhotoSort;
+  eventIds?: string[];
+  knownCreatorAccountId?: string;
   refreshOptions: BulkDataRefreshOptions;
 }
 
@@ -84,8 +90,11 @@ function App() {
 
   const [currentAccountId, setCurrentAccountId] = useState<string>('');
   const [currentRoomId, setCurrentRoomId] = useState<string>('');
+  const [currentEventCreatorId, setCurrentEventCreatorId] = useState<string>('');
   const [libraryMode, setLibraryMode] = useState<LibraryMode>('user');
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
+  const [eventDownloadPanelPrefill, setEventDownloadPanelPrefill] =
+    useState<EventDownloadPanelPrefill | null>(null);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const [debugMenuOpen, setDebugMenuOpen] = useState(false);
   const [libraryMoveDialogOpen, setLibraryMoveDialogOpen] = useState(false);
@@ -363,7 +372,18 @@ function App() {
 
   const retryRequest = downloadDraft ?? lastDownloadRequest;
   const canRetryDownload = Boolean(
-    retryRequest?.username.trim() && retryRequest?.filePath.trim()
+    retryRequest?.filePath.trim() &&
+      (() => {
+        const r = retryRequest;
+        if (!r) return false;
+        if (r.libraryMode === 'event') {
+          return (
+            (r.eventIds?.length ?? 0) > 0 &&
+            (!!r.username.trim() || !!r.knownCreatorAccountId?.trim())
+          );
+        }
+        return r.username.trim().length > 0;
+      })()
   );
 
   const isProgressIdle =
@@ -416,10 +436,27 @@ function App() {
     filePath: string,
     downloadSources: DownloadSourceSelection,
     refreshOptions: BulkDataRefreshOptions = {},
-    roomPhotoSort: RoomPhotoSort = 0
+    roomPhotoSort: RoomPhotoSort = 0,
+    eventIds: string[] = [],
+    knownCreatorAccountId?: string
   ) => {
     const selectedSources = getSelectedDownloadSources(downloadSources);
-    if (!username.trim() || !filePath.trim() || selectedSources.length === 0) {
+    const trimmedUser = username.trim();
+    const trimmedCreator = knownCreatorAccountId?.trim();
+    if (!filePath.trim()) {
+      return;
+    }
+    if (libraryMode === 'user' && selectedSources.length === 0) {
+      return;
+    }
+    if (libraryMode === 'event') {
+      if (eventIds.length === 0) {
+        return;
+      }
+      if (!trimmedUser && !trimmedCreator) {
+        return;
+      }
+    } else if (!trimmedUser) {
       return;
     }
 
@@ -440,6 +477,8 @@ function App() {
       filePath,
       downloadSources,
       roomPhotoSort,
+      eventIds,
+      knownCreatorAccountId: trimmedCreator,
       refreshOptions: {
         forceAccountsRefresh,
         forceRoomsRefresh,
@@ -454,7 +493,9 @@ function App() {
     addLog(
       libraryMode === 'room'
         ? `Starting room photo collection for room: ${username}`
-        : `Starting metadata collection for username: ${username}`,
+        : libraryMode === 'event' && trimmedCreator
+          ? `Starting event photo download${trimmedUser ? ` for @${trimmedUser}` : ''}...`
+          : `Starting metadata collection for username: ${username}`,
       'info'
     );
     setProgress({
@@ -484,6 +525,65 @@ function App() {
         });
         setSettings(updatedSettings);
         addLog(`Output path set to: ${filePath}`, 'info');
+
+        if (libraryMode === 'event') {
+          if (eventIds.length === 0) {
+            throw new Error('Choose at least one event to download.');
+          }
+
+          let creatorAccountId = trimmedCreator || '';
+          if (!creatorAccountId) {
+            addLog(`Loading events for username: ${username}`, 'info');
+            const discoveryResult =
+              await window.electronAPI.discoverEventsForUsername({
+                username,
+                token: token.trim() || undefined,
+              });
+            if (!discoveryResult.success || !discoveryResult.data) {
+              throw new Error(
+                discoveryResult.error || 'Could not load events for this user'
+              );
+            }
+
+            creatorAccountId = discoveryResult.data.creatorAccountId;
+            addLog(
+              `Found ${discoveryResult.data.events.length} event(s) for @${discoveryResult.data.username}.`,
+              'success'
+            );
+          } else {
+            addLog(
+              `Downloading event photos (creator ${creatorAccountId})${trimmedUser ? ` for @${trimmedUser}` : ''}.`,
+              'info'
+            );
+          }
+
+          setCurrentEventCreatorId(creatorAccountId);
+
+          const eventResult: {
+            success: boolean;
+            data?: EventPhotoBatchResult;
+            error?: string;
+          } = await window.electronAPI.downloadEventPhotos({
+            creatorAccountId,
+            eventIds,
+            token: token.trim() || undefined,
+          });
+          if (!eventResult.success || !eventResult.data) {
+            throw new Error(
+              eventResult.error || 'Failed to download event photos'
+            );
+          }
+
+          addResult('Event Photos', eventResult.data, 'success');
+          addLog(
+            `Event photo download complete: ${eventResult.data.downloadStats.newDownloads} downloaded, ${eventResult.data.downloadStats.alreadyDownloaded} already on disk.`,
+            eventResult.data.downloadStats.failedDownloads > 0
+              ? 'warning'
+              : 'success'
+          );
+          setCleanCompletionProgress('Completed event photo download');
+          return;
+        }
 
         if (libraryMode === 'room') {
           stopRoomLoopRef.current = false;
@@ -1002,9 +1102,81 @@ function App() {
       retryRequest.filePath,
       retryRequest.downloadSources,
       retryRequest.refreshOptions,
-      retryRequest.roomPhotoSort
+      retryRequest.roomPhotoSort,
+      retryRequest.eventIds ?? [],
+      retryRequest.knownCreatorAccountId
     );
   }, [handleDownload, isDownloading, retryRequest]);
+
+  const openDownloadPanelPlain = useCallback(() => {
+    setEventDownloadPanelPrefill(null);
+    setDownloadPanelOpen(true);
+  }, []);
+
+  const handleDownloadPanelOpenChange = useCallback((nextOpen: boolean) => {
+    setDownloadPanelOpen(nextOpen);
+    if (!nextOpen) {
+      setEventDownloadPanelPrefill(null);
+    }
+  }, []);
+
+  const startQuickEventPhotoDownload = useCallback(
+    async (intent: EventDownloadIntent) => {
+      if (!window.electronAPI || intent.kind !== 'eventAlbum') {
+        return;
+      }
+      const filePath = settings.outputRoot || '';
+      if (!filePath.trim() || !settings.outputPathConfiguredForDownload) {
+        return;
+      }
+      const d = downloadDraft;
+      await handleDownload(
+        (intent.username?.trim() || d?.username?.trim() || '').trim(),
+        d?.token ?? '',
+        filePath,
+        d?.downloadSources ?? DEFAULT_DOWNLOAD_SOURCE_SELECTION,
+        d?.refreshOptions ?? {
+          forceAccountsRefresh: false,
+          forceRoomsRefresh: false,
+          forceEventsRefresh: false,
+          forceImageCommentsRefresh: false,
+        },
+        d?.roomPhotoSort ?? 0,
+        [intent.eventId],
+        intent.creatorAccountId
+      );
+    },
+    [
+      downloadDraft,
+      handleDownload,
+      settings.outputPathConfiguredForDownload,
+      settings.outputRoot,
+    ]
+  );
+
+  const handleOpenDownloadPanelFromViewer = useCallback(
+    (intent?: EventDownloadIntent) => {
+      if (intent?.kind === 'eventAlbum') {
+        if (settings.outputPathConfiguredForDownload) {
+          void startQuickEventPhotoDownload(intent);
+        } else {
+          setEventDownloadPanelPrefill({
+            creatorAccountId: intent.creatorAccountId,
+            eventIds: [intent.eventId],
+            usernameHint: intent.username,
+          });
+          setDownloadPanelOpen(true);
+        }
+        return;
+      }
+      openDownloadPanelPlain();
+    },
+    [
+      openDownloadPanelPlain,
+      settings.outputPathConfiguredForDownload,
+      startQuickEventPhotoDownload,
+    ]
+  );
 
   const handleViewerAccountChange = useCallback(
     (accountId?: string) => {
@@ -1114,7 +1286,7 @@ function App() {
         />
 
         <CustomTitleBar
-          onDownloadClick={() => setDownloadPanelOpen(true)}
+          onDownloadClick={openDownloadPanelPlain}
           onStatsClick={() => setStatsDialogOpen(true)}
           settings={settings}
           onUpdateSettings={updateSettings}
@@ -1128,7 +1300,7 @@ function App() {
           onRetryDownload={handleRetryDownload}
           canRetryDownload={canRetryDownload}
           isRetryingDownload={isDownloading}
-          onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
+          onOpenDownloadPanel={openDownloadPanelPlain}
           onOpenOutputFolder={handleOpenPathInExplorer}
           outputExplorerPath={effectiveOutputExplorerPath}
           libraryMode={libraryMode}
@@ -1145,7 +1317,7 @@ function App() {
             onRetryDownload={handleRetryDownload}
             canRetryDownload={canRetryDownload}
             isRetrying={isDownloading}
-            onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
+            onOpenDownloadPanel={openDownloadPanelPlain}
             onOpenOperationResults={openOperationResults}
             onOpenPathInExplorer={handleOpenPathInExplorer}
           />
@@ -1155,7 +1327,7 @@ function App() {
           <ErrorBoundary sectionName="Download panel">
             <DownloadPanel
               open={downloadPanelOpen}
-              onOpenChange={setDownloadPanelOpen}
+              onOpenChange={handleDownloadPanelOpenChange}
               onDownload={handleDownload}
               onDraftChange={handleDownloadDraftChange}
               onCancel={handleCancelDownload}
@@ -1164,6 +1336,10 @@ function App() {
               settings={settings}
               libraryMode={libraryMode}
               onUpdateSettings={updateSettings}
+              eventDownloadPrefill={eventDownloadPanelPrefill}
+              onEventDownloadPrefillConsumed={() =>
+                setEventDownloadPanelPrefill(null)
+              }
             />
           </ErrorBoundary>
 
@@ -1184,7 +1360,7 @@ function App() {
                 progress={progress}
                 onClose={() => setShowProgressPanel(false)}
                 onOpenOperationResults={openOperationResults}
-                onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
+                onOpenDownloadPanel={openDownloadPanelPlain}
                 onCancelDownload={handleCancelDownload}
                 onConfirmDownload={handleConfirmDownload}
                 onSkipDownload={handleSkipDownload}
@@ -1216,6 +1392,11 @@ function App() {
                     ? currentRoomId
                     : undefined
                 }
+                eventCreatorId={
+                  libraryMode === 'event' && isDownloading
+                    ? currentEventCreatorId
+                    : undefined
+                }
                 libraryMode={libraryMode}
                 isDownloading={isDownloading}
                 onAccountChange={handleViewerAccountChange}
@@ -1224,6 +1405,7 @@ function App() {
                 scrollContainerRef={photoScrollRef}
                 headerMode={headerMode}
                 onOpenActivityMenu={handleOpenActivityMenu}
+                onOpenDownloadPanel={handleOpenDownloadPanelFromViewer}
                 onRevealOutputFolder={handleRevealOutputFolder}
                 onPhotosLoadError={handlePhotosLoadError}
                 onPhotosLoadSuccess={clearPhotosIncident}

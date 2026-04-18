@@ -8,6 +8,28 @@ import {
 export class EventsController {
   constructor(private readonly http: RecNetHttpClient) {}
 
+  async fetchCreatorEvents(
+    creatorAccountId: string,
+    params: { skip: number; take: number },
+    token?: string,
+    options?: RecNetRequestOptions
+  ): Promise<EventDto[]> {
+    const { skip, take } = params;
+    const url = `https://apim.rec.net/apis/api/playerevents/v1/creator/${encodeURIComponent(creatorAccountId)}?skip=${skip}&take=${take}`;
+    const events = await this.http.requestOrThrow<EventDto[]>(
+      { url, method: 'GET' },
+      token,
+      options
+    );
+
+    return events.map((event: EventDto) => ({
+      ...event,
+      PlayerEventId: String(event.PlayerEventId),
+      CreatorPlayerId: String(event.CreatorPlayerId),
+      RoomId: String(event.RoomId),
+    }));
+  }
+
   async fetchBulkEvents(
     eventIds: string[],
     token?: string,

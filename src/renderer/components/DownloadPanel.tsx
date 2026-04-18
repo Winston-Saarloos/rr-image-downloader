@@ -1,11 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ChevronDown,
   ChevronRight,
+  Calendar,
   Download,
   ExternalLink,
   HelpCircle,
   Key,
+  Image as ImageIcon,
   RefreshCcw,
   DoorOpen,
   UserRound,
@@ -22,7 +30,13 @@ import {
   DialogTitle,
 } from '../components/ui/dialog';
 import { buildCdnImageUrl } from '../../shared/cdnUrl';
-import { AccountInfo, LibraryMode, RecNetSettings } from '../../shared/types';
+import {
+  AccountInfo,
+  AvailableEvent,
+  EventDownloadPanelPrefill,
+  LibraryMode,
+  RecNetSettings,
+} from '../../shared/types';
 import { Card } from '../components/ui/card';
 import {
   Tooltip,
@@ -35,6 +49,7 @@ import {
   DownloadSourceSelection,
   hasSelectedDownloadSources,
 } from '../../shared/download-sources';
+import { EventCoverImage } from './EventCoverImage';
 import {
   Select,
   SelectContent,
@@ -53,6 +68,8 @@ interface DownloadDraft {
   filePath: string;
   downloadSources: DownloadSourceSelection;
   roomPhotoSort: RoomPhotoSort;
+  eventIds?: string[];
+  knownCreatorAccountId?: string;
   refreshOptions: {
     forceAccountsRefresh: boolean;
     forceRoomsRefresh: boolean;
@@ -75,10 +92,14 @@ interface DownloadPanelProps {
       forceEventsRefresh: boolean;
       forceImageCommentsRefresh: boolean;
     },
-    roomPhotoSort: RoomPhotoSort
+    roomPhotoSort: RoomPhotoSort,
+    eventIds?: string[],
+    knownCreatorAccountId?: string
   ) => Promise<void>;
   onDraftChange?: (draft: DownloadDraft) => void;
   libraryMode?: LibraryMode;
+  eventDownloadPrefill?: EventDownloadPanelPrefill | null;
+  onEventDownloadPrefillConsumed?: () => void;
   onCancel?: () => void;
   isDownloading?: boolean;
   showCancel?: boolean;
@@ -100,6 +121,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   settings,
   libraryMode = 'user',
   onUpdateSettings,
+  eventDownloadPrefill = null,
+  onEventDownloadPrefillConsumed,
 }) => {
   const electronAPI = (window as unknown as { electronAPI?: any }).electronAPI;
   const recNetTokenGuideUrl =
@@ -120,6 +143,10 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const [downloadSources, setDownloadSources] =
     useState<DownloadSourceSelection>(DEFAULT_DOWNLOAD_SOURCE_SELECTION);
   const [roomPhotoSort, setRoomPhotoSort] = useState<RoomPhotoSort>(0);
+  const [eventCards, setEventCards] = useState<AvailableEvent[]>([]);
+  const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsError, setEventsError] = useState<string | null>(null);
   const [forceAccountsRefresh, setForceAccountsRefresh] = useState(false);
   const [forceRoomsRefresh, setForceRoomsRefresh] = useState(false);
   const [forceEventsRefresh, setForceEventsRefresh] = useState(false);
@@ -127,11 +154,18 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [eventKnownCreatorAccountId, setEventKnownCreatorAccountId] =
+    useState<string | undefined>(undefined);
 
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const tokenValidationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const tokenValidationRequestIdRef = useRef(0);
   const tokenTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastDiscoveredUsernameRef = useRef('');
+  const eventSelectionQueueRef = useRef<string[] | null>(null);
+  const eventListRef = useRef<HTMLDivElement | null>(null);
+  const [eventListScrollTop, setEventListScrollTop] = useState(0);
+  const [eventListWidth, setEventListWidth] = useState(0);
 
   useEffect(() => {
     return () => {
@@ -151,8 +185,38 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       setForceEventsRefresh(false);
       setForceImageCommentsRefresh(false);
       setAdvancedOpen(false);
+    } else {
+      setEventKnownCreatorAccountId(undefined);
+      eventSelectionQueueRef.current = null;
     }
   }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || libraryMode !== 'event') {
+      return;
+    }
+
+    const node = eventListRef.current;
+    if (!node) {
+      return;
+    }
+
+    const updateWidth = () => {
+      const w = node.clientWidth;
+      // Hidden dialogs often report 0; don't clobber a good width or force 1-column layout.
+      if (w > 0) {
+        setEventListWidth(w);
+      }
+    };
+
+    updateWidth();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateWidth();
+    });
+    resizeObserver.observe(node);
+    return () => resizeObserver.disconnect();
+  }, [open, eventCards.length, libraryMode]);
 
   useEffect(() => {
     onDraftChange?.({
@@ -163,6 +227,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       filePath: settings.outputRoot || '',
       downloadSources,
       roomPhotoSort,
+      eventIds: selectedEventIds,
+      knownCreatorAccountId: eventKnownCreatorAccountId,
       refreshOptions: {
         forceAccountsRefresh,
         forceRoomsRefresh,
@@ -180,9 +246,11 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     libraryMode,
     onDraftChange,
     roomPhotoSort,
+    selectedEventIds,
     token,
     username,
     roomName,
+    eventKnownCreatorAccountId,
   ]);
 
   const clearSearchTimeout = () => {
@@ -227,6 +295,126 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       setResolvedAccount(null);
     }
   };
+
+  const loadEventsForUsername = async (
+    value = username,
+    selectEventIdsAfterLoad?: string[]
+  ) => {
+    const cleanedUsername = value.trim();
+    if (!cleanedUsername || !settings.outputPathConfiguredForDownload) {
+      return;
+    }
+
+    setEventsLoading(true);
+    setEventsError(null);
+    try {
+      const result = await electronAPI?.discoverEventsForUsername?.({
+        username: cleanedUsername,
+        token: cleanToken(token) || undefined,
+      });
+      if (result?.success && result.data) {
+        const cards = result.data.events;
+        setEventCards(cards);
+        const allowed = new Set(cards.map(e => e.eventId));
+        const queued = eventSelectionQueueRef.current;
+        eventSelectionQueueRef.current = null;
+        let fromParam: string[] | undefined =
+          selectEventIdsAfterLoad && selectEventIdsAfterLoad.length > 0
+            ? selectEventIdsAfterLoad
+            : undefined;
+        if (!fromParam?.length && queued?.length) {
+          fromParam = queued;
+        }
+        const nextSelected = fromParam?.filter(id => allowed.has(id)) ?? [];
+        setSelectedEventIds(nextSelected);
+        lastDiscoveredUsernameRef.current = cleanedUsername.toLowerCase();
+      } else {
+        setEventCards([]);
+        setSelectedEventIds([]);
+        setEventsError(result?.error || 'Could not load events.');
+      }
+    } catch (error) {
+      setEventCards([]);
+      setSelectedEventIds([]);
+      setEventsError(
+        error instanceof Error ? error.message : 'Could not load events.'
+      );
+    } finally {
+      setEventsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (
+      !open ||
+      libraryMode !== 'event' ||
+      !eventDownloadPrefill ||
+      !electronAPI
+    ) {
+      return;
+    }
+
+    const { creatorAccountId, eventIds, usernameHint } =
+      eventDownloadPrefill;
+
+    let cancelled = false;
+
+    const run = async () => {
+      let resolvedUsername = (usernameHint || '').trim();
+      if (!resolvedUsername && electronAPI.lookupAccountById) {
+        try {
+          const result = await electronAPI.lookupAccountById(creatorAccountId);
+          if (result?.success && result.data?.username) {
+            resolvedUsername = (result.data.username || '').trim();
+            if (!cancelled) {
+              setResolvedAccount(result.data);
+              setUsernameStatus('found');
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!resolvedUsername) {
+        onEventDownloadPrefillConsumed?.();
+        return;
+      }
+
+      if (!cancelled) {
+        setUsername(resolvedUsername);
+        setUsernameStatus('found');
+        setEventKnownCreatorAccountId(creatorAccountId);
+      }
+
+      if (!settings.outputPathConfiguredForDownload) {
+        eventSelectionQueueRef.current = [...eventIds];
+        if (!cancelled) {
+          onEventDownloadPrefillConsumed?.();
+        }
+        return;
+      }
+
+      await loadEventsForUsername(resolvedUsername, eventIds);
+      if (!cancelled) {
+        onEventDownloadPrefillConsumed?.();
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // loadEventsForUsername is stable enough per render; token read at call time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    open,
+    libraryMode,
+    eventDownloadPrefill,
+    electronAPI,
+    settings.outputPathConfiguredForDownload,
+    onEventDownloadPrefillConsumed,
+  ]);
 
   const cleanToken = (tokenValue: string): string => {
     let cleaned = tokenValue.trim();
@@ -319,6 +507,14 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setUsername(value);
+    if (libraryMode === 'event') {
+      setEventCards([]);
+      setSelectedEventIds([]);
+      setEventsError(null);
+      setEventKnownCreatorAccountId(undefined);
+      eventSelectionQueueRef.current = null;
+      lastDiscoveredUsernameRef.current = '';
+    }
     clearSearchTimeout();
 
     if (!value.trim()) {
@@ -368,6 +564,31 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     return () => clearSearchTimeout();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  useEffect(() => {
+    if (libraryMode !== 'event') {
+      return;
+    }
+    const cleanedUsername = username.trim();
+    if (
+      usernameStatus !== 'found' ||
+      !cleanedUsername ||
+      !settings.outputPathConfiguredForDownload ||
+      eventsLoading ||
+      lastDiscoveredUsernameRef.current === cleanedUsername.toLowerCase()
+    ) {
+      return;
+    }
+
+    void loadEventsForUsername(cleanedUsername);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    eventsLoading,
+    libraryMode,
+    settings.outputPathConfiguredForDownload,
+    username,
+    usernameStatus,
+  ]);
 
   useEffect(() => {
     clearTokenValidationTimeout();
@@ -450,10 +671,20 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const handleDownload = async () => {
     const identifier = libraryMode === 'room' ? roomName : username;
     const outputPath = settings.outputRoot || '';
-    if (!identifier.trim() || !outputPath.trim()) {
+    if (!outputPath.trim()) {
       return;
     }
     if (libraryMode === 'event') {
+      if (
+        !identifier.trim() &&
+        !(eventKnownCreatorAccountId && eventKnownCreatorAccountId.trim())
+      ) {
+        return;
+      }
+    } else if (!identifier.trim()) {
+      return;
+    }
+    if (libraryMode === 'event' && selectedEventIds.length === 0) {
       return;
     }
     if (
@@ -476,7 +707,11 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
         forceEventsRefresh,
         forceImageCommentsRefresh,
       },
-      roomPhotoSort
+      roomPhotoSort,
+      selectedEventIds,
+      libraryMode === 'event'
+        ? eventKnownCreatorAccountId
+        : undefined
     );
   };
 
@@ -487,10 +722,13 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const isFormValid =
     (libraryMode === 'room'
       ? roomName.trim() !== ''
-      : username.trim() !== '') &&
+      : libraryMode === 'event'
+        ? username.trim() !== '' || Boolean(eventKnownCreatorAccountId)
+        : username.trim() !== '') &&
     outputSavePathAllowed &&
-    libraryMode !== 'event' &&
-    (libraryMode === 'room' || hasSelectedDownloadSources(downloadSources));
+    (libraryMode === 'event'
+      ? selectedEventIds.length > 0
+      : libraryMode === 'room' || hasSelectedDownloadSources(downloadSources));
   const profileHistoryEnabled = tokenStatus === 'verified';
   const feedPhotosVisibilitySuffix =
     tokenStatus === 'verified' ? '(Public & Private)' : '(Public)';
@@ -548,9 +786,78 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     return option;
   };
 
+  const toggleEventSelection = (eventId: string, checked: boolean) => {
+    setSelectedEventIds(current => {
+      if (checked) {
+        return current.includes(eventId) ? current : [...current, eventId];
+      }
+      return current.filter(id => id !== eventId);
+    });
+  };
+
+  const selectAllEvents = () => {
+    setSelectedEventIds(eventCards.map(event => event.eventId));
+  };
+
+  const clearEventSelection = () => {
+    setSelectedEventIds([]);
+  };
+
+  const formatEventDate = (event: AvailableEvent): string => {
+    if (!event.startTime) {
+      return 'Date unknown';
+    }
+    return new Date(event.startTime).toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  };
+
+  const EVENT_CARD_MIN_WIDTH = 260;
+  const EVENT_CARD_ROW_HEIGHT = 360;
+  const EVENT_CARD_GAP = 12;
+  const eventCardColumns = Math.max(
+    1,
+    Math.floor((eventListWidth + EVENT_CARD_GAP) / (EVENT_CARD_MIN_WIDTH + EVENT_CARD_GAP))
+  );
+  const eventCardRows = Math.ceil(eventCards.length / eventCardColumns);
+  const eventListViewportHeight = 352;
+  const eventStartRow = Math.max(
+    0,
+    Math.floor(eventListScrollTop / (EVENT_CARD_ROW_HEIGHT + EVENT_CARD_GAP)) - 1
+  );
+  const eventEndRow = Math.min(
+    eventCardRows,
+    Math.ceil(
+      (eventListScrollTop + eventListViewportHeight) /
+        (EVENT_CARD_ROW_HEIGHT + EVENT_CARD_GAP)
+    ) + 1
+  );
+  const visibleEventCards = useMemo(
+    () =>
+      eventCards.slice(
+        eventStartRow * eventCardColumns,
+        Math.min(eventCards.length, eventEndRow * eventCardColumns)
+      ),
+    [eventCardColumns, eventCards, eventEndRow, eventStartRow]
+  );
+  const eventListPaddingTop =
+    eventStartRow * (EVENT_CARD_ROW_HEIGHT + EVENT_CARD_GAP);
+  const eventListPaddingBottom = Math.max(
+    0,
+    (eventCardRows - eventEndRow) * (EVENT_CARD_ROW_HEIGHT + EVENT_CARD_GAP)
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100%-2rem)] max-w-3xl max-h-[calc(100dvh-2rem)] overflow-y-auto">
+      <DialogContent
+        className={`w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto ${
+          libraryMode === 'event' ? 'max-w-6xl' : 'max-w-3xl'
+        }`}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Download className="h-5 w-5" />
@@ -564,18 +871,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             {libraryMode === 'room'
               ? 'Enter a room name, token, and save path to gather room photos in batches.'
               : libraryMode === 'event'
-                ? 'Event photo downloads are coming later.'
+                ? 'Enter a username, load their events, and choose which event albums to download.'
                 : 'Enter a token, username, save path, and choose what data to download.'}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {libraryMode === 'event' && (
-            <div className="rounded-md border p-4 text-sm text-muted-foreground">
-              Event photo gathering is not available yet.
-            </div>
-          )}
-
+        <div className="min-w-0 space-y-4">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Label htmlFor="token" className="flex items-center gap-2">
@@ -673,7 +974,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             </div>
           )}
 
-          {libraryMode === 'user' && (
+          {(libraryMode === 'user' || libraryMode === 'event') && (
             <div className="space-y-2">
               <Label htmlFor="username">Rec Room @ Username</Label>
               <Input
@@ -729,6 +1030,174 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {libraryMode === 'event' && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={
+                    usernameStatus !== 'found' ||
+                    !outputSavePathAllowed ||
+                    eventsLoading
+                  }
+                  onClick={() => void loadEventsForUsername()}
+                >
+                  <RefreshCcw className="mr-2 h-4 w-4" />
+                  {eventsLoading ? 'Loading events...' : 'Refresh events'}
+                </Button>
+                {eventCards.length > 0 && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={selectAllEvents}
+                      disabled={isDownloading}
+                    >
+                      Select all
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={clearEventSelection}
+                      disabled={isDownloading}
+                    >
+                      Clear
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      {selectedEventIds.length} selected
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {eventsError && (
+                <p className="text-sm text-red-600 dark:text-red-400">
+                  {eventsError}
+                </p>
+              )}
+
+              {eventsLoading ? (
+                <div className="rounded-md border p-4 text-sm text-muted-foreground">
+                  Loading events...
+                </div>
+              ) : eventCards.length > 0 ? (
+                <div
+                  ref={eventListRef}
+                  className="max-h-[22rem] w-full min-w-0 overflow-y-auto pr-1"
+                  onScroll={event =>
+                    setEventListScrollTop(event.currentTarget.scrollTop)
+                  }
+                >
+                  <div style={{ paddingTop: eventListPaddingTop, paddingBottom: eventListPaddingBottom }}>
+                    <div
+                      className="grid gap-3"
+                      style={{
+                        gridTemplateColumns: `repeat(${eventCardColumns}, minmax(0, 1fr))`,
+                      }}
+                    >
+                  {visibleEventCards.map(event => {
+                    const selected = selectedEventIds.includes(event.eventId);
+                    return (
+                      <div
+                        key={event.eventId}
+                        className={`select-none overflow-hidden rounded-md border bg-card transition ${
+                          event.isDownloaded
+                            ? 'border-border'
+                            : 'border-dashed opacity-75'
+                        } ${selected ? 'ring-2 ring-primary' : ''} ${
+                          isDownloading ? 'cursor-not-allowed' : 'cursor-pointer'
+                        }`}
+                        onClick={() => {
+                          if (!isDownloading) {
+                            toggleEventSelection(event.eventId, !selected);
+                          }
+                        }}
+                      >
+                        <div className="aspect-video bg-muted">
+                          <EventCoverImage
+                            event={event}
+                            cdnBase={settings.cdnBase}
+                            iconClassName="h-7 w-7"
+                          />
+                        </div>
+                        <div className="space-y-3 p-3">
+                          <div className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              className="mt-1 h-4 w-4 rounded border-input"
+                              checked={selected}
+                              disabled={isDownloading}
+                              onClick={e => e.stopPropagation()}
+                              onChange={eventChange =>
+                                toggleEventSelection(
+                                  event.eventId,
+                                  eventChange.target.checked
+                                )
+                              }
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium">
+                                {event.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {event.isDownloaded
+                                  ? 'Photos downloaded'
+                                  : 'Photos not downloaded'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 gap-1 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Calendar className="h-3.5 w-3.5" />
+                              {formatEventDate(event)}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <UserRound className="h-3.5 w-3.5" />
+                              {event.attendeeCount} attending
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <ImageIcon className="h-3.5 w-3.5" />
+                              {event.photoCount > 0
+                                ? `${event.downloadedPhotoCount}/${event.photoCount} photos`
+                                : 'Photo count unknown'}
+                            </span>
+                          </div>
+                          {!event.isDownloaded && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              className="w-full"
+                              disabled={isDownloading}
+                              onClick={e => {
+                                e.stopPropagation();
+                                setSelectedEventIds([event.eventId]);
+                              }}
+                            >
+                              {selected
+                                ? 'Queued for download'
+                                : 'Queue this event'}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                    </div>
+                  </div>
+                </div>
+              ) : usernameStatus === 'found' && outputSavePathAllowed ? (
+                <div className="rounded-md border p-4 text-sm text-muted-foreground">
+                  No events found for this user.
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -878,6 +1347,10 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               ? !outputSavePathAllowed
                 ? 'Enter a room name and choose an output folder with Browse to start.'
                 : 'Enter a room name to start.'
+              : libraryMode === 'event'
+                ? !outputSavePathAllowed
+                  ? 'Enter a username and choose an output folder with Browse to load events.'
+                  : 'Enter a username and select at least one event to download.'
               : !outputSavePathAllowed
                 ? 'Enter a username, choose an output folder with Browse, and select at least one download type to start.'
                 : 'Enter a username and select at least one download type to start.'}
