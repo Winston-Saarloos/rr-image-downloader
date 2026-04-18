@@ -8,6 +8,7 @@ import {
   HelpCircle,
   Key,
   RefreshCcw,
+  DoorOpen,
   UserRound,
   X,
 } from 'lucide-react';
@@ -22,7 +23,7 @@ import {
   DialogTitle,
 } from '../components/ui/dialog';
 import { buildCdnImageUrl } from '../../shared/cdnUrl';
-import { AccountInfo, RecNetSettings } from '../../shared/types';
+import { AccountInfo, LibraryMode, RecNetSettings } from '../../shared/types';
 import { Card } from '../components/ui/card';
 import {
   Tooltip,
@@ -35,12 +36,23 @@ import {
   DownloadSourceSelection,
   hasSelectedDownloadSources,
 } from '../../shared/download-sources';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
+import type { RoomPhotoSort } from '../../shared/types';
 
 interface DownloadDraft {
   username: string;
+  roomName: string;
+  libraryMode: LibraryMode;
   token: string;
   filePath: string;
   downloadSources: DownloadSourceSelection;
+  roomPhotoSort: RoomPhotoSort;
   refreshOptions: {
     forceAccountsRefresh: boolean;
     forceRoomsRefresh: boolean;
@@ -53,7 +65,7 @@ interface DownloadPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDownload: (
-    username: string,
+    identifier: string,
     token: string,
     filePath: string,
     downloadSources: DownloadSourceSelection,
@@ -62,9 +74,11 @@ interface DownloadPanelProps {
       forceRoomsRefresh: boolean;
       forceEventsRefresh: boolean;
       forceImageCommentsRefresh: boolean;
-    }
+    },
+    roomPhotoSort: RoomPhotoSort
   ) => Promise<void>;
   onDraftChange?: (draft: DownloadDraft) => void;
+  libraryMode?: LibraryMode;
   onCancel?: () => void;
   isDownloading?: boolean;
   showCancel?: boolean;
@@ -83,11 +97,13 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   isDownloading = false,
   showCancel = false,
   settings,
+  libraryMode = 'user',
 }) => {
   const electronAPI = (window as unknown as { electronAPI?: any }).electronAPI;
   const recNetTokenGuideUrl =
     'https://github.com/Winston-Saarloos/rr-image-downloader/blob/main/docs/RECNET_TOKEN_GUIDE.md';
   const [username, setUsername] = useState('');
+  const [roomName, setRoomName] = useState('');
   const [token, setToken] = useState('');
   const [filePath, setFilePath] = useState(settings.outputRoot || '');
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle');
@@ -102,6 +118,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const [tokenHelpOpen, setTokenHelpOpen] = useState(false);
   const [downloadSources, setDownloadSources] =
     useState<DownloadSourceSelection>(DEFAULT_DOWNLOAD_SOURCE_SELECTION);
+  const [roomPhotoSort, setRoomPhotoSort] = useState<RoomPhotoSort>(0);
   const [forceAccountsRefresh, setForceAccountsRefresh] = useState(false);
   const [forceRoomsRefresh, setForceRoomsRefresh] = useState(false);
   const [forceEventsRefresh, setForceEventsRefresh] = useState(false);
@@ -143,9 +160,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   useEffect(() => {
     onDraftChange?.({
       username,
+      roomName,
+      libraryMode,
       token,
       filePath,
       downloadSources,
+      roomPhotoSort,
       refreshOptions: {
         forceAccountsRefresh,
         forceRoomsRefresh,
@@ -160,9 +180,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     forceEventsRefresh,
     forceImageCommentsRefresh,
     forceRoomsRefresh,
+    libraryMode,
     onDraftChange,
+    roomPhotoSort,
     token,
     username,
+    roomName,
   ]);
 
   const clearSearchTimeout = () => {
@@ -444,27 +467,44 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   };
 
   const handleDownload = async () => {
-    if (!username.trim() || !filePath.trim()) {
+    const identifier = libraryMode === 'room' ? roomName : username;
+    if (!identifier.trim() || !filePath.trim()) {
       return;
     }
-    if (!hasSelectedDownloadSources(downloadSources)) {
+    if (libraryMode === 'event') {
+      return;
+    }
+    if (
+      libraryMode === 'user' &&
+      !hasSelectedDownloadSources(downloadSources)
+    ) {
       return;
     }
 
     const cleanedToken = cleanToken(token);
     onOpenChange(false);
-    await onDownload(username, cleanedToken, filePath, downloadSources, {
-      forceAccountsRefresh,
-      forceRoomsRefresh,
-      forceEventsRefresh,
-      forceImageCommentsRefresh,
-    });
+    await onDownload(
+      identifier,
+      cleanedToken,
+      filePath,
+      downloadSources,
+      {
+        forceAccountsRefresh,
+        forceRoomsRefresh,
+        forceEventsRefresh,
+        forceImageCommentsRefresh,
+      },
+      roomPhotoSort
+    );
   };
 
   const isFormValid =
-    username.trim() !== '' &&
+    (libraryMode === 'room'
+      ? roomName.trim() !== ''
+      : username.trim() !== '') &&
     filePath.trim() !== '' &&
-    hasSelectedDownloadSources(downloadSources);
+    libraryMode !== 'event' &&
+    (libraryMode === 'room' || hasSelectedDownloadSources(downloadSources));
   const profileHistoryEnabled = tokenStatus === 'verified';
   const feedPhotosVisibilitySuffix =
     tokenStatus === 'verified' ? '(Public & Private)' : '(Public)';
@@ -528,15 +568,28 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Download className="h-5 w-5" />
-            Download Photos
+            {libraryMode === 'room'
+              ? 'Download Room Photos'
+              : libraryMode === 'event'
+                ? 'Event Photos'
+                : 'Download Photos'}
           </DialogTitle>
           <DialogDescription>
-            Enter a token, username, save path, and choose what data to
-            download.
+            {libraryMode === 'room'
+              ? 'Enter a room name, token, and save path to gather room photos in batches.'
+              : libraryMode === 'event'
+                ? 'Event photo downloads are coming later.'
+                : 'Enter a token, username, save path, and choose what data to download.'}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
+          {libraryMode === 'event' && (
+            <div className="rounded-md border p-4 text-sm text-muted-foreground">
+              Event photo gathering is not available yet.
+            </div>
+          )}
+
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Label htmlFor="token" className="flex items-center gap-2">
@@ -595,62 +648,103 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             )}
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="username">Rec Room @ Username</Label>
-            <Input
-              id="username"
-              placeholder="Enter your username"
-              value={username}
-              onChange={handleUsernameChange}
-            />
-            <div className="space-y-2">
-              <div className="min-h-5">
-                {usernameStatus === 'found' && resolvedAccount && (
-                  <p className="text-sm text-green-600 dark:text-green-400">
-                    Account found successfully
-                  </p>
-                )}
-                {usernameStatus === 'not-found' && (
-                  <p className="text-sm text-red-600 dark:text-red-400">
-                    Username not found
-                  </p>
-                )}
-                {usernameStatus === 'checking' && (
-                  <p className="text-sm text-muted-foreground">
-                    Checking username...
-                  </p>
-                )}
+          {libraryMode === 'room' && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="roomname" className="flex items-center gap-2">
+                  <DoorOpen className="h-4 w-4" />
+                  ^Room Name
+                </Label>
+                <Input
+                  id="roomname"
+                  placeholder="Enter a room name"
+                  value={roomName}
+                  onChange={e => setRoomName(e.target.value)}
+                />
               </div>
-              <div className="flex min-h-[3.75rem] items-center">
-                {usernameStatus === 'found' && resolvedAccount && (
-                  <Card className="flex w-full flex-row items-center gap-2.5 p-2.5 shadow-none">
-                    {resolvedProfilePhotoUrl ? (
-                      <img
-                        src={resolvedProfilePhotoUrl}
-                        alt=""
-                        className="size-10 shrink-0 rounded-full object-cover ring-1 ring-border"
-                      />
-                    ) : (
-                      <div
-                        className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted ring-1 ring-border"
-                        aria-hidden
-                      >
-                        <UserRound className="size-5 text-muted-foreground" />
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium leading-tight">
-                        {resolvedAccount.displayName}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        @{resolvedAccount.username}
-                      </p>
-                    </div>
-                  </Card>
-                )}
+              <div className="space-y-2">
+                <Label htmlFor="room-photo-sort">Room photo fetch order</Label>
+                <Select
+                  value={roomPhotoSort.toString()}
+                  onValueChange={value =>
+                    setRoomPhotoSort(value === '1' ? 1 : 0)
+                  }
+                  disabled={isDownloading}
+                >
+                  <SelectTrigger id="room-photo-sort">
+                    <SelectValue placeholder="Choose fetch order" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Newest first</SelectItem>
+                    <SelectItem value="1">Most cheered first</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Both modes save into the same room folder and skip photos that
+                  are already downloaded.
+                </p>
               </div>
             </div>
-          </div>
+          )}
+
+          {libraryMode === 'user' && (
+            <div className="space-y-2">
+              <Label htmlFor="username">Rec Room @ Username</Label>
+              <Input
+                id="username"
+                placeholder="Enter your username"
+                value={username}
+                onChange={handleUsernameChange}
+              />
+              <div className="space-y-2">
+                <div className="min-h-5">
+                  {usernameStatus === 'found' && resolvedAccount && (
+                    <p className="text-sm text-green-600 dark:text-green-400">
+                      Account found successfully
+                    </p>
+                  )}
+                  {usernameStatus === 'not-found' && (
+                    <p className="text-sm text-red-600 dark:text-red-400">
+                      Username not found
+                    </p>
+                  )}
+                  {usernameStatus === 'checking' && (
+                    <p className="text-sm text-muted-foreground">
+                      Checking username...
+                    </p>
+                  )}
+                </div>
+                <div className="flex min-h-[3.75rem] items-center">
+                  {usernameStatus === 'found' && resolvedAccount && (
+                    <Card className="flex w-full flex-row items-center gap-2.5 p-2.5 shadow-none">
+                      {resolvedProfilePhotoUrl ? (
+                        <img
+                          src={resolvedProfilePhotoUrl}
+                          alt=""
+                          className="size-10 shrink-0 rounded-full object-cover ring-1 ring-border"
+                        />
+                      ) : (
+                        <div
+                          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted ring-1 ring-border"
+                          aria-hidden
+                        >
+                          <UserRound className="size-5 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium leading-tight">
+                          {resolvedAccount.displayName}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          @{resolvedAccount.username}
+                        </p>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="filepath">
@@ -686,41 +780,43 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             </p>
           )}
 
-          <div className="space-y-2">
-            <Label>Download Types</Label>
+          {libraryMode === 'user' && (
             <div className="space-y-2">
-              {renderDownloadType({
-                id: 'download-user-feed',
-                title: `User Feed ${feedPhotosVisibilitySuffix}`,
-                description: 'Download photos the user was tagged in.',
-                checked: downloadSources.downloadUserFeed,
-                onChange: checked =>
-                  toggleDownloadSource('downloadUserFeed', checked),
-              })}
-              {renderDownloadType({
-                id: 'download-user-photos',
-                title: `User Photos ${feedPhotosVisibilitySuffix}`,
-                description: 'Download photos the user took.',
-                checked: downloadSources.downloadUserPhotos,
-                onChange: checked =>
-                  toggleDownloadSource('downloadUserPhotos', checked),
-              })}
-              {renderDownloadType({
-                id: 'download-profile-history',
-                title: 'Profile Picture History',
-                description:
-                  'Download the user profile picture history and save the raw JSON manifest.',
-                checked: downloadSources.downloadProfileHistory,
-                disabled: !profileHistoryEnabled,
-                disabledReason:
-                  tokenStatus === 'checking'
-                    ? 'Verifying the bearer token for this username.'
-                    : tokenStatusMessage,
-                onChange: checked =>
-                  toggleDownloadSource('downloadProfileHistory', checked),
-              })}
+              <Label>Download Types</Label>
+              <div className="space-y-2">
+                {renderDownloadType({
+                  id: 'download-user-feed',
+                  title: `User Feed ${feedPhotosVisibilitySuffix}`,
+                  description: 'Download photos the user was tagged in.',
+                  checked: downloadSources.downloadUserFeed,
+                  onChange: checked =>
+                    toggleDownloadSource('downloadUserFeed', checked),
+                })}
+                {renderDownloadType({
+                  id: 'download-user-photos',
+                  title: `User Photos ${feedPhotosVisibilitySuffix}`,
+                  description: 'Download photos the user took.',
+                  checked: downloadSources.downloadUserPhotos,
+                  onChange: checked =>
+                    toggleDownloadSource('downloadUserPhotos', checked),
+                })}
+                {renderDownloadType({
+                  id: 'download-profile-history',
+                  title: 'Profile Picture History',
+                  description:
+                    'Download the user profile picture history and save the raw JSON manifest.',
+                  checked: downloadSources.downloadProfileHistory,
+                  disabled: !profileHistoryEnabled,
+                  disabledReason:
+                    tokenStatus === 'checking'
+                      ? 'Verifying the bearer token for this username.'
+                      : tokenStatusMessage,
+                  onChange: checked =>
+                    toggleDownloadSource('downloadProfileHistory', checked),
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="rounded-md border">
             <button
@@ -808,8 +904,9 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             className={`text-sm text-muted-foreground ${isFormValid ? 'invisible' : ''}`}
             aria-hidden={isFormValid}
           >
-            Enter a username, choose a save folder, and select at least one
-            download type to start.
+            {libraryMode === 'room'
+              ? 'Enter a room name and choose a save folder to start.'
+              : 'Enter a username, choose a save folder, and select at least one download type to start.'}
           </p>
 
           <div className="flex gap-2">

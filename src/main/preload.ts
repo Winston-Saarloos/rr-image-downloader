@@ -15,6 +15,9 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke('download-profile-history', params),
   validateProfileHistoryAccess: (params) =>
     ipcRenderer.invoke('validate-profile-history-access', params),
+  lookupRoomByName: (params) => ipcRenderer.invoke('lookup-room-by-name', params),
+  downloadRoomPhotoBatch: (params) =>
+    ipcRenderer.invoke('download-room-photo-batch', params),
 
   selectOutputFolder: () => ipcRenderer.invoke('select-output-folder'),
 
@@ -43,11 +46,21 @@ const electronAPI: ElectronAPI = {
   loadProfileHistoryPhotos: (accountId) =>
     ipcRenderer.invoke('load-profile-history-photos', accountId),
   listAvailableAccounts: () => ipcRenderer.invoke('list-available-accounts'),
+  listAvailableRooms: () => ipcRenderer.invoke('list-available-rooms'),
   loadAccountsData: (accountId) => ipcRenderer.invoke('load-accounts-data', accountId),
   loadRoomsData: (accountId) => ipcRenderer.invoke('load-rooms-data', accountId),
   loadEventsData: (accountId) => ipcRenderer.invoke('load-events-data', accountId),
   loadImageCommentsData: (accountId) =>
     ipcRenderer.invoke('load-image-comments-data', accountId),
+  loadRoomPhotos: (roomId) => ipcRenderer.invoke('load-room-photos', roomId),
+  loadRoomAccountsData: (roomId) =>
+    ipcRenderer.invoke('load-room-accounts-data', roomId),
+  loadRoomRoomsData: (roomId) =>
+    ipcRenderer.invoke('load-room-rooms-data', roomId),
+  loadRoomEventsData: (roomId) =>
+    ipcRenderer.invoke('load-room-events-data', roomId),
+  loadRoomImageCommentsData: (roomId) =>
+    ipcRenderer.invoke('load-room-image-comments-data', roomId),
 
   getFavorites: () => ipcRenderer.invoke('get-favorites'),
   toggleFavorite: (photoId) => ipcRenderer.invoke('toggle-favorite', photoId),

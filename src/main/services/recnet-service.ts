@@ -17,6 +17,9 @@ import {
   DownloadStats,
   AccountInfo,
   BulkDataRefreshOptions,
+  AvailableRoom,
+  RoomPhotoBatchResult,
+  RoomPhotoSort,
 } from '../../shared/types';
 import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import {
@@ -79,6 +82,32 @@ type FolderMetaV1 = {
   cache?: Record<string, unknown>;
 };
 
+type RoomFolderMetaV1 = {
+  schemaVersion: 1;
+  roomId: string;
+  roomName: string;
+  displayLabel: string;
+  updatedAt: string;
+  nextSkip?: number;
+  roomPhotoCursors?: Partial<
+    Record<
+      RoomPhotoSort,
+      {
+        nextSkip?: number;
+        completed?: boolean;
+        updatedAt?: string;
+      }
+    >
+  >;
+  cache?: Record<string, unknown>;
+};
+
+type BulkDataStorageContext = {
+  directory: string;
+  fileStem: string;
+  writeOwnerMeta?: boolean;
+};
+
 type DownloadBatchTrace = {
   label: string;
   startedAt: number;
@@ -101,6 +130,9 @@ const PHOTO_DOWNLOAD_MAX_ATTEMPTS = PHOTO_DOWNLOAD_RETRY_COUNT + 1;
 const PHOTO_DOWNLOAD_RETRY_DELAY_MS = 750;
 const PHOTO_DOWNLOAD_TIMEOUT_MS = 15_000;
 const PHOTO_MAX_PAGE_SIZE = 1_000;
+const ROOM_PHOTO_DEFAULT_PAGE_SIZE = 100;
+const ROOM_PHOTO_DEFAULT_BATCH_PAGES = 5;
+const ROOM_PHOTO_DEFAULT_SORT: RoomPhotoSort = 0;
 // RecNet API returns 429s for this if requested too frequently.
 // Serialized globally: one in-flight request and minimum gap between starts.
 const IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS = 250;
@@ -2219,6 +2251,117 @@ export class RecNetService extends EventEmitter {
     }
   }
 
+  private async downloadImageToDirectory(
+    photo: Photo,
+    targetDir: string,
+    token?: string,
+    operation?: CurrentOperation
+  ): Promise<DownloadResultItem> {
+    const photoId = this.sanitizeFileStem(this.normalizeId(photo.Id));
+    const imageName = photo.ImageName;
+    const photoUrl = buildCdnImageUrl(this.settings.cdnBase, imageName);
+
+    if (!photoId || !imageName) {
+      return {
+        error: 'invalid_photo_data',
+        photoId,
+        imageName,
+        photo: JSON.stringify(photo),
+      };
+    }
+
+    if (operation?.cancelled || this.currentOperation?.cancelled) {
+      return {
+        photoId,
+        imageName,
+        status: 'cancelled',
+      };
+    }
+
+    const photoPath = path.join(targetDir, `${photoId}.jpg`);
+    if (await fs.pathExists(photoPath)) {
+      return {
+        photoId,
+        imageName,
+        status: 'already_exists_in_room_photos',
+        path: photoPath,
+      };
+    }
+
+    let attemptsUsed = 1;
+    try {
+      const attempt = await this.downloadPhotoWithRetry(
+        imageName,
+        token,
+        operation
+      );
+      attemptsUsed = attempt.attempts;
+      const response = attempt.response;
+      const recoveredAfterRetry =
+        attempt.attempts > 1 && !!response?.success && !!response.value;
+
+      if (response?.success && response.value) {
+        const data = Buffer.from(response.value);
+        try {
+          await fs.writeFile(photoPath, data);
+        } catch (error) {
+          if (this.isOutOfDiskSpaceError(error)) {
+            this.abortOperationForDiskFull(imageName, operation);
+          }
+          throw error;
+        }
+        return {
+          photoId,
+          imageName,
+          status: 'downloaded',
+          size: data.length,
+          path: photoPath,
+          url: photoUrl,
+          attempts: attempt.attempts,
+          retries: Math.max(0, attempt.attempts - 1),
+          recoveredAfterRetry,
+        };
+      }
+
+      if (response) {
+        return {
+          photoId,
+          imageName,
+          status: 'failed',
+          statusCode: response.status,
+          reason: (response.message || response.error) ?? undefined,
+          url: photoUrl,
+          attempts: attempt.attempts,
+          retries: Math.max(0, attempt.attempts - 1),
+        };
+      }
+
+      throw attempt.error ?? new Error('Download failed after retries');
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Operation cancelled') {
+        return {
+          photoId,
+          imageName,
+          status: 'cancelled',
+        };
+      }
+
+      if (this.isOutOfDiskSpaceError(error)) {
+        this.abortOperationForDiskFull(imageName, operation);
+      }
+
+      return {
+        photoId,
+        imageName,
+        status: 'error',
+        error: (error as Error).message,
+        url: photoUrl,
+        attempts: attemptsUsed,
+        retries: Math.max(0, attemptsUsed - 1),
+      };
+    }
+  }
+
   private async downloadProfileHistoryImage(
     photo: Photo,
     profileHistoryDir: string,
@@ -2525,6 +2668,60 @@ export class RecNetService extends EventEmitter {
     next.cache = { ...(existing?.cache ?? {}), ...(patch.cache ?? {}) };
 
     await fs.writeJson(metaPath, next, { spaces: 2 });
+  }
+
+  private getRoomsRoot(): string {
+    return path.join(this.settings.outputRoot, 'rooms');
+  }
+
+  private getRoomDirectory(roomId: string): string {
+    return path.join(this.getRoomsRoot(), this.sanitizeFileStem(roomId));
+  }
+
+  private async readRoomFolderMeta(
+    roomDir: string
+  ): Promise<RoomFolderMetaV1 | null> {
+    try {
+      const metaPath = this.getFolderMetaPath(roomDir);
+      if (!(await fs.pathExists(metaPath))) {
+        return null;
+      }
+      const parsed = (await fs.readJson(
+        metaPath
+      )) as Partial<RoomFolderMetaV1>;
+      if (!parsed || parsed.schemaVersion !== 1 || !parsed.roomId) {
+        return null;
+      }
+      return parsed as RoomFolderMetaV1;
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeRoomFolderMeta(
+    roomDir: string,
+    room: RoomDto,
+    patch: Partial<RoomFolderMetaV1> = {}
+  ): Promise<void> {
+    const roomId = this.normalizeId(room.RoomId);
+    const roomName = (room.Name || roomId).trim();
+    const existing = await this.readRoomFolderMeta(roomDir);
+    const next: RoomFolderMetaV1 = {
+      schemaVersion: 1,
+      updatedAt: new Date().toISOString(),
+      ...patch,
+      nextSkip: patch.nextSkip ?? existing?.nextSkip,
+      roomId,
+      roomName,
+      displayLabel: patch.displayLabel || existing?.displayLabel || roomName,
+      roomPhotoCursors: {
+        ...(existing?.roomPhotoCursors ?? {}),
+        ...(patch.roomPhotoCursors ?? {}),
+      },
+      cache: { ...(existing?.cache ?? {}), ...(patch.cache ?? {}) },
+    };
+
+    await fs.writeJson(this.getFolderMetaPath(roomDir), next, { spaces: 2 });
   }
 
   private computeOwnerFromAccounts(
@@ -3056,6 +3253,8 @@ export class RecNetService extends EventEmitter {
         return 'user photos';
       case 'profile-history':
         return 'profile picture history';
+      case 'room-photos':
+        return 'room photos';
       default:
         return source;
     }
@@ -3324,7 +3523,8 @@ export class RecNetService extends EventEmitter {
     photos: Photo[],
     token?: string,
     options: BulkDataRefreshOptions = {},
-    source: DownloadSource = 'user-photos'
+    source: DownloadSource = 'user-photos',
+    storageContext?: BulkDataStorageContext
   ): Promise<{
     accountsFetched: number;
     roomsFetched: number;
@@ -3376,7 +3576,10 @@ export class RecNetService extends EventEmitter {
         `Found ${accountIdsArray.length} unique account IDs, ${roomIdsArray.length} unique room IDs, ${eventIdsArray.length} unique event IDs, and ${imageIdsWithComments.length} image IDs with comments`
       );
 
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir =
+        storageContext?.directory ?? path.join(this.settings.outputRoot, accountId);
+      const fileStem = storageContext?.fileStem ?? accountId;
+      const shouldWriteOwnerMeta = storageContext?.writeOwnerMeta !== false;
       await fs.ensureDir(accountDir);
 
       let accountsFetched = 0;
@@ -3385,13 +3588,13 @@ export class RecNetService extends EventEmitter {
       let imageCommentsFetched = 0;
       const accountsJsonPath = path.join(
         accountDir,
-        `${accountId}_accounts.json`
+        `${fileStem}_accounts.json`
       );
-      const roomsJsonPath = path.join(accountDir, `${accountId}_rooms.json`);
-      const eventsJsonPath = path.join(accountDir, `${accountId}_events.json`);
+      const roomsJsonPath = path.join(accountDir, `${fileStem}_rooms.json`);
+      const eventsJsonPath = path.join(accountDir, `${fileStem}_events.json`);
       const imageCommentsJsonPath = path.join(
         accountDir,
-        `${accountId}_image_comments.json`
+        `${fileStem}_image_comments.json`
       );
       const accountsFileExists = await fs.pathExists(accountsJsonPath);
       const roomsFileExists = await fs.pathExists(roomsJsonPath);
@@ -3479,7 +3682,7 @@ export class RecNetService extends EventEmitter {
                 cachedAccounts,
                 accountId
               );
-              if (owner) {
+              if (owner && shouldWriteOwnerMeta) {
                 await this.writeFolderMeta(accountDir, accountId, { owner });
               }
             }
@@ -3558,9 +3761,9 @@ export class RecNetService extends EventEmitter {
             mergedAccounts,
             accountId
           );
-          if (owner) {
-            await this.writeFolderMeta(accountDir, accountId, { owner });
-          }
+           if (owner && shouldWriteOwnerMeta) {
+             await this.writeFolderMeta(accountDir, accountId, { owner });
+           }
           console.log(
             `Saved ${mergedAccounts.length} accounts to ${accountsJsonPath} (downloaded ${normalizedAccounts.length} new entries)`
           );
@@ -4077,6 +4280,347 @@ export class RecNetService extends EventEmitter {
     }
   }
 
+  async lookupRoomByName(roomName: string, token?: string): Promise<RoomDto> {
+    await this.ensureSettingsLoaded();
+    const cleanedRoomName = roomName.trim();
+    if (!cleanedRoomName) {
+      throw new Error('Room name is required.');
+    }
+
+    try {
+      const room = this.normalizeRooms([
+        await this.roomsController.lookupRoomByName(cleanedRoomName, token),
+      ])[0];
+      if (!room?.RoomId) {
+        throw new Error('Room not found');
+      }
+      return room;
+    } catch (error) {
+      throw new Error(
+        `Failed to lookup room by name: ${(error as Error).message}`
+      );
+    }
+  }
+
+  async downloadRoomPhotoBatch(params: {
+    roomName: string;
+    token?: string;
+    startSkip?: number;
+    batchPages?: number;
+    pageSize?: number;
+    sort?: RoomPhotoSort;
+    forceAccountsRefresh?: boolean;
+    forceRoomsRefresh?: boolean;
+    forceEventsRefresh?: boolean;
+    forceImageCommentsRefresh?: boolean;
+  }): Promise<RoomPhotoBatchResult> {
+    await this.ensureSettingsLoaded();
+    const operation = this.startOperation();
+    const pageSize = Math.min(
+      ROOM_PHOTO_DEFAULT_PAGE_SIZE,
+      Math.max(1, Math.floor(params.pageSize ?? ROOM_PHOTO_DEFAULT_PAGE_SIZE))
+    );
+    const batchPages = Math.max(
+      1,
+      Math.floor(params.batchPages ?? ROOM_PHOTO_DEFAULT_BATCH_PAGES)
+    );
+    const requestedStartSkip =
+      params.startSkip === undefined
+        ? undefined
+        : Math.max(0, Math.floor(params.startSkip));
+    const roomPhotoSort: RoomPhotoSort =
+      params.sort === 1 ? 1 : ROOM_PHOTO_DEFAULT_SORT;
+
+    try {
+      this.resetProgressIssueState();
+      this.updateSourceProgress(
+        'metadata',
+        'room-photos',
+        'Validating room...',
+        0,
+        0,
+        0,
+        { recentActivity: `Looking up room ${params.roomName.trim()}...` }
+      );
+
+      const room = await this.lookupRoomByName(params.roomName, params.token);
+      const roomId = this.normalizeId(room.RoomId);
+      const roomName = room.Name || params.roomName.trim();
+      const roomDir = this.getRoomDirectory(roomId);
+      const photosDir = path.join(roomDir, 'photos');
+      const metadataPath = path.join(roomDir, `${roomId}_photos.json`);
+
+      await fs.ensureDir(roomDir);
+      await fs.ensureDir(photosDir);
+      const existingRoomMeta = await this.readRoomFolderMeta(roomDir);
+      const roomPhotoCursor = existingRoomMeta?.roomPhotoCursors?.[roomPhotoSort];
+      const startSkip =
+        requestedStartSkip ??
+        Math.max(
+          0,
+          roomPhotoCursor?.nextSkip ??
+            (roomPhotoSort === ROOM_PHOTO_DEFAULT_SORT
+              ? existingRoomMeta?.nextSkip
+              : undefined) ??
+            0
+        );
+
+      let existingPhotos: Photo[] = [];
+      if (await fs.pathExists(metadataPath)) {
+        try {
+          const existing = (await fs.readJson(metadataPath)) as ImageDto[];
+          existingPhotos = Array.isArray(existing)
+            ? this.normalizePhotos(existing)
+            : [];
+        } catch (error) {
+          console.log(
+            `Warning: Failed to read room photo metadata: ${(error as Error).message}`
+          );
+        }
+      }
+
+      const allPhotosById = new Map<string, Photo>();
+      for (const photo of existingPhotos) {
+        const photoId = this.normalizeId(photo.Id);
+        if (photoId) {
+          allPhotosById.set(photoId, photo);
+        }
+      }
+
+      const batchPhotos: Photo[] = [];
+      let photosFetched = 0;
+      let pagesFetched = 0;
+      let hasMore = true;
+
+      for (let pageIndex = 0; pageIndex < batchPages; pageIndex++) {
+        if (operation.cancelled) {
+          throw this.createOperationCancelledError();
+        }
+
+        const skip = startSkip + pageIndex * pageSize;
+        const pageNumber = pageIndex + 1;
+        this.updateSourceProgress(
+          'metadata',
+          'room-photos',
+          'Collecting room photos metadata...',
+          pageIndex,
+          batchPages,
+          Math.round((pageIndex / batchPages) * 100),
+          {
+            pageLabel: `Room page ${pageNumber}`,
+            recentActivity: `Checking room page ${pageNumber} for ${roomName}...`,
+          }
+        );
+
+        const pagePhotos = this.normalizePhotos(
+          await this.runMetadataRequestWithRetry({
+            label: `room photos page ${pageNumber}`,
+            source: 'room-photos',
+            operationRef: operation,
+            pageLabel: `Room page ${pageNumber}`,
+            recentActivity: `Collected room page ${pageNumber} for ${roomName}.`,
+            operation: () =>
+              this.photosController.fetchRoomPhotos(
+                roomId,
+                { skip, take: pageSize, filter: 1, sort: roomPhotoSort },
+                params.token,
+                { signal: operation.controller.signal }
+              ),
+          })
+        );
+
+        pagesFetched++;
+        photosFetched += pagePhotos.length;
+        batchPhotos.push(...pagePhotos);
+
+        for (const photo of pagePhotos) {
+          const photoId = this.normalizeId(photo.Id);
+          if (photoId && !allPhotosById.has(photoId)) {
+            allPhotosById.set(photoId, photo);
+          }
+        }
+
+        if (pagePhotos.length < pageSize) {
+          hasMore = false;
+          break;
+        }
+      }
+
+      const normalizedAll = this.normalizePhotos(
+        Array.from(allPhotosById.values())
+      );
+      const newPhotosAdded = Math.max(
+        0,
+        normalizedAll.length - existingPhotos.length
+      );
+      await fs.writeJson(metadataPath, normalizedAll, { spaces: 2 });
+
+      const relatedMetadata = await this.fetchAndSaveBulkData(
+        roomId,
+        normalizedAll,
+        params.token,
+        {
+          forceAccountsRefresh: params.forceAccountsRefresh,
+          forceRoomsRefresh: params.forceRoomsRefresh,
+          forceEventsRefresh: params.forceEventsRefresh,
+          forceImageCommentsRefresh: params.forceImageCommentsRefresh,
+        },
+        'room-photos',
+        { directory: roomDir, fileStem: roomId, writeOwnerMeta: false }
+      );
+
+      const uniqueBatchPhotos = Array.from(
+        new Map(
+          this.normalizePhotos(batchPhotos).map(photo => [photo.Id, photo])
+        ).values()
+      );
+      const downloadResults: DownloadResultItem[] = [];
+      const downloadStats: DownloadStats = {
+        totalPhotos: uniqueBatchPhotos.length,
+        alreadyDownloaded: 0,
+        newDownloads: 0,
+        failedDownloads: 0,
+        skipped: 0,
+        retryAttempts: 0,
+        recoveredAfterRetry: 0,
+      };
+
+      this.updateSourceProgress(
+        'download',
+        'room-photos',
+        'Downloading room photos...',
+        0,
+        uniqueBatchPhotos.length,
+        0
+      );
+
+      const trace = this.createDownloadBatchTrace(
+        'room-photo-downloads',
+        uniqueBatchPhotos.length
+      );
+      const semaphore = new Semaphore(this.settings.maxConcurrentDownloads);
+      let processedCount = 0;
+      const promises = uniqueBatchPhotos.map((photo, index) =>
+        (async (): Promise<DownloadResultItem> => {
+          await semaphore.acquire();
+          const scheduledIndex = index + 1;
+          const runStartedAt = Date.now();
+          const photoId = this.normalizeId(photo.Id);
+          const imageName = photo.ImageName;
+          trace.inFlight++;
+          this.logDownloadWorkerStart(trace, {
+            scheduledIndex,
+            photoId,
+            imageName,
+            scheduledDelayMs: 0,
+            slotWaitMs: 0,
+          });
+          let result: DownloadResultItem | undefined;
+          try {
+            this.setDownloadItemActivity(
+              'room-photos',
+              imageName || photoId || `image ${scheduledIndex}`
+            );
+            result = await this.downloadImageToDirectory(
+              photo,
+              photosDir,
+              params.token,
+              operation
+            );
+            const status = result.status;
+            if (status === 'downloaded') {
+              downloadStats.newDownloads++;
+              downloadStats.retryAttempts += (result.attempts || 1) - 1;
+              if (result.recoveredAfterRetry) {
+                downloadStats.recoveredAfterRetry++;
+              }
+            } else if (status?.startsWith('already_exists')) {
+              downloadStats.alreadyDownloaded++;
+            } else if (status === 'failed' || status === 'error') {
+              downloadStats.failedDownloads++;
+              downloadStats.retryAttempts += (result.attempts || 1) - 1;
+            } else if (status === 'cancelled') {
+              downloadStats.skipped++;
+            }
+            return result;
+          } finally {
+            trace.inFlight = Math.max(0, trace.inFlight - 1);
+            trace.completed++;
+            this.logDownloadWorkerFinish(trace, {
+              scheduledIndex,
+              photoId,
+              imageName,
+              result,
+              runDurationMs: Date.now() - runStartedAt,
+            });
+            semaphore.release();
+            if (this.currentOperation === operation) {
+              processedCount++;
+              this.setDownloadResultActivity('room-photos', result);
+              this.updateSourceProgress(
+                'download',
+                'room-photos',
+                'Downloading room photos...',
+                processedCount,
+                uniqueBatchPhotos.length
+              );
+            }
+          }
+        })()
+      );
+      downloadResults.push(...(await Promise.all(promises)));
+
+      if (operation.cancelled) {
+        throw this.createOperationCancelledError();
+      }
+
+      const nextSkip = startSkip + pagesFetched * pageSize;
+      await this.writeRoomFolderMeta(roomDir, room, {
+        nextSkip:
+          roomPhotoSort === ROOM_PHOTO_DEFAULT_SORT ? nextSkip : undefined,
+        roomPhotoCursors: {
+          [roomPhotoSort]: {
+            nextSkip,
+            completed: !hasMore,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      });
+      this.logDownloadBatchSummary(trace, downloadStats);
+      this.setOperationComplete();
+
+      return {
+        roomId,
+        roomName,
+        roomPhotoSort,
+        roomDirectory: roomDir,
+        photosDirectory: photosDir,
+        metadataPath,
+        startSkip,
+        nextSkip,
+        pageSize,
+        batchPages,
+        pagesFetched,
+        photosFetched,
+        newPhotosAdded,
+        totalPhotos: normalizedAll.length,
+        hasMore,
+        relatedMetadata,
+        downloadStats,
+        downloadResults,
+        totalResults: downloadResults.length,
+        guidance: this.buildDownloadGuidance('room photos', downloadStats),
+      };
+    } catch (error) {
+      if (!this.isOperationCancelledError(error)) {
+        this.setOperationFailed((error as Error).message);
+      }
+      throw error;
+    } finally {
+      this.finishOperation(operation);
+    }
+  }
+
   async resetAppState(): Promise<{
     removedAccountDirectories: number;
     removedLegacyFiles: number;
@@ -4373,5 +4917,71 @@ export class RecNetService extends EventEmitter {
     }
 
     return accounts;
+  }
+
+  async listAvailableRooms(): Promise<AvailableRoom[]> {
+    await this.ensureSettingsLoaded();
+    const rooms: AvailableRoom[] = [];
+    const roomsRoot = this.getRoomsRoot();
+
+    try {
+      if (!(await fs.pathExists(roomsRoot))) {
+        return rooms;
+      }
+
+      const entries = await fs.readdir(roomsRoot, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) {
+          continue;
+        }
+
+        const roomId = entry.name;
+        const roomDir = path.join(roomsRoot, roomId);
+        const photosJsonPath = path.join(roomDir, `${roomId}_photos.json`);
+        let photoCount = 0;
+        let hasPhotos = false;
+
+        if (await fs.pathExists(photosJsonPath)) {
+          try {
+            const photos = (await fs.readJson(photosJsonPath)) as Photo[];
+            if (Array.isArray(photos)) {
+              photoCount = photos.length;
+              hasPhotos = photoCount > 0;
+            }
+          } catch (error) {
+            console.log(
+              `Failed to read room photos JSON for ${roomId}: ${(error as Error).message}`
+            );
+          }
+        }
+
+        if (!hasPhotos) {
+          continue;
+        }
+
+        const meta = await this.readRoomFolderMeta(roomDir);
+        const name = meta?.roomName || roomId;
+        rooms.push({
+          roomId,
+          name,
+          photoCount,
+          hasPhotos,
+          displayLabel: meta?.displayLabel || name,
+          updatedAt: meta?.updatedAt,
+        });
+      }
+
+      rooms.sort((a, b) =>
+        (a.displayLabel || a.name || a.roomId).localeCompare(
+          b.displayLabel || b.name || b.roomId,
+          undefined,
+          { sensitivity: 'base', numeric: true }
+        )
+      );
+    } catch (error) {
+      console.log(`Failed to list available rooms: ${(error as Error).message}`);
+    }
+
+    return rooms;
   }
 }

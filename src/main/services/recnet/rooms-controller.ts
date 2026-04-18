@@ -8,6 +8,28 @@ import {
 export class RoomsController {
   constructor(private readonly http: RecNetHttpClient) {}
 
+  async lookupRoomByName(
+    roomName: string,
+    token?: string,
+    options?: RecNetRequestOptions
+  ): Promise<RoomDto> {
+    const room = await this.http.requestOrThrow<RoomDto>(
+      {
+        url: `https://rooms.rec.net/rooms?name=${encodeURIComponent(roomName)}&include=8489`,
+        method: 'GET',
+      },
+      token,
+      options
+    );
+
+    return {
+      ...room,
+      RoomId: String(room.RoomId),
+      CreatorAccountId: String(room.CreatorAccountId),
+      RankedEntityId: String(room.RankedEntityId),
+    };
+  }
+
   async fetchBulkRooms(
     roomIds: string[],
     token?: string,
