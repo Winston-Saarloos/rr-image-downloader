@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-import { FolderOpen, Settings as SettingsIcon } from 'lucide-react';
-import { Button } from '../components/ui/button';
+import React from 'react';
+import { Settings as SettingsIcon } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import {
@@ -11,6 +10,7 @@ import {
   CardTitle,
 } from '../components/ui/card';
 import { RecNetSettings } from '../../shared/types';
+import { OutputPathPickerGroup } from './OutputPathPickerGroup';
 
 interface SettingsPanelProps {
   settings: RecNetSettings;
@@ -26,26 +26,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onUpdateSettings,
   onLog,
 }) => {
-  const [isSelectingFolder, setIsSelectingFolder] = useState(false);
-
-  const handleSelectFolder = async () => {
-    const api = (window as unknown as { electronAPI?: any }).electronAPI;
-    if (!api) return;
-
-    setIsSelectingFolder(true);
-    try {
-      const folder = await api.selectOutputFolder();
-      if (folder) {
-        await onUpdateSettings({ outputRoot: folder });
-        onLog(`Output folder set to: ${folder}`, 'info');
-      }
-    } catch (error) {
-      onLog(`Failed to select folder: ${error}`, 'error');
-    } finally {
-      setIsSelectingFolder(false);
-    }
-  };
-
   const handleDelayChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.trim();
     if (value === '') {
@@ -98,27 +78,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Output Folder */}
-        <div className="space-y-2">
-          <Label htmlFor="output-path">Output Path</Label>
-          <div className="flex gap-2">
-            <Input
-              id="output-path"
-              type="text"
-              value={settings.outputRoot}
-              readOnly
-              className="flex-1"
-            />
-            <Button
-              onClick={handleSelectFolder}
-              disabled={isSelectingFolder}
-              variant="outline"
-              size="icon"
-            >
-              <FolderOpen className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+        <OutputPathPickerGroup
+          settings={settings}
+          onUpdateSettings={onUpdateSettings}
+          heading="Output Path"
+          inputId="output-path"
+          showConfigurationCallout
+          calloutContext="settings"
+          onPickerError={msg => onLog(msg, 'error')}
+          onFolderChosen={path =>
+            onLog(`Output folder set to: ${path}`, 'info')
+          }
+        />
 
         {/* Delay Between Pages */}
         <div className="space-y-2">

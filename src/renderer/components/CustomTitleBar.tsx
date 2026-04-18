@@ -49,9 +49,13 @@ interface CustomTitleBarProps {
   isRetryingDownload?: boolean;
   onOpenDownloadPanel?: () => void;
   onOpenOutputFolder?: (folderPath: string) => void | Promise<void>;
-  outputRoot: string;
+  /** Absolute path to open in Explorer (resolved when output root is relative). */
+  outputExplorerPath: string;
   libraryMode: LibraryMode;
   onLibraryModeChange: (mode: LibraryMode) => void;
+  /** When false, the library move row is shown but the button stays disabled. */
+  libraryMoveEnabled?: boolean;
+  onOpenLibraryMove?: () => void;
 }
 
 export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
@@ -71,9 +75,11 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
   isRetryingDownload,
   onOpenDownloadPanel,
   onOpenOutputFolder,
-  outputRoot,
+  outputExplorerPath,
   libraryMode,
   onLibraryModeChange,
+  libraryMoveEnabled = false,
+  onOpenLibraryMove,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
   const resultsSectionRef = useRef<HTMLDivElement | null>(null);
@@ -251,6 +257,40 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
                 // Logging handled by parent component
               }}
             />
+            {onOpenLibraryMove && (
+              <div
+                className={`rounded-md border p-3 space-y-2 ${!libraryMoveEnabled ? 'opacity-80' : ''}`}
+              >
+                <p className="text-sm font-medium">Move Photo Library</p>
+                <p className="text-xs text-muted-foreground">
+                  Move the entire photo library to another folder (copy, move,
+                  verify, then remove the old location).
+                </p>
+                {!libraryMoveEnabled && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    Temporarily disabled
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!libraryMoveEnabled}
+                  title={
+                    libraryMoveEnabled
+                      ? undefined
+                      : 'Library move is disabled. Enable LIBRARY_MOVE_ENABLED in App.tsx.'
+                  }
+                  onClick={() => {
+                    if (libraryMoveEnabled) {
+                      onOpenLibraryMove();
+                    }
+                  }}
+                >
+                  Move photo library…
+                </Button>
+              </div>
+            )}
             <LogPanel logs={logs} onClearLogs={onClearLogs} />
             <div ref={resultsSectionRef}>
               <ResultsPanel
@@ -260,7 +300,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
                 isRetryingDownload={isRetryingDownload}
                 onOpenDownloadPanel={onOpenDownloadPanel}
                 onOpenOutputFolder={onOpenOutputFolder}
-                outputRoot={outputRoot}
+                outputExplorerPath={outputExplorerPath}
               />
             </div>
           </div>

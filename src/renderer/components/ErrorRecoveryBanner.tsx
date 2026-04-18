@@ -5,7 +5,8 @@ import type { UserFacingIncident } from '../../shared/types';
 
 export interface ErrorRecoveryBannerProps {
   incident: UserFacingIncident | null;
-  outputRoot: string;
+  /** Path passed to Explorer when opening the output folder. */
+  outputExplorerPath: string;
   onDismiss: () => void;
   onRetryDownload?: () => void | Promise<void>;
   canRetryDownload?: boolean;
@@ -17,7 +18,7 @@ export interface ErrorRecoveryBannerProps {
 
 export const ErrorRecoveryBanner: React.FC<ErrorRecoveryBannerProps> = ({
   incident,
-  outputRoot,
+  outputExplorerPath,
   onDismiss,
   onRetryDownload,
   canRetryDownload = false,
@@ -52,7 +53,7 @@ export const ErrorRecoveryBanner: React.FC<ErrorRecoveryBannerProps> = ({
     onRetryDownload;
 
   const showOpenFolder =
-    Boolean(outputRoot?.trim()) &&
+    Boolean(outputExplorerPath?.trim()) &&
     onOpenPathInExplorer &&
     (incident.source === 'download' ||
       incident.source === 'photos' ||
@@ -138,7 +139,7 @@ export const ErrorRecoveryBanner: React.FC<ErrorRecoveryBannerProps> = ({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => void onOpenPathInExplorer(outputRoot)}
+                onClick={() => void onOpenPathInExplorer(outputExplorerPath)}
               >
                 Open output folder
               </Button>

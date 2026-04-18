@@ -20,6 +20,8 @@ import {
   AvailableRoom,
   RoomPhotoBatchResult,
   RoomPhotoSort,
+  LibraryMoveProgress,
+  LibraryMoveResult,
 } from '../../shared/types';
 import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import {
@@ -40,6 +42,41 @@ import { ImageCommentsController } from './recnet/image-comments-controller';
 import { PhotosController } from './recnet/photos-controller';
 import { RoomsController } from './recnet/rooms-controller';
 import { Semaphore } from '../utils/semaphore';
+import {
+  LibraryMoveCancelledError,
+  pathsEffectivelyEqual,
+  removePartialLibraryCopy,
+  runLibraryMove,
+} from './library-move';
+
+/** Absolute directory used for reads/writes; empty if `outputRoot` is unset. */
+export function computeResolvedOutputRoot(outputRoot: string): string {
+  const t = typeof outputRoot === 'string' ? outputRoot.trim() : '';
+  if (!t) {
+    return '';
+  }
+  return path.isAbsolute(t) ? t : path.resolve(process.cwd(), t);
+}
+
+export function isOutputRootConfiguredForWrites(outputRoot: string): boolean {
+  const root = typeof outputRoot === 'string' ? outputRoot.trim() : '';
+  if (!root) {
+    return false;
+  }
+  return path.isAbsolute(root);
+}
+
+export function describeOutputConfigurationError(settings: {
+  outputRoot: string;
+}): string | null {
+  if (isOutputRootConfiguredForWrites(settings.outputRoot)) {
+    return null;
+  }
+  if (!settings.outputRoot.trim()) {
+    return 'Choose an output folder before downloading or saving data.';
+  }
+  return 'Choose an absolute output folder path (use Browse) before downloading or saving data.';
+}
 
 interface CurrentOperation {
   cancelled: boolean;
@@ -119,7 +156,7 @@ type DownloadBatchTrace = {
 };
 
 const DEFAULT_SETTINGS: RecNetSettings = {
-  outputRoot: 'output',
+  outputRoot: '',
   cdnBase: DEFAULT_CDN_BASE,
   interPageDelayMs: 100,
   maxConcurrentDownloads: 3,
@@ -139,7 +176,10 @@ const IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS = 250;
 
 type PersistedRecNetSettings = Omit<
   RecNetSettings,
-  'interPageDelayMs' | 'maxConcurrentDownloads'
+  | 'interPageDelayMs'
+  | 'maxConcurrentDownloads'
+  | 'resolvedOutputRoot'
+  | 'outputPathConfiguredForDownload'
 >;
 
 function normalizeRecNetSettings(input: unknown): RecNetSettings {
@@ -166,12 +206,15 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
       ? Math.floor(maxRaw)
       : undefined;
 
+  const outputRoot =
+    typeof raw.outputRoot === 'string' ? raw.outputRoot.trim() : '';
+
   return {
-    outputRoot:
-      typeof raw.outputRoot === 'string' && raw.outputRoot.length > 0
-        ? raw.outputRoot
-        : DEFAULT_SETTINGS.outputRoot,
-    cdnBase: DEFAULT_SETTINGS.cdnBase,
+    outputRoot,
+    cdnBase:
+      typeof raw.cdnBase === 'string' && raw.cdnBase.length > 0
+        ? raw.cdnBase
+        : DEFAULT_SETTINGS.cdnBase,
     interPageDelayMs,
     maxPhotosToDownload,
     maxConcurrentDownloads,
@@ -221,6 +264,8 @@ export class RecNetService extends EventEmitter {
   private settings: RecNetSettings;
   private settingsLoaded: Promise<void>;
   private currentOperation: CurrentOperation | null = null;
+  private libraryMoveInProgress = false;
+  private libraryMoveAbort: AbortController | null = null;
   private progress: Progress;
   private httpClient: RecNetHttpClient;
   private photosController: PhotosController;
@@ -269,14 +314,38 @@ export class RecNetService extends EventEmitter {
     try {
       if (await fs.pathExists(this.settingsPath)) {
         const savedSettings = await fs.readJson(this.settingsPath);
+        const savedRecord = savedSettings as Record<string, unknown>;
+
         this.settings = normalizeRecNetSettings({
           ...DEFAULT_SETTINGS,
           ...extractPersistedRecNetSettings(savedSettings),
         });
 
+        let shouldRewriteDisk = false;
+        const root = this.settings.outputRoot.trim();
+        if (root !== '' && !path.isAbsolute(root)) {
+          this.settings = { ...this.settings, outputRoot: '' };
+          shouldRewriteDisk = true;
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(
+            savedRecord,
+            'legacyRelativeOutputAllowed'
+          )
+        ) {
+          shouldRewriteDisk = true;
+        }
         if (hasLegacyRuntimeOnlySettings(savedSettings)) {
+          shouldRewriteDisk = true;
+        }
+
+        if (shouldRewriteDisk) {
           await this.saveSettings();
         }
+      } else {
+        this.settings = normalizeRecNetSettings({
+          ...DEFAULT_SETTINGS,
+        });
       }
     } catch (error) {
       console.log('Failed to load settings:', (error as Error).message);
@@ -298,8 +367,16 @@ export class RecNetService extends EventEmitter {
     }
   }
 
+  private getResolvedOutputRoot(): string {
+    return computeResolvedOutputRoot(this.settings.outputRoot);
+  }
+
   private ensureOutputDirectory(): void {
-    fs.ensureDirSync(this.settings.outputRoot);
+    const resolved = this.getResolvedOutputRoot();
+    if (!resolved) {
+      return;
+    }
+    fs.ensureDirSync(resolved);
   }
 
   private syncHttpClientSettings(): void {
@@ -314,23 +391,328 @@ export class RecNetService extends EventEmitter {
     };
   }
 
+  async getOutputConfigurationError(): Promise<string | null> {
+    await this.ensureSettingsLoaded();
+    if (this.libraryMoveInProgress) {
+      return 'Photo library move in progress. Wait for it to finish or cancel it.';
+    }
+    return describeOutputConfigurationError(this.settings);
+  }
+
+  isLibraryMoveInProgress(): boolean {
+    return this.libraryMoveInProgress;
+  }
+
+  cancelLibraryMove(): boolean {
+    if (this.libraryMoveAbort && !this.libraryMoveAbort.signal.aborted) {
+      this.libraryMoveAbort.abort();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Copy library to an absolute empty folder, verify, update settings, then remove the old root.
+   */
+  async moveLibraryTo(
+    destAbsolute: string,
+    onProgress: (p: LibraryMoveProgress) => void
+  ): Promise<LibraryMoveResult> {
+    await this.ensureSettingsLoaded();
+
+    const logMove = (line: string) => {
+      console.log(`[LibraryMove] ${line}`);
+    };
+
+    if (this.libraryMoveInProgress) {
+      logMove('Rejected: a library move is already in progress.');
+      return {
+        success: false,
+        previousRoot: '',
+        newRoot: '',
+        filesCopied: 0,
+        bytesCopied: 0,
+        error: 'A library move is already in progress.',
+        operationLog: ['Rejected: a library move is already in progress.'],
+      };
+    }
+    if (this.currentOperation) {
+      logMove('Rejected: another operation is running.');
+      return {
+        success: false,
+        previousRoot: '',
+        newRoot: '',
+        filesCopied: 0,
+        bytesCopied: 0,
+        error:
+          'Another operation is running. Cancel it before moving the library.',
+        operationLog: ['Rejected: another operation is running.'],
+      };
+    }
+
+    const srcRoot = this.getResolvedOutputRoot();
+    const outputOk =
+      isOutputRootConfiguredForWrites(this.settings.outputRoot) &&
+      srcRoot.trim() !== '';
+
+    if (!outputOk) {
+      const err =
+        describeOutputConfigurationError(this.settings) ??
+        'No output library folder is configured.';
+      logMove(`Rejected before start: ${err}`);
+      return {
+        success: false,
+        previousRoot: '',
+        newRoot: '',
+        filesCopied: 0,
+        bytesCopied: 0,
+        error: err,
+        operationLog: [`Rejected: ${err}`],
+      };
+    }
+
+    const destRoot = path.resolve(destAbsolute.trim());
+    if (!path.isAbsolute(destRoot)) {
+      logMove('Rejected: destination must be an absolute path.');
+      return {
+        success: false,
+        previousRoot: srcRoot,
+        newRoot: '',
+        filesCopied: 0,
+        bytesCopied: 0,
+        error: 'Destination must be an absolute path.',
+        operationLog: ['Rejected: destination must be an absolute path.'],
+      };
+    }
+
+    if (pathsEffectivelyEqual(srcRoot, destRoot)) {
+      logMove('Rejected: source and destination are the same folder.');
+      return {
+        success: false,
+        previousRoot: srcRoot,
+        newRoot: destRoot,
+        filesCopied: 0,
+        bytesCopied: 0,
+        error: 'Source and destination are the same folder.',
+        operationLog: ['Rejected: source and destination are the same folder.'],
+      };
+    }
+
+    this.libraryMoveInProgress = true;
+    this.libraryMoveAbort = new AbortController();
+    const signal = this.libraryMoveAbort.signal;
+
+    let outcome: Awaited<ReturnType<typeof runLibraryMove>> | null = null;
+    let copyAndVerifySucceeded = false;
+
+    try {
+      outcome = await runLibraryMove({
+        srcRoot,
+        destRoot,
+        signal,
+        onProgress,
+      });
+      copyAndVerifySucceeded = true;
+
+      let workingLog = [...outcome.operationLog];
+
+      const pushOrchestrationLog = (line: string) => {
+        workingLog = [...workingLog, line];
+        logMove(line);
+      };
+
+      const emitOrchestration = (
+        partial: Partial<LibraryMoveProgress> & Pick<LibraryMoveProgress, 'phase'>
+      ) => {
+        onProgress({
+          phase: partial.phase,
+          bytesDone: partial.bytesDone ?? outcome!.bytesCopied,
+          bytesTotal: partial.bytesTotal ?? outcome!.bytesCopied,
+          filesDone: partial.filesDone ?? outcome!.filesCopied,
+          filesTotal: partial.filesTotal ?? outcome!.filesCopied,
+          currentLabel: partial.currentLabel ?? '',
+          done: partial.done ?? false,
+          error: partial.error,
+          sourceDeleteWarning: partial.sourceDeleteWarning,
+          operationLog: [...workingLog],
+        });
+      };
+
+      pushOrchestrationLog(`Settings: saving new library path "${destRoot}".`);
+      emitOrchestration({
+        phase: 'saving_settings',
+        currentLabel: 'Updating app settings to the new library folder…',
+      });
+      await this.updateSettings({ outputRoot: destRoot });
+      pushOrchestrationLog('Settings: saved successfully.');
+
+      emitOrchestration({
+        phase: 'removing_old',
+        currentLabel: 'Removing the old library folder…',
+      });
+
+      let sourceDeleteWarning: string | undefined;
+      try {
+        if (
+          !pathsEffectivelyEqual(srcRoot, destRoot) &&
+          (await fs.pathExists(srcRoot))
+        ) {
+          pushOrchestrationLog(`Old library: deleting "${srcRoot}"…`);
+          await fs.remove(srcRoot);
+          pushOrchestrationLog('Old library: removed successfully.');
+        } else {
+          pushOrchestrationLog(
+            'Old library: skipped delete (same path or source already absent).'
+          );
+        }
+      } catch (err) {
+        sourceDeleteWarning = `Library is now at ${destRoot}, but the old folder could not be fully removed: ${(err as Error).message}`;
+        pushOrchestrationLog(
+          `Old library: delete failed — ${(err as Error).message}`
+        );
+      }
+
+      emitOrchestration({
+        phase: 'complete',
+        currentLabel: sourceDeleteWarning
+          ? 'Move finished with a warning about the old folder.'
+          : 'Move finished.',
+        done: true,
+        sourceDeleteWarning,
+      });
+
+      logMove(
+        sourceDeleteWarning
+          ? `Finished with warning: ${sourceDeleteWarning}`
+          : 'Finished successfully.'
+      );
+
+      return {
+        success: true,
+        previousRoot: outcome.previousRoot,
+        newRoot: outcome.newRoot,
+        filesCopied: outcome.filesCopied,
+        bytesCopied: outcome.bytesCopied,
+        sourceDeleteWarning,
+        operationLog: workingLog,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      if (error instanceof LibraryMoveCancelledError) {
+        logMove('Cancelled by user; cleaning up partial destination data…');
+        try {
+          await removePartialLibraryCopy(
+            destRoot,
+            outcome?.topLevelDestNames ?? []
+          );
+          if (
+            !(outcome?.topLevelDestNames?.length) &&
+            (await fs.pathExists(destRoot))
+          ) {
+            const kids = await fs.readdir(destRoot);
+            for (const k of kids) {
+              await fs.remove(path.join(destRoot, k));
+            }
+          }
+          logMove('Cancel cleanup: destination partial copy removed where possible.');
+        } catch {
+          logMove('Cancel cleanup: some destination files may remain.');
+          // ignore cleanup failure
+        }
+        const cancelLog = [
+          ...(outcome?.operationLog ?? []),
+          'Cancelled: partial data under the destination was removed where possible.',
+        ];
+        return {
+          success: false,
+          previousRoot: srcRoot,
+          newRoot: destRoot,
+          filesCopied: 0,
+          bytesCopied: 0,
+          error:
+            'Library move was cancelled. Partial files under the destination may have been removed.',
+          operationLog: cancelLog,
+        };
+      }
+
+      if (!copyAndVerifySucceeded) {
+        logMove(`Copy/verify failed: ${message}; cleaning destination…`);
+        try {
+          if (await fs.pathExists(destRoot)) {
+            const kids = await fs.readdir(destRoot);
+            for (const k of kids) {
+              await fs.remove(path.join(destRoot, k));
+            }
+          }
+          logMove('Failure cleanup: emptied destination folder where possible.');
+        } catch {
+          logMove('Failure cleanup: could not fully empty destination.');
+          // ignore
+        }
+      } else {
+        logMove(
+          `After copy/verify failure on commit: ${message} (new folder may still hold files).`
+        );
+      }
+
+      const failLog = [
+        ...(outcome?.operationLog ?? []),
+        copyAndVerifySucceeded
+          ? `Failed after successful copy: ${message}`
+          : `Failed during copy or verify: ${message}`,
+      ];
+
+      return {
+        success: false,
+        previousRoot: srcRoot,
+        newRoot: destRoot,
+        filesCopied: outcome?.filesCopied ?? 0,
+        bytesCopied: outcome?.bytesCopied ?? 0,
+        error: copyAndVerifySucceeded
+          ? `${message} Your files are still under the new folder; settings may not have updated. Try choosing that folder in Settings.`
+          : message,
+        operationLog: failLog,
+      };
+    } finally {
+      this.libraryMoveInProgress = false;
+      this.libraryMoveAbort = null;
+    }
+  }
+
   async getSettings(): Promise<RecNetSettings> {
     await this.ensureSettingsLoaded();
-    return { ...this.settings };
+    const resolvedOutputRoot = computeResolvedOutputRoot(
+      this.settings.outputRoot
+    );
+    const outputPathConfiguredForDownload = isOutputRootConfiguredForWrites(
+      this.settings.outputRoot
+    );
+    return {
+      ...this.settings,
+      resolvedOutputRoot,
+      outputPathConfiguredForDownload,
+    };
   }
 
   async updateSettings(
     newSettings: Partial<RecNetSettings>
   ): Promise<RecNetSettings> {
     await this.ensureSettingsLoaded();
+    const { resolvedOutputRoot, outputPathConfiguredForDownload, ...rest } =
+      newSettings;
+    void resolvedOutputRoot;
+    void outputPathConfiguredForDownload;
+
     this.settings = normalizeRecNetSettings({
       ...this.settings,
-      ...newSettings,
+      ...rest,
     });
+
     this.syncHttpClientSettings();
     this.ensureOutputDirectory();
     await this.saveSettings();
-    return this.settings;
+    return this.getSettings();
   }
 
   getProgress(): Progress {
@@ -513,7 +895,7 @@ export class RecNetService extends EventEmitter {
       const iterationDetails: IterationDetail[] = [];
 
       // Create account-specific directory
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       console.log(`Using output root: ${this.settings.outputRoot}`);
       console.log(`Creating account directory: ${accountDir}`);
       await fs.ensureDir(accountDir);
@@ -528,7 +910,7 @@ export class RecNetService extends EventEmitter {
 
       // Check for old file in root directory and migrate it
       const oldJsonPath = path.join(
-        this.settings.outputRoot,
+        this.getResolvedOutputRoot(),
         `${accountId}_photos.json`
       );
       if (await fs.pathExists(oldJsonPath)) {
@@ -851,7 +1233,7 @@ export class RecNetService extends EventEmitter {
         }
       );
 
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       console.log(`Creating account directory for feed: ${accountDir}`);
       await fs.ensureDir(accountDir);
       console.log(`Account directory for feed created successfully`);
@@ -864,7 +1246,7 @@ export class RecNetService extends EventEmitter {
 
       // Check for old feed file in root directory and migrate it
       const oldFeedJsonPath = path.join(
-        this.settings.outputRoot,
+        this.getResolvedOutputRoot(),
         `${accountId}_feed.json`
       );
       if (await fs.pathExists(oldFeedJsonPath)) {
@@ -1157,7 +1539,7 @@ export class RecNetService extends EventEmitter {
         0,
         0
       );
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       const jsonPath = path.join(accountDir, `${accountId}_photos.json`);
 
       console.log(`Looking for photos metadata at: ${jsonPath}`);
@@ -1427,7 +1809,7 @@ export class RecNetService extends EventEmitter {
         0,
         0
       );
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
       if (!(await fs.pathExists(feedJsonPath))) {
@@ -1764,7 +2146,7 @@ export class RecNetService extends EventEmitter {
         );
       }
 
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       await fs.ensureDir(accountDir);
 
       const manifestPath = path.join(
@@ -1859,7 +2241,7 @@ export class RecNetService extends EventEmitter {
         );
       }
 
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       await fs.ensureDir(accountDir);
 
       const manifestPath = path.join(
@@ -2671,7 +3053,7 @@ export class RecNetService extends EventEmitter {
   }
 
   private getRoomsRoot(): string {
-    return path.join(this.settings.outputRoot, 'rooms');
+    return path.join(this.getResolvedOutputRoot(), 'rooms');
   }
 
   private getRoomDirectory(roomId: string): string {
@@ -3577,7 +3959,7 @@ export class RecNetService extends EventEmitter {
       );
 
       const accountDir =
-        storageContext?.directory ?? path.join(this.settings.outputRoot, accountId);
+        storageContext?.directory ?? path.join(this.getResolvedOutputRoot(), accountId);
       const fileStem = storageContext?.fileStem ?? accountId;
       const shouldWriteOwnerMeta = storageContext?.writeOwnerMeta !== false;
       await fs.ensureDir(accountDir);
@@ -4052,7 +4434,7 @@ export class RecNetService extends EventEmitter {
     accountId: string,
     source: DownloadSource
   ): Promise<DownloadPreflightSourceSummary> {
-    const accountDir = path.join(this.settings.outputRoot, accountId);
+    const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
 
     if (source === 'user-photos') {
       const metadataPath = path.join(accountDir, `${accountId}_photos.json`);
@@ -4628,7 +5010,7 @@ export class RecNetService extends EventEmitter {
     await this.ensureSettingsLoaded();
     let removedAccountDirectories = 0;
     let removedLegacyFiles = 0;
-    const currentOutputRoot = this.settings.outputRoot;
+    const currentOutputRoot = this.getResolvedOutputRoot();
 
     try {
       if (await fs.pathExists(currentOutputRoot)) {
@@ -4696,7 +5078,7 @@ export class RecNetService extends EventEmitter {
   }
   async clearAccountData(accountId: string): Promise<{ filesRemoved: number }> {
     await this.ensureSettingsLoaded();
-    const accountDir = path.join(this.settings.outputRoot, accountId);
+    const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
     const photosJsonPath = path.join(accountDir, `${accountId}_photos.json`);
     const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
@@ -4765,12 +5147,12 @@ export class RecNetService extends EventEmitter {
 
     try {
       // Ensure output directory exists
-      if (!(await fs.pathExists(this.settings.outputRoot))) {
+      if (!(await fs.pathExists(this.getResolvedOutputRoot()))) {
         return accounts;
       }
 
       // Read all directories in output root
-      const entries = await fs.readdir(this.settings.outputRoot, {
+      const entries = await fs.readdir(this.getResolvedOutputRoot(), {
         withFileTypes: true,
       });
 
@@ -4780,7 +5162,7 @@ export class RecNetService extends EventEmitter {
         }
 
         const accountId = entry.name;
-        const accountDir = path.join(this.settings.outputRoot, accountId);
+        const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
         const photosJsonPath = path.join(
           accountDir,
           `${accountId}_photos.json`

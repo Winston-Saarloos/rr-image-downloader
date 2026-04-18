@@ -112,6 +112,7 @@ describe('RecNetService - File Saving Functionality', () => {
         outputRoot: testOutputDir,
         maxPhotosToDownload: 4,
       });
+      expect(savedSettings).not.toHaveProperty('legacyRelativeOutputAllowed');
       expect(savedSettings).not.toHaveProperty('interPageDelayMs');
       expect(savedSettings).not.toHaveProperty('maxConcurrentDownloads');
     });
@@ -130,6 +131,7 @@ describe('RecNetService - File Saving Functionality', () => {
       const settings = await localService.getSettings();
 
       expect(settings.outputRoot).toBe(testOutputDir);
+      expect(settings.outputPathConfiguredForDownload).toBe(true);
       expect(settings.maxPhotosToDownload).toBe(7);
       expect(settings.interPageDelayMs).toBe(100);
       expect(settings.maxConcurrentDownloads).toBe(3);
@@ -140,6 +142,39 @@ describe('RecNetService - File Saving Functionality', () => {
       >;
       expect(rewrittenSettings).not.toHaveProperty('interPageDelayMs');
       expect(rewrittenSettings).not.toHaveProperty('maxConcurrentDownloads');
+    });
+
+    it('fresh install leaves output empty and marks download path as not configured', async () => {
+      jest.clearAllMocks();
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+      const localService = new RecNetService();
+      const settings = await localService.getSettings();
+      expect(settings.outputRoot).toBe('');
+      expect(settings.resolvedOutputRoot).toBe('');
+      expect(settings.outputPathConfiguredForDownload).toBe(false);
+    });
+
+    it('migrates relative outputRoot on load to empty and rewrites disk', async () => {
+      jest.clearAllMocks();
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(true);
+      (mockedFs.readJson as jest.Mock).mockResolvedValue({
+        outputRoot: 'output',
+        cdnBase: 'https://cdn.example.com/',
+      });
+
+      const localService = new RecNetService();
+      const settings = await localService.getSettings();
+
+      expect(settings.outputRoot).toBe('');
+      expect(settings.outputPathConfiguredForDownload).toBe(false);
+      expect(settings.resolvedOutputRoot).toBe('');
+
+      const rewrittenSettings = mockedFs.writeJson.mock.calls.at(-1)?.[1] as Record<
+        string,
+        unknown
+      >;
+      expect(rewrittenSettings?.outputRoot).toBe('');
+      expect(rewrittenSettings).not.toHaveProperty('legacyRelativeOutputAllowed');
     });
   });
 

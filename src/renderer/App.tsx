@@ -6,6 +6,7 @@ import { PhotoViewer } from './components/PhotoViewer';
 import { ProgressDisplay } from './components/ProgressDisplay';
 import { StatsDialog } from './components/StatsDialog';
 import { CustomTitleBar } from './components/CustomTitleBar';
+import { LibraryMoveDialog } from './components/LibraryMoveDialog';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DEFAULT_CDN_BASE } from '../shared/cdnUrl';
 import {
@@ -56,9 +57,12 @@ const EMPTY_DOWNLOAD_STEP = 'Nothing to download';
 const CLEAN_DOWNLOAD_FOLLOW_UP =
   'If you take more photos in Rec Room, come back and run this download again. The app will only grab anything new.';
 
+/** Set to true to allow starting a library move from the debug menu. */
+const LIBRARY_MOVE_ENABLED = false;
+
 function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
-    outputRoot: 'output',
+    outputRoot: '',
     cdnBase: DEFAULT_CDN_BASE,
     interPageDelayMs: 100,
     maxConcurrentDownloads: 3,
@@ -84,6 +88,7 @@ function App() {
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const [debugMenuOpen, setDebugMenuOpen] = useState(false);
+  const [libraryMoveDialogOpen, setLibraryMoveDialogOpen] = useState(false);
   const [resultsScrollRequestId, setResultsScrollRequestId] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [headerMode, setHeaderMode] = useState<'full' | 'compact' | 'hidden'>(
@@ -474,8 +479,10 @@ function App() {
     try {
       // Update settings with new file path
       if (window.electronAPI) {
-        await window.electronAPI.updateSettings({ outputRoot: filePath });
-        setSettings(prev => ({ ...prev, outputRoot: filePath }));
+        const updatedSettings = await window.electronAPI.updateSettings({
+          outputRoot: filePath,
+        });
+        setSettings(updatedSettings);
         addLog(`Output path set to: ${filePath}`, 'info');
 
         if (libraryMode === 'room') {
@@ -1022,9 +1029,16 @@ function App() {
     setDebugMenuOpen(true);
   }, []);
 
+  const effectiveOutputExplorerPath =
+    (settings.resolvedOutputRoot ?? '').trim() ||
+    settings.outputRoot.trim();
+
   const handleRevealOutputFolder = useCallback(() => {
-    void handleOpenPathInExplorer(settings.outputRoot);
-  }, [handleOpenPathInExplorer, settings.outputRoot]);
+    if (!effectiveOutputExplorerPath) {
+      return;
+    }
+    void handleOpenPathInExplorer(effectiveOutputExplorerPath);
+  }, [handleOpenPathInExplorer, effectiveOutputExplorerPath]);
 
   const handlePhotosLoadError = useCallback((message: string) => {
     setActiveIncident(createUserIncident('photos', message));
@@ -1092,6 +1106,13 @@ function App() {
     <FavoritesProvider>
       <div className="min-h-screen bg-background">
         {/* Custom Title Bar */}
+        <LibraryMoveDialog
+          open={libraryMoveDialogOpen}
+          onOpenChange={setLibraryMoveDialogOpen}
+          settings={settings}
+          onCompleted={loadSettings}
+        />
+
         <CustomTitleBar
           onDownloadClick={() => setDownloadPanelOpen(true)}
           onStatsClick={() => setStatsDialogOpen(true)}
@@ -1109,15 +1130,17 @@ function App() {
           isRetryingDownload={isDownloading}
           onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
           onOpenOutputFolder={handleOpenPathInExplorer}
-          outputRoot={settings.outputRoot}
+          outputExplorerPath={effectiveOutputExplorerPath}
           libraryMode={libraryMode}
           onLibraryModeChange={setLibraryMode}
+          libraryMoveEnabled={LIBRARY_MOVE_ENABLED}
+          onOpenLibraryMove={() => setLibraryMoveDialogOpen(true)}
         />
 
         <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden pt-14">
           <ErrorRecoveryBanner
             incident={activeIncident}
-            outputRoot={settings.outputRoot}
+            outputExplorerPath={effectiveOutputExplorerPath}
             onDismiss={dismissIncident}
             onRetryDownload={handleRetryDownload}
             canRetryDownload={canRetryDownload}
@@ -1140,6 +1163,7 @@ function App() {
               showCancel={isDownloading}
               settings={settings}
               libraryMode={libraryMode}
+              onUpdateSettings={updateSettings}
             />
           </ErrorBoundary>
 
@@ -1149,7 +1173,7 @@ function App() {
               open={statsDialogOpen}
               onOpenChange={setStatsDialogOpen}
               accountId={currentAccountId}
-              filePath={settings.outputRoot}
+              filePath={effectiveOutputExplorerPath}
             />
           </ErrorBoundary>
 
@@ -1181,7 +1205,7 @@ function App() {
             )}
             <ErrorBoundary sectionName="Photo viewer">
               <PhotoViewer
-                filePath={settings.outputRoot}
+                filePath={effectiveOutputExplorerPath}
                 accountId={
                   libraryMode === 'user' && isDownloading
                     ? currentAccountId

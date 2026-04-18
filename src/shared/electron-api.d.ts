@@ -21,6 +21,8 @@ import type {
   RoomDto,
   RoomPhotoBatchResult,
   RoomPhotoSort,
+  LibraryMoveProgress,
+  LibraryMoveResult,
 } from './types';
 import type { DownloadSourceSelection } from './download-sources';
 
@@ -82,6 +84,16 @@ export interface ElectronAPI {
   selectOutputFolder: () => Promise<string | null>;
   getSettings: () => Promise<RecNetSettings>;
   updateSettings: (settings: Partial<RecNetSettings>) => Promise<RecNetSettings>;
+
+  startLibraryMove: (dest: string) => Promise<ApiResponse<LibraryMoveResult>>;
+  cancelLibraryMove: () => Promise<boolean>;
+  onLibraryMoveProgress: (
+    callback: (event: unknown, progress: LibraryMoveProgress) => void
+  ) => void;
+  removeLibraryMoveProgressListener: (
+    callback: (event: unknown, progress: LibraryMoveProgress) => void
+  ) => void;
+
   getProgress: () => Promise<Progress>;
   cancelOperation: () => Promise<boolean>;
   onProgress: (callback: (event: unknown, progress: Progress) => void) => void;

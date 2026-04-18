@@ -30,7 +30,7 @@ interface ResultsPanelProps {
   isRetryingDownload?: boolean;
   onOpenDownloadPanel?: () => void;
   onOpenOutputFolder?: (folderPath: string) => void | Promise<void>;
-  outputRoot?: string;
+  outputExplorerPath?: string;
 }
 
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({
@@ -40,7 +40,7 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
   isRetryingDownload = false,
   onOpenDownloadPanel,
   onOpenOutputFolder,
-  outputRoot = '',
+  outputExplorerPath = '',
 }) => {
   const getResultIcon = (type: 'success' | 'error') => {
     return type === 'success' ? (
@@ -103,7 +103,7 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
 
           {(showRetry ||
             onOpenDownloadPanel ||
-            (onOpenOutputFolder && outputRoot.trim())) && (
+            (onOpenOutputFolder && outputExplorerPath.trim())) && (
             <div className="flex flex-wrap gap-2 pl-8">
               {showRetry && (
                 <Button
@@ -120,11 +120,11 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                   Open download
                 </Button>
               )}
-              {onOpenOutputFolder && outputRoot.trim() ? (
+              {onOpenOutputFolder && outputExplorerPath.trim() ? (
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => void onOpenOutputFolder(outputRoot)}
+                  onClick={() => void onOpenOutputFolder(outputExplorerPath)}
                 >
                   Open output folder
                 </Button>

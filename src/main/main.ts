@@ -27,6 +27,7 @@ import {
   RoomDto,
   RoomPhotoBatchResult,
   RoomPhotoSort,
+  LibraryMoveResult,
 } from '../shared/types';
 import type { DownloadSourceSelection } from '../shared/download-sources';
 import { EventDto } from './models/EventDto';
@@ -410,6 +411,10 @@ app.on('window-all-closed', () => {
   }
 });
 
+async function getOutputWriteBlockedError(): Promise<string | null> {
+  return recNetService.getOutputConfigurationError();
+}
+
 // IPC handlers for communication with renderer process
 ipcMain.handle(
   'collect-photos',
@@ -418,6 +423,10 @@ ipcMain.handle(
     params: CollectPhotosParams
   ): Promise<ApiResponse<CollectionResult>> => {
     try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
       const result = await recNetService.collectPhotos(
         params.accountId,
         params.token,
@@ -442,6 +451,10 @@ ipcMain.handle(
     params: CollectFeedPhotosParams
   ): Promise<ApiResponse<CollectionResult>> => {
     try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
       const result = await recNetService.collectFeedPhotos(
         params.accountId,
         params.token,
@@ -467,6 +480,10 @@ ipcMain.handle(
     params: ValidateProfileHistoryAccessParams & { accountId: string }
   ): Promise<ApiResponse<ProfileHistoryCollectionResult>> => {
     try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
       const result = await recNetService.collectProfileHistoryManifest(
         params.accountId,
         params.token
@@ -485,6 +502,10 @@ ipcMain.handle(
     params: BuildDownloadPreflightParams
   ): Promise<ApiResponse<DownloadPreflightSummary>> => {
     try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
       const result = await recNetService.buildDownloadPreflightSummary(
         params.accountId,
         params.downloadSources
@@ -503,6 +524,10 @@ ipcMain.handle(
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
       const result = await recNetService.downloadPhotos(
         params.accountId,
         params.token
@@ -521,6 +546,10 @@ ipcMain.handle(
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
       const result = await recNetService.downloadFeedPhotos(
         params.accountId,
         params.token
@@ -539,6 +568,10 @@ ipcMain.handle(
     params: ValidateProfileHistoryAccessParams & { accountId: string }
   ): Promise<ApiResponse<DownloadResult>> => {
     try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
       const result = await recNetService.downloadProfileHistory(
         params.accountId,
         params.token
@@ -575,6 +608,10 @@ ipcMain.handle(
     params: DownloadRoomPhotoBatchParams
   ): Promise<ApiResponse<RoomPhotoBatchResult>> => {
     try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
       const result = await recNetService.downloadRoomPhotoBatch(params);
       return { success: true, data: result };
     } catch (error) {
@@ -628,6 +665,37 @@ ipcMain.handle(
     return await recNetService.updateSettings(settings);
   }
 );
+
+ipcMain.handle(
+  'library-move-start',
+  async (
+    _event: IpcMainInvokeEvent,
+    dest: string
+  ): Promise<ApiResponse<LibraryMoveResult>> => {
+    try {
+      const result = await recNetService.moveLibraryTo(dest, progress => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          return;
+        }
+        mainWindow.webContents.send('library-move-progress', progress);
+      });
+      if (result.success) {
+        return { success: true, data: result };
+      }
+      return {
+        success: false,
+        error: result.error ?? 'Library move failed.',
+        data: result,
+      };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
+
+ipcMain.handle('library-move-cancel', (): boolean => {
+  return recNetService.cancelLibraryMove();
+});
 
 // Progress tracking
 ipcMain.handle('get-progress', async (): Promise<Progress> => {
@@ -730,6 +798,10 @@ ipcMain.handle(
     accountId: string
   ): Promise<ApiResponse<{ filesRemoved: number }>> => {
     try {
+      const outputErr = await getOutputWriteBlockedError();
+      if (outputErr) {
+        return { success: false, error: outputErr };
+      }
       const result = await recNetService.clearAccountData(accountId);
       return { success: true, data: result };
     } catch (error) {
@@ -747,7 +819,11 @@ ipcMain.handle(
   ): Promise<ApiResponse<Photo[]>> => {
     try {
       const settings = await recNetService.getSettings();
-      const accountDir = path.join(settings.outputRoot, accountId);
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
+      const accountDir = path.join(root, accountId);
       const jsonPath = path.join(accountDir, `${accountId}_photos.json`);
 
       if (!(await fs.pathExists(jsonPath))) {
@@ -823,7 +899,11 @@ ipcMain.handle(
   ): Promise<ApiResponse<Photo[]>> => {
     try {
       const settings = await recNetService.getSettings();
-      const accountDir = path.join(settings.outputRoot, accountId);
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
+      const accountDir = path.join(root, accountId);
       const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
       if (!(await fs.pathExists(feedJsonPath))) {
@@ -899,7 +979,11 @@ ipcMain.handle(
   ): Promise<ApiResponse<Photo[]>> => {
     try {
       const settings = await recNetService.getSettings();
-      const accountDir = path.join(settings.outputRoot, accountId);
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
+      const accountDir = path.join(root, accountId);
       const profileHistoryJsonPath = path.join(
         accountDir,
         `${accountId}_profile_history.json`
@@ -995,7 +1079,11 @@ ipcMain.handle(
   ): Promise<ApiResponse<Photo[]>> => {
     try {
       const settings = await recNetService.getSettings();
-      const roomDir = path.join(settings.outputRoot, 'rooms', roomId);
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
+      const roomDir = path.join(root, 'rooms', roomId);
       const jsonPath = path.join(roomDir, `${roomId}_photos.json`);
 
       if (!(await fs.pathExists(jsonPath))) {
@@ -1041,8 +1129,12 @@ ipcMain.handle(
   ): Promise<ApiResponse<PlayerResult[]>> => {
     try {
       const settings = await recNetService.getSettings();
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
       const jsonPath = path.join(
-        settings.outputRoot,
+        root,
         'rooms',
         roomId,
         `${roomId}_accounts.json`
@@ -1068,8 +1160,12 @@ ipcMain.handle(
   ): Promise<ApiResponse<RoomDto[]>> => {
     try {
       const settings = await recNetService.getSettings();
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
       const jsonPath = path.join(
-        settings.outputRoot,
+        root,
         'rooms',
         roomId,
         `${roomId}_rooms.json`
@@ -1095,8 +1191,12 @@ ipcMain.handle(
   ): Promise<ApiResponse<EventDto[]>> => {
     try {
       const settings = await recNetService.getSettings();
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
       const jsonPath = path.join(
-        settings.outputRoot,
+        root,
         'rooms',
         roomId,
         `${roomId}_events.json`
@@ -1122,8 +1222,12 @@ ipcMain.handle(
   ): Promise<ApiResponse<ImageCommentDto[]>> => {
     try {
       const settings = await recNetService.getSettings();
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
       const jsonPath = path.join(
-        settings.outputRoot,
+        root,
         'rooms',
         roomId,
         `${roomId}_image_comments.json`
@@ -1151,7 +1255,11 @@ ipcMain.handle(
   ): Promise<ApiResponse<PlayerResult[]>> => {
     try {
       const settings = await recNetService.getSettings();
-      const accountDir = path.join(settings.outputRoot, accountId);
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
+      const accountDir = path.join(root, accountId);
       const accountsJsonPath = path.join(
         accountDir,
         `${accountId}_accounts.json`
@@ -1183,7 +1291,11 @@ ipcMain.handle(
   ): Promise<ApiResponse<RoomDto[]>> => {
     try {
       const settings = await recNetService.getSettings();
-      const accountDir = path.join(settings.outputRoot, accountId);
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
+      const accountDir = path.join(root, accountId);
       const roomsJsonPath = path.join(accountDir, `${accountId}_rooms.json`);
 
       if (await fs.pathExists(roomsJsonPath)) {
@@ -1209,7 +1321,11 @@ ipcMain.handle(
   ): Promise<ApiResponse<EventDto[]>> => {
     try {
       const settings = await recNetService.getSettings();
-      const accountDir = path.join(settings.outputRoot, accountId);
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
+      const accountDir = path.join(root, accountId);
       const eventsJsonPath = path.join(accountDir, `${accountId}_events.json`);
 
       if (await fs.pathExists(eventsJsonPath)) {
@@ -1235,7 +1351,11 @@ ipcMain.handle(
   ): Promise<ApiResponse<ImageCommentDto[]>> => {
     try {
       const settings = await recNetService.getSettings();
-      const accountDir = path.join(settings.outputRoot, accountId);
+      const root = (settings.resolvedOutputRoot ?? '').trim();
+      if (!root) {
+        return { success: true, data: [] };
+      }
+      const accountDir = path.join(root, accountId);
       const imageCommentsJsonPath = path.join(
         accountDir,
         `${accountId}_image_comments.json`
