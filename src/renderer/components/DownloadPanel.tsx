@@ -45,6 +45,24 @@ import {
 } from '../components/ui/select';
 import type { RoomPhotoSort } from '../../shared/types';
 
+/** Matches main-process absolute path rule without Node `path` in the renderer. */
+function isProbablyAbsoluteSavePath(value: string): boolean {
+  const t = value.trim();
+  if (!t) {
+    return false;
+  }
+  if (t.startsWith('\\\\')) {
+    return true;
+  }
+  if (/^[A-Za-z]:[\\/]/.test(t)) {
+    return true;
+  }
+  if (t.startsWith('/')) {
+    return true;
+  }
+  return false;
+}
+
 interface DownloadDraft {
   username: string;
   roomName: string;
@@ -498,11 +516,16 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
     );
   };
 
+  const outputSavePathAllowed =
+    filePath.trim() !== '' &&
+    (settings.legacyRelativeOutputAllowed === true ||
+      isProbablyAbsoluteSavePath(filePath));
+
   const isFormValid =
     (libraryMode === 'room'
       ? roomName.trim() !== ''
       : username.trim() !== '') &&
-    filePath.trim() !== '' &&
+    outputSavePathAllowed &&
     libraryMode !== 'event' &&
     (libraryMode === 'room' || hasSelectedDownloadSources(downloadSources));
   const profileHistoryEnabled = tokenStatus === 'verified';
@@ -770,8 +793,50 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              All photos and data are saved to the selected folder.
+              All photos and data are saved to the selected folder. New installs
+              require an absolute path—use Browse or paste a full path (for
+              example <span className="font-mono">D:\Photos\RecRoom</span>).
             </p>
+            {filePath.trim() === settings.outputRoot.trim() &&
+            (settings.resolvedOutputRoot ?? '').trim() !== '' ? (
+              <div className="space-y-1 rounded-md border bg-muted/30 px-2 py-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  On disk (resolved location)
+                </p>
+                <p className="break-all font-mono text-xs">
+                  {settings.resolvedOutputRoot}
+                </p>
+              </div>
+            ) : filePath.trim() !== '' &&
+              filePath.trim() !== settings.outputRoot.trim() &&
+              isProbablyAbsoluteSavePath(filePath) ? (
+              <div className="space-y-1 rounded-md border bg-muted/30 px-2 py-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Will save under (after you start download)
+                </p>
+                <p className="break-all font-mono text-xs">{filePath.trim()}</p>
+              </div>
+            ) : filePath.trim() !== '' &&
+              !settings.legacyRelativeOutputAllowed &&
+              !isProbablyAbsoluteSavePath(filePath) ? (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                This path looks relative. Use Browse or enter a full absolute
+                path, unless you upgraded from an older version that already uses
+                a relative output folder.
+              </p>
+            ) : !filePath.trim() ? (
+              <p className="text-xs text-muted-foreground">
+                Choose an output folder to continue.
+              </p>
+            ) : null}
+            {settings.legacyDefaultRelativeOutputWarning && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+                The default folder name <span className="font-mono">output</span>{' '}
+                is relative to where the app was launched from, which can change.
+                Consider moving your library to a permanent folder (Browse) under
+                Documents or Pictures.
+              </div>
+            )}
           </div>
 
           {folderError && (
@@ -905,8 +970,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
             aria-hidden={isFormValid}
           >
             {libraryMode === 'room'
-              ? 'Enter a room name and choose a save folder to start.'
-              : 'Enter a username, choose a save folder, and select at least one download type to start.'}
+              ? !outputSavePathAllowed
+                ? 'Enter a room name and set an absolute save folder (Browse) to start.'
+                : 'Enter a room name and choose a save folder to start.'
+              : !outputSavePathAllowed
+                ? 'Enter a username, set an absolute save folder (Browse), and select at least one download type to start.'
+                : 'Enter a username, choose a save folder, and select at least one download type to start.'}
           </p>
 
           <div className="flex gap-2">

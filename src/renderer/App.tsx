@@ -58,7 +58,8 @@ const CLEAN_DOWNLOAD_FOLLOW_UP =
 
 function App() {
   const [settings, setSettings] = useState<RecNetSettings>({
-    outputRoot: 'output',
+    outputRoot: '',
+    legacyRelativeOutputAllowed: false,
     cdnBase: DEFAULT_CDN_BASE,
     interPageDelayMs: 100,
     maxConcurrentDownloads: 3,
@@ -474,8 +475,10 @@ function App() {
     try {
       // Update settings with new file path
       if (window.electronAPI) {
-        await window.electronAPI.updateSettings({ outputRoot: filePath });
-        setSettings(prev => ({ ...prev, outputRoot: filePath }));
+        const updatedSettings = await window.electronAPI.updateSettings({
+          outputRoot: filePath,
+        });
+        setSettings(updatedSettings);
         addLog(`Output path set to: ${filePath}`, 'info');
 
         if (libraryMode === 'room') {
@@ -1022,9 +1025,16 @@ function App() {
     setDebugMenuOpen(true);
   }, []);
 
+  const effectiveOutputExplorerPath =
+    (settings.resolvedOutputRoot ?? '').trim() ||
+    settings.outputRoot.trim();
+
   const handleRevealOutputFolder = useCallback(() => {
-    void handleOpenPathInExplorer(settings.outputRoot);
-  }, [handleOpenPathInExplorer, settings.outputRoot]);
+    if (!effectiveOutputExplorerPath) {
+      return;
+    }
+    void handleOpenPathInExplorer(effectiveOutputExplorerPath);
+  }, [handleOpenPathInExplorer, effectiveOutputExplorerPath]);
 
   const handlePhotosLoadError = useCallback((message: string) => {
     setActiveIncident(createUserIncident('photos', message));
@@ -1109,7 +1119,7 @@ function App() {
           isRetryingDownload={isDownloading}
           onOpenDownloadPanel={() => setDownloadPanelOpen(true)}
           onOpenOutputFolder={handleOpenPathInExplorer}
-          outputRoot={settings.outputRoot}
+          outputExplorerPath={effectiveOutputExplorerPath}
           libraryMode={libraryMode}
           onLibraryModeChange={setLibraryMode}
         />
@@ -1117,7 +1127,7 @@ function App() {
         <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden pt-14">
           <ErrorRecoveryBanner
             incident={activeIncident}
-            outputRoot={settings.outputRoot}
+            outputExplorerPath={effectiveOutputExplorerPath}
             onDismiss={dismissIncident}
             onRetryDownload={handleRetryDownload}
             canRetryDownload={canRetryDownload}
@@ -1149,7 +1159,7 @@ function App() {
               open={statsDialogOpen}
               onOpenChange={setStatsDialogOpen}
               accountId={currentAccountId}
-              filePath={settings.outputRoot}
+              filePath={effectiveOutputExplorerPath}
             />
           </ErrorBoundary>
 
@@ -1181,7 +1191,7 @@ function App() {
             )}
             <ErrorBoundary sectionName="Photo viewer">
               <PhotoViewer
-                filePath={settings.outputRoot}
+                filePath={effectiveOutputExplorerPath}
                 accountId={
                   libraryMode === 'user' && isDownloading
                     ? currentAccountId

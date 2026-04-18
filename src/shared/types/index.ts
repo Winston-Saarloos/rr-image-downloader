@@ -9,6 +9,23 @@ export type { EventDto, ImageDto, ImageCommentDto, PlayerResult, RoomDto };
 
 export interface RecNetSettings {
   outputRoot: string;
+  /**
+   * When false (new installs), downloads require a non-empty absolute `outputRoot`.
+   * When true (legacy settings files without this key), relative `outputRoot` is allowed.
+   */
+  legacyRelativeOutputAllowed: boolean;
+  /**
+   * Absolute path where files are written (computed in main `getSettings` from `outputRoot` and cwd).
+   */
+  resolvedOutputRoot?: string;
+  /**
+   * True when the legacy default relative folder name `output` is in use; informational for UI.
+   */
+  legacyDefaultRelativeOutputWarning?: boolean;
+  /**
+   * True when output is configured so downloads may start; set by main `getSettings` only.
+   */
+  outputPathConfiguredForDownload?: boolean;
   /** Image CDN base URL (image name is appended automatically). */
   cdnBase: string;
   interPageDelayMs?: number;

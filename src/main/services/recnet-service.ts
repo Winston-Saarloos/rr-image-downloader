@@ -41,6 +41,47 @@ import { PhotosController } from './recnet/photos-controller';
 import { RoomsController } from './recnet/rooms-controller';
 import { Semaphore } from '../utils/semaphore';
 
+/** Absolute directory used for reads/writes; empty if `outputRoot` is unset. */
+export function computeResolvedOutputRoot(outputRoot: string): string {
+  const t = typeof outputRoot === 'string' ? outputRoot.trim() : '';
+  if (!t) {
+    return '';
+  }
+  return path.isAbsolute(t) ? t : path.resolve(process.cwd(), t);
+}
+
+export function isOutputRootConfiguredForWrites(
+  outputRoot: string,
+  legacyRelativeOutputAllowed: boolean
+): boolean {
+  const root = typeof outputRoot === 'string' ? outputRoot.trim() : '';
+  if (!root) {
+    return false;
+  }
+  if (legacyRelativeOutputAllowed) {
+    return true;
+  }
+  return path.isAbsolute(root);
+}
+
+export function describeOutputConfigurationError(settings: {
+  outputRoot: string;
+  legacyRelativeOutputAllowed: boolean;
+}): string | null {
+  if (
+    isOutputRootConfiguredForWrites(
+      settings.outputRoot,
+      settings.legacyRelativeOutputAllowed
+    )
+  ) {
+    return null;
+  }
+  if (!settings.outputRoot.trim()) {
+    return 'Choose an output folder before downloading or saving data.';
+  }
+  return 'Choose an absolute output folder path (use Browse) before downloading or saving data.';
+}
+
 interface CurrentOperation {
   cancelled: boolean;
   controller: AbortController;
@@ -119,7 +160,8 @@ type DownloadBatchTrace = {
 };
 
 const DEFAULT_SETTINGS: RecNetSettings = {
-  outputRoot: 'output',
+  outputRoot: '',
+  legacyRelativeOutputAllowed: false,
   cdnBase: DEFAULT_CDN_BASE,
   interPageDelayMs: 100,
   maxConcurrentDownloads: 3,
@@ -139,7 +181,11 @@ const IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS = 250;
 
 type PersistedRecNetSettings = Omit<
   RecNetSettings,
-  'interPageDelayMs' | 'maxConcurrentDownloads'
+  | 'interPageDelayMs'
+  | 'maxConcurrentDownloads'
+  | 'resolvedOutputRoot'
+  | 'legacyDefaultRelativeOutputWarning'
+  | 'outputPathConfiguredForDownload'
 >;
 
 function normalizeRecNetSettings(input: unknown): RecNetSettings {
@@ -166,12 +212,21 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
       ? Math.floor(maxRaw)
       : undefined;
 
+  const outputRoot =
+    typeof raw.outputRoot === 'string' ? raw.outputRoot.trim() : '';
+
+  const legacyRelativeOutputAllowed =
+    typeof raw.legacyRelativeOutputAllowed === 'boolean'
+      ? raw.legacyRelativeOutputAllowed
+      : DEFAULT_SETTINGS.legacyRelativeOutputAllowed;
+
   return {
-    outputRoot:
-      typeof raw.outputRoot === 'string' && raw.outputRoot.length > 0
-        ? raw.outputRoot
-        : DEFAULT_SETTINGS.outputRoot,
-    cdnBase: DEFAULT_SETTINGS.cdnBase,
+    outputRoot,
+    legacyRelativeOutputAllowed,
+    cdnBase:
+      typeof raw.cdnBase === 'string' && raw.cdnBase.length > 0
+        ? raw.cdnBase
+        : DEFAULT_SETTINGS.cdnBase,
     interPageDelayMs,
     maxPhotosToDownload,
     maxConcurrentDownloads,
@@ -190,6 +245,10 @@ function extractPersistedRecNetSettings(
     outputRoot:
       typeof raw.outputRoot === 'string' && raw.outputRoot.length > 0
         ? raw.outputRoot
+        : undefined,
+    legacyRelativeOutputAllowed:
+      typeof raw.legacyRelativeOutputAllowed === 'boolean'
+        ? raw.legacyRelativeOutputAllowed
         : undefined,
     cdnBase:
       typeof raw.cdnBase === 'string' && raw.cdnBase.length > 0
@@ -269,14 +328,27 @@ export class RecNetService extends EventEmitter {
     try {
       if (await fs.pathExists(this.settingsPath)) {
         const savedSettings = await fs.readJson(this.settingsPath);
+        const savedRecord = savedSettings as Record<string, unknown>;
+        const legacyFromDisk =
+          typeof savedRecord.legacyRelativeOutputAllowed === 'boolean'
+            ? savedRecord.legacyRelativeOutputAllowed
+            : true;
+
         this.settings = normalizeRecNetSettings({
           ...DEFAULT_SETTINGS,
           ...extractPersistedRecNetSettings(savedSettings),
+          legacyRelativeOutputAllowed: legacyFromDisk,
         });
 
         if (hasLegacyRuntimeOnlySettings(savedSettings)) {
           await this.saveSettings();
         }
+      } else {
+        this.settings = normalizeRecNetSettings({
+          ...DEFAULT_SETTINGS,
+          outputRoot: '',
+          legacyRelativeOutputAllowed: false,
+        });
       }
     } catch (error) {
       console.log('Failed to load settings:', (error as Error).message);
@@ -298,8 +370,16 @@ export class RecNetService extends EventEmitter {
     }
   }
 
+  private getResolvedOutputRoot(): string {
+    return computeResolvedOutputRoot(this.settings.outputRoot);
+  }
+
   private ensureOutputDirectory(): void {
-    fs.ensureDirSync(this.settings.outputRoot);
+    const resolved = this.getResolvedOutputRoot();
+    if (!resolved) {
+      return;
+    }
+    fs.ensureDirSync(resolved);
   }
 
   private syncHttpClientSettings(): void {
@@ -309,28 +389,71 @@ export class RecNetService extends EventEmitter {
   private getPersistedSettingsForDisk(): PersistedRecNetSettings {
     return {
       outputRoot: this.settings.outputRoot,
+      legacyRelativeOutputAllowed: this.settings.legacyRelativeOutputAllowed,
       cdnBase: this.settings.cdnBase,
       maxPhotosToDownload: this.settings.maxPhotosToDownload,
     };
   }
 
+  async getOutputConfigurationError(): Promise<string | null> {
+    await this.ensureSettingsLoaded();
+    return describeOutputConfigurationError(this.settings);
+  }
+
   async getSettings(): Promise<RecNetSettings> {
     await this.ensureSettingsLoaded();
-    return { ...this.settings };
+    const resolvedOutputRoot = computeResolvedOutputRoot(
+      this.settings.outputRoot
+    );
+    const legacyDefaultRelativeOutputWarning =
+      this.settings.legacyRelativeOutputAllowed &&
+      this.settings.outputRoot === 'output';
+    const outputPathConfiguredForDownload = isOutputRootConfiguredForWrites(
+      this.settings.outputRoot,
+      this.settings.legacyRelativeOutputAllowed
+    );
+    return {
+      ...this.settings,
+      resolvedOutputRoot,
+      legacyDefaultRelativeOutputWarning,
+      outputPathConfiguredForDownload,
+    };
   }
 
   async updateSettings(
     newSettings: Partial<RecNetSettings>
   ): Promise<RecNetSettings> {
     await this.ensureSettingsLoaded();
+    const {
+      resolvedOutputRoot,
+      legacyDefaultRelativeOutputWarning,
+      outputPathConfiguredForDownload,
+      ...rest
+    } = newSettings;
+    void resolvedOutputRoot;
+    void legacyDefaultRelativeOutputWarning;
+    void outputPathConfiguredForDownload;
+
     this.settings = normalizeRecNetSettings({
       ...this.settings,
-      ...newSettings,
+      ...rest,
     });
+
+    if (
+      rest.outputRoot !== undefined &&
+      this.settings.outputRoot.trim() !== '' &&
+      path.isAbsolute(this.settings.outputRoot.trim())
+    ) {
+      this.settings = {
+        ...this.settings,
+        legacyRelativeOutputAllowed: false,
+      };
+    }
+
     this.syncHttpClientSettings();
     this.ensureOutputDirectory();
     await this.saveSettings();
-    return this.settings;
+    return this.getSettings();
   }
 
   getProgress(): Progress {
@@ -513,7 +636,7 @@ export class RecNetService extends EventEmitter {
       const iterationDetails: IterationDetail[] = [];
 
       // Create account-specific directory
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       console.log(`Using output root: ${this.settings.outputRoot}`);
       console.log(`Creating account directory: ${accountDir}`);
       await fs.ensureDir(accountDir);
@@ -528,7 +651,7 @@ export class RecNetService extends EventEmitter {
 
       // Check for old file in root directory and migrate it
       const oldJsonPath = path.join(
-        this.settings.outputRoot,
+        this.getResolvedOutputRoot(),
         `${accountId}_photos.json`
       );
       if (await fs.pathExists(oldJsonPath)) {
@@ -851,7 +974,7 @@ export class RecNetService extends EventEmitter {
         }
       );
 
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       console.log(`Creating account directory for feed: ${accountDir}`);
       await fs.ensureDir(accountDir);
       console.log(`Account directory for feed created successfully`);
@@ -864,7 +987,7 @@ export class RecNetService extends EventEmitter {
 
       // Check for old feed file in root directory and migrate it
       const oldFeedJsonPath = path.join(
-        this.settings.outputRoot,
+        this.getResolvedOutputRoot(),
         `${accountId}_feed.json`
       );
       if (await fs.pathExists(oldFeedJsonPath)) {
@@ -1157,7 +1280,7 @@ export class RecNetService extends EventEmitter {
         0,
         0
       );
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       const jsonPath = path.join(accountDir, `${accountId}_photos.json`);
 
       console.log(`Looking for photos metadata at: ${jsonPath}`);
@@ -1427,7 +1550,7 @@ export class RecNetService extends EventEmitter {
         0,
         0
       );
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
       if (!(await fs.pathExists(feedJsonPath))) {
@@ -1764,7 +1887,7 @@ export class RecNetService extends EventEmitter {
         );
       }
 
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       await fs.ensureDir(accountDir);
 
       const manifestPath = path.join(
@@ -1859,7 +1982,7 @@ export class RecNetService extends EventEmitter {
         );
       }
 
-      const accountDir = path.join(this.settings.outputRoot, accountId);
+      const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
       await fs.ensureDir(accountDir);
 
       const manifestPath = path.join(
@@ -2671,7 +2794,7 @@ export class RecNetService extends EventEmitter {
   }
 
   private getRoomsRoot(): string {
-    return path.join(this.settings.outputRoot, 'rooms');
+    return path.join(this.getResolvedOutputRoot(), 'rooms');
   }
 
   private getRoomDirectory(roomId: string): string {
@@ -3577,7 +3700,7 @@ export class RecNetService extends EventEmitter {
       );
 
       const accountDir =
-        storageContext?.directory ?? path.join(this.settings.outputRoot, accountId);
+        storageContext?.directory ?? path.join(this.getResolvedOutputRoot(), accountId);
       const fileStem = storageContext?.fileStem ?? accountId;
       const shouldWriteOwnerMeta = storageContext?.writeOwnerMeta !== false;
       await fs.ensureDir(accountDir);
@@ -4052,7 +4175,7 @@ export class RecNetService extends EventEmitter {
     accountId: string,
     source: DownloadSource
   ): Promise<DownloadPreflightSourceSummary> {
-    const accountDir = path.join(this.settings.outputRoot, accountId);
+    const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
 
     if (source === 'user-photos') {
       const metadataPath = path.join(accountDir, `${accountId}_photos.json`);
@@ -4628,7 +4751,7 @@ export class RecNetService extends EventEmitter {
     await this.ensureSettingsLoaded();
     let removedAccountDirectories = 0;
     let removedLegacyFiles = 0;
-    const currentOutputRoot = this.settings.outputRoot;
+    const currentOutputRoot = this.getResolvedOutputRoot();
 
     try {
       if (await fs.pathExists(currentOutputRoot)) {
@@ -4696,7 +4819,7 @@ export class RecNetService extends EventEmitter {
   }
   async clearAccountData(accountId: string): Promise<{ filesRemoved: number }> {
     await this.ensureSettingsLoaded();
-    const accountDir = path.join(this.settings.outputRoot, accountId);
+    const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
     const photosJsonPath = path.join(accountDir, `${accountId}_photos.json`);
     const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
 
@@ -4765,12 +4888,12 @@ export class RecNetService extends EventEmitter {
 
     try {
       // Ensure output directory exists
-      if (!(await fs.pathExists(this.settings.outputRoot))) {
+      if (!(await fs.pathExists(this.getResolvedOutputRoot()))) {
         return accounts;
       }
 
       // Read all directories in output root
-      const entries = await fs.readdir(this.settings.outputRoot, {
+      const entries = await fs.readdir(this.getResolvedOutputRoot(), {
         withFileTypes: true,
       });
 
@@ -4780,7 +4903,7 @@ export class RecNetService extends EventEmitter {
         }
 
         const accountId = entry.name;
-        const accountDir = path.join(this.settings.outputRoot, accountId);
+        const accountDir = path.join(this.getResolvedOutputRoot(), accountId);
         const photosJsonPath = path.join(
           accountDir,
           `${accountId}_photos.json`

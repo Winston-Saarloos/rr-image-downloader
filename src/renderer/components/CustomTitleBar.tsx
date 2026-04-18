@@ -49,7 +49,8 @@ interface CustomTitleBarProps {
   isRetryingDownload?: boolean;
   onOpenDownloadPanel?: () => void;
   onOpenOutputFolder?: (folderPath: string) => void | Promise<void>;
-  outputRoot: string;
+  /** Absolute path to open in Explorer (resolved when output root is relative). */
+  outputExplorerPath: string;
   libraryMode: LibraryMode;
   onLibraryModeChange: (mode: LibraryMode) => void;
 }
@@ -71,7 +72,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
   isRetryingDownload,
   onOpenDownloadPanel,
   onOpenOutputFolder,
-  outputRoot,
+  outputExplorerPath,
   libraryMode,
   onLibraryModeChange,
 }) => {
@@ -260,7 +261,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
                 isRetryingDownload={isRetryingDownload}
                 onOpenDownloadPanel={onOpenDownloadPanel}
                 onOpenOutputFolder={onOpenOutputFolder}
-                outputRoot={outputRoot}
+                outputExplorerPath={outputExplorerPath}
               />
             </div>
           </div>

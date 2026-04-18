@@ -118,6 +118,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <FolderOpen className="h-4 w-4" />
             </Button>
           </div>
+          {(settings.resolvedOutputRoot ?? '').trim() !== '' && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">
+                Files are saved under (resolved path)
+              </p>
+              <p className="break-all rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs">
+                {settings.resolvedOutputRoot}
+              </p>
+            </div>
+          )}
+          {settings.legacyDefaultRelativeOutputWarning && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+              You are using the default relative folder name{' '}
+              <span className="font-mono">output</span>. Its real location depends
+              on how the app was started. Choose a permanent folder (for example
+              under Documents or Pictures) with Browse so your photos always save
+              where you expect.
+            </div>
+          )}
         </div>
 
         {/* Delay Between Pages */}
