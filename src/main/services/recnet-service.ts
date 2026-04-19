@@ -5440,8 +5440,9 @@ export class RecNetService extends EventEmitter {
           downloadedPhotoCount,
           hasPhotos: normalizedEventPhotos.length > 0,
           isDownloaded:
-            normalizedEventPhotos.length > 0 &&
-            downloadedPhotoCount >= normalizedEventPhotos.length,
+            normalizedEventPhotos.length === 0
+              ? true
+              : downloadedPhotoCount >= normalizedEventPhotos.length,
         });
         const availableEvent = this.eventToAvailableEvent(event, meta);
         if (localImagePath) {

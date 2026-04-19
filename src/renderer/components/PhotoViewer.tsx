@@ -1173,11 +1173,15 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                           <p className="truncate text-sm font-semibold">
                             {event.name}
                           </p>
-                          <p className="text-xs text-muted-foreground">
-                            {event.isDownloaded
-                              ? 'Album downloaded'
-                              : 'Photos not downloaded'}
-                          </p>
+                          {event.isDownloaded && event.photoCount > 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              Album downloaded
+                            </p>
+                          ) : !event.isDownloaded ? (
+                            <p className="text-xs text-muted-foreground">
+                              Photos not downloaded
+                            </p>
+                          ) : null}
                         </div>
                         <div className="grid grid-cols-1 gap-1 text-xs text-muted-foreground">
                           <span className="flex items-center gap-1">
@@ -1190,9 +1194,11 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                           </span>
                           <span className="flex items-center gap-1">
                             <ImageIcon className="h-3.5 w-3.5" />
-                            {event.photoCount > 0
-                              ? `${event.downloadedPhotoCount}/${event.photoCount} photos`
-                              : 'Photo count unknown'}
+                            {!event.isDownloaded && event.photoCount === 0
+                              ? 'Photo count unknown'
+                              : event.photoCount > 0
+                                ? `${event.downloadedPhotoCount}/${event.photoCount} photos`
+                                : '0 photos'}
                           </span>
                         </div>
                         {!event.isDownloaded && (

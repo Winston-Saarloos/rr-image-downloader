@@ -387,4 +387,49 @@ describe('RecNetService - Room Photo Batches', () => {
     expect(photosForBulk.some(p => p.Id === 'photo-1')).toBe(true);
     expect(photosForBulk.some(p => p.Id === 'stm-event-bulk-context')).toBe(true);
   });
+
+  it('marks empty event albums as downloaded when the API returns no photos', async () => {
+    const event = createEvent();
+    const eventDir = path.join(outputRoot, 'events', 'creator-1', 'event-1');
+    const photosDir = path.join(eventDir, 'photos');
+    const manifestPath = path.join(outputRoot, 'events', 'creator-1', 'events.json');
+
+    (mockedFs.pathExists as jest.Mock).mockImplementation(async filePath => {
+      return filePath === manifestPath || filePath === photosDir;
+    });
+    (mockedFs.readJson as jest.Mock).mockImplementation(async filePath => {
+      if (filePath === manifestPath) {
+        return [event];
+      }
+      return null;
+    });
+    (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+    mockPhotosController.fetchPlayerEventPhotos.mockResolvedValueOnce([]);
+
+    const result = await service.downloadEventPhotos({
+      creatorAccountId: 'creator-1',
+      eventIds: ['event-1'],
+    });
+
+    expect(mockPhotosController.fetchPlayerEventPhotos).toHaveBeenCalledWith(
+      'event-1',
+      { skip: 0, take: 100 },
+      undefined,
+      expect.any(Object)
+    );
+    expect(mockedFs.writeJson).toHaveBeenCalledWith(
+      path.join(eventDir, 'event-1_photos.json'),
+      [],
+      { spaces: 2 }
+    );
+    expect(result.downloadedEvents[0]).toEqual(
+      expect.objectContaining({
+        eventId: 'event-1',
+        photoCount: 0,
+        downloadedPhotoCount: 0,
+        hasPhotos: false,
+        isDownloaded: true,
+      })
+    );
+  });
 });
