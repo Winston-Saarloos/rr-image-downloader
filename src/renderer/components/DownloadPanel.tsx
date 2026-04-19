@@ -311,6 +311,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       const result = await electronAPI?.discoverEventsForUsername?.({
         username: cleanedUsername,
         token: cleanToken(token) || undefined,
+        persist: false,
       });
       if (result?.success && result.data) {
         const cards = result.data.events;
@@ -1146,11 +1147,15 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                               <p className="truncate text-sm font-medium">
                                 {event.name}
                               </p>
-                              <p className="text-xs text-muted-foreground">
-                                {event.isDownloaded
-                                  ? 'Photos downloaded'
-                                  : 'Photos not downloaded'}
-                              </p>
+                              {event.isDownloaded && event.photoCount > 0 ? (
+                                <p className="text-xs text-muted-foreground">
+                                  Photos downloaded
+                                </p>
+                              ) : !event.isDownloaded ? (
+                                <p className="text-xs text-muted-foreground">
+                                  Photos not downloaded
+                                </p>
+                              ) : null}
                             </div>
                           </div>
                           <div className="grid grid-cols-1 gap-1 text-xs text-muted-foreground">
@@ -1164,9 +1169,11 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                             </span>
                             <span className="flex items-center gap-1">
                               <ImageIcon className="h-3.5 w-3.5" />
-                              {event.photoCount > 0
-                                ? `${event.downloadedPhotoCount}/${event.photoCount} photos`
-                                : 'Photo count unknown'}
+                              {!event.isDownloaded && event.photoCount === 0
+                                ? 'Photo count unknown'
+                                : event.photoCount > 0
+                                  ? `${event.downloadedPhotoCount}/${event.photoCount} photos`
+                                  : '0 photos'}
                             </span>
                           </div>
                           {!event.isDownloaded && (

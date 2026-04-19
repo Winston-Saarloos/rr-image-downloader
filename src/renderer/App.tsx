@@ -531,31 +531,39 @@ function App() {
             throw new Error('Choose at least one event to download.');
           }
 
-          let creatorAccountId = trimmedCreator || '';
-          if (!creatorAccountId) {
-            addLog(`Loading events for username: ${username}`, 'info');
-            const discoveryResult =
-              await window.electronAPI.discoverEventsForUsername({
-                username,
-                token: token.trim() || undefined,
-              });
-            if (!discoveryResult.success || !discoveryResult.data) {
-              throw new Error(
-                discoveryResult.error || 'Could not load events for this user'
-              );
-            }
-
-            creatorAccountId = discoveryResult.data.creatorAccountId;
-            addLog(
-              `Found ${discoveryResult.data.events.length} event(s) for @${discoveryResult.data.username}.`,
-              'success'
+          let usernameForDiscover = trimmedUser;
+          if (!usernameForDiscover && trimmedCreator) {
+            const lookup = await window.electronAPI.lookupAccountById(
+              trimmedCreator
             );
-          } else {
-            addLog(
-              `Downloading event photos (creator ${creatorAccountId})${trimmedUser ? ` for @${trimmedUser}` : ''}.`,
-              'info'
+            if (lookup.success && lookup.data?.username) {
+              usernameForDiscover = lookup.data.username.trim();
+            }
+          }
+          if (!usernameForDiscover) {
+            throw new Error(
+              'Could not resolve a username to save event metadata. Enter a username or try again.'
             );
           }
+
+          addLog(`Saving event list for @${usernameForDiscover}...`, 'info');
+          const discoveryResult =
+            await window.electronAPI.discoverEventsForUsername({
+              username: usernameForDiscover,
+              token: token.trim() || undefined,
+              persist: true,
+            });
+          if (!discoveryResult.success || !discoveryResult.data) {
+            throw new Error(
+              discoveryResult.error || 'Could not load events for this user'
+            );
+          }
+
+          const creatorAccountId = discoveryResult.data.creatorAccountId;
+          addLog(
+            `Found ${discoveryResult.data.events.length} event(s) for @${discoveryResult.data.username}.`,
+            'success'
+          );
 
           setCurrentEventCreatorId(creatorAccountId);
 
