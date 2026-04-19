@@ -87,6 +87,7 @@ export interface ElectronAPI {
   discoverEventsForUsername: (params: {
     username: string;
     token?: string;
+    persist?: boolean;
   }) => Promise<ApiResponse<EventDiscoveryResult>>;
   downloadEventPhotos: (params: {
     creatorAccountId: string;

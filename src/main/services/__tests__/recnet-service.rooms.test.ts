@@ -301,6 +301,33 @@ describe('RecNetService - Room Photo Batches', () => {
     );
   });
 
+  it('does not write creator event files when persist is false', async () => {
+    const event = { ...createEvent(), ImageName: 'null' };
+    jest.spyOn(service, 'lookupAccountByUsername').mockResolvedValue({
+      accountId: 'creator-1',
+      username: 'winston',
+      displayName: 'Winston',
+      profileImage: '',
+    } as any);
+    mockEventsController.fetchCreatorEvents
+      .mockResolvedValueOnce([event])
+      .mockResolvedValueOnce([]);
+
+    (mockedFs.writeJson as jest.Mock).mockClear();
+    (mockedFs.ensureDir as jest.Mock).mockClear();
+
+    const result = await service.discoverEventsForUsername(
+      'winston',
+      undefined,
+      { persist: false }
+    );
+
+    expect(result.creatorAccountId).toBe('creator-1');
+    expect(result.events).toHaveLength(1);
+    expect(mockedFs.ensureDir).not.toHaveBeenCalled();
+    expect(mockedFs.writeJson).not.toHaveBeenCalled();
+  });
+
   it('downloads selected event photos into event album folders', async () => {
     const event = createEvent();
     const eventDir = path.join(outputRoot, 'events', 'creator-1', 'event-1');

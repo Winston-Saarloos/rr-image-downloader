@@ -311,6 +311,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
       const result = await electronAPI?.discoverEventsForUsername?.({
         username: cleanedUsername,
         token: cleanToken(token) || undefined,
+        persist: false,
       });
       if (result?.success && result.data) {
         const cards = result.data.events;

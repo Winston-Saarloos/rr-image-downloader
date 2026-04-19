@@ -112,6 +112,7 @@ interface DownloadRoomPhotoBatchParams {
 interface DiscoverEventsForUsernameParams {
   username: string;
   token?: string;
+  persist?: boolean;
 }
 
 interface DownloadEventPhotosParams {
@@ -669,7 +670,8 @@ ipcMain.handle(
       }
       const result = await recNetService.discoverEventsForUsername(
         params.username,
-        params.token
+        params.token,
+        { persist: params.persist }
       );
       return { success: true, data: result };
     } catch (error) {

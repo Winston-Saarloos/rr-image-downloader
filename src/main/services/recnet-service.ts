@@ -4886,9 +4886,11 @@ export class RecNetService extends EventEmitter {
 
   async discoverEventsForUsername(
     username: string,
-    token?: string
+    token?: string,
+    options?: { persist?: boolean }
   ): Promise<EventDiscoveryResult> {
     await this.ensureSettingsLoaded();
+    const persist = options?.persist !== false;
     const cleanedUsername = username.trim();
     if (!cleanedUsername) {
       throw new Error('Username is required.');
@@ -4901,7 +4903,9 @@ export class RecNetService extends EventEmitter {
     }
 
     const creatorDir = this.getCreatorEventsDirectory(creatorAccountId);
-    await fs.ensureDir(creatorDir);
+    if (persist) {
+      await fs.ensureDir(creatorDir);
+    }
 
     const events: EventDto[] = [];
     let skip = 0;
@@ -4928,23 +4932,29 @@ export class RecNetService extends EventEmitter {
       return timeB - timeA;
     });
 
-    await fs.writeJson(path.join(creatorDir, 'events.json'), dedupedEvents, {
-      spaces: 2,
-    });
-    await fs.writeJson(
-      path.join(creatorDir, 'creator.json'),
-      this.normalizeAccounts([account as PlayerResult])[0],
-      { spaces: 2 }
-    );
+    if (persist) {
+      await fs.writeJson(path.join(creatorDir, 'events.json'), dedupedEvents, {
+        spaces: 2,
+      });
+      await fs.writeJson(
+        path.join(creatorDir, 'creator.json'),
+        this.normalizeAccounts([account as PlayerResult])[0],
+        { spaces: 2 }
+      );
+    }
 
     const availableEvents: AvailableEvent[] = [];
     for (const event of dedupedEvents) {
-      const eventDir = this.getEventDirectory(
-        creatorAccountId,
-        event.PlayerEventId
-      );
-      const meta = await this.writeEventFolderMeta(eventDir, event);
-      availableEvents.push(this.eventToAvailableEvent(event, meta));
+      if (persist) {
+        const eventDir = this.getEventDirectory(
+          creatorAccountId,
+          event.PlayerEventId
+        );
+        const meta = await this.writeEventFolderMeta(eventDir, event);
+        availableEvents.push(this.eventToAvailableEvent(event, meta));
+      } else {
+        availableEvents.push(this.eventToAvailableEvent(event, null));
+      }
     }
 
     return {
