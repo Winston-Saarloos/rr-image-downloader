@@ -64,6 +64,7 @@ interface PhotoViewerProps {
   onPhotosLoadError?: (message: string) => void;
   onPhotosLoadSuccess?: () => void;
   cdnBase?: string;
+  viewerOnlyMode?: boolean;
 }
 
 type PhotoSource = 'photos' | 'feed' | 'profile-history';
@@ -87,6 +88,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   onPhotosLoadError,
   onPhotosLoadSuccess,
   cdnBase = DEFAULT_CDN_BASE,
+  viewerOnlyMode = false,
 }) => {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1136,7 +1138,11 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
             </div>
           ) : availableEvents.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
-              <p>No event albums found. Download event photos to get started.</p>
+              <p>
+                {viewerOnlyMode
+                  ? 'No local event photo albums found.'
+                  : 'No event albums found. Download event photos to get started.'}
+              </p>
             </div>
           ) : (
             <div
@@ -1166,7 +1172,11 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                       onClick={() => handleEventOpen(event)}
                     >
                       <div className="aspect-video bg-muted">
-                        <EventCoverImage event={event} cdnBase={cdnBase} />
+                        <EventCoverImage
+                          event={event}
+                          cdnBase={cdnBase}
+                          allowRemoteFallback={!viewerOnlyMode}
+                        />
                       </div>
                       <div className="space-y-3 p-4">
                         <div className="min-w-0">
@@ -1201,7 +1211,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                                 : '0 photos'}
                           </span>
                         </div>
-                        {!event.isDownloaded && (
+                        {!viewerOnlyMode && !event.isDownloaded && (
                           <Button
                             size="sm"
                             variant="secondary"
@@ -1236,11 +1246,19 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           </div>
         ) : libraryMode === 'user' && !accountId && availableAccounts.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>No accounts with metadata found. Download photos to get started.</p>
+            <p>
+              {viewerOnlyMode
+                ? 'No local account photo libraries found.'
+                : 'No accounts with metadata found. Download photos to get started.'}
+            </p>
           </div>
         ) : libraryMode === 'room' && !roomId && availableRooms.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>No rooms with metadata found. Download room photos to get started.</p>
+            <p>
+              {viewerOnlyMode
+                ? 'No local room photo libraries found.'
+                : 'No rooms with metadata found. Download room photos to get started.'}
+            </p>
           </div>
         ) : loading ? (
           <div className="text-center py-12 text-muted-foreground">
@@ -1318,6 +1336,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
               accountMap={accountMap}
               eventMap={eventMap}
               cdnBase={cdnBase}
+              allowRemoteImages={!viewerOnlyMode}
               onScrollPositionChange={onScrollPositionChange}
               scrollContainerRef={activeScrollRef}
               accountId={accountId}
@@ -1336,6 +1355,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         eventMap={eventMap}
         cdnBase={cdnBase}
         imageComments={imageComments}
+        allowRemoteImages={!viewerOnlyMode}
       />
     </div>
   );

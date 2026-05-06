@@ -30,6 +30,7 @@ interface PhotoGridProps {
   onScrollPositionChange?: (scrollTop: number) => void;
   className?: string;
   accountId?: string;
+  allowRemoteImages?: boolean;
 }
 
 const PhotoGridComponent: React.FC<PhotoGridProps> = ({
@@ -46,10 +47,18 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   onScrollPositionChange,
   className = '',
   accountId,
+  allowRemoteImages = true,
 }) => {
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl, getPhotoEvent } =
-    usePhotoMetadata(roomMap, accountMap, eventMap, cdnBase);
+    usePhotoMetadata(
+      roomMap,
+      accountMap,
+      eventMap,
+      cdnBase,
+      undefined,
+      allowRemoteImages
+    );
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = scrollContainerRefProp ?? internalScrollRef;
   const [containerSize, setContainerSize] = useState({ width: 0, height: 700 });

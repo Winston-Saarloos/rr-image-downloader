@@ -39,6 +39,10 @@ import {
   buildDownloadProgressIncident,
   getDownloadProgressLogEntries,
 } from './utils/downloadProgressFeedback';
+import {
+  getViewerOnlyCutoffDate,
+  isViewerOnlyMode,
+} from '../shared/viewer-only-mode';
 
 interface DownloadRequestState {
   username: string;
@@ -62,11 +66,15 @@ interface PendingDownloadPreflight {
 const EMPTY_DOWNLOAD_STEP = 'Nothing to download';
 const CLEAN_DOWNLOAD_FOLLOW_UP =
   'If you take more photos in Rec Room, come back and run this download again. The app will only grab anything new.';
+const VIEWER_ONLY_RECHECK_MS = 60 * 60 * 1000;
 
 /** Set to true to allow starting a library move from the debug menu. */
 const LIBRARY_MOVE_ENABLED = false;
 
 function App() {
+  const [viewerOnlyMode, setViewerOnlyMode] = useState(() =>
+    isViewerOnlyMode()
+  );
   const [settings, setSettings] = useState<RecNetSettings>({
     outputRoot: '',
     cdnBase: DEFAULT_CDN_BASE,
@@ -138,6 +146,29 @@ function App() {
     loadSettings();
     setupProgressMonitoring();
   }, []);
+
+  useEffect(() => {
+    if (viewerOnlyMode) {
+      setDownloadPanelOpen(false);
+      setPendingPreflight(null);
+      if (isDownloading) {
+        void window.electronAPI?.cancelOperation?.();
+      }
+      return;
+    }
+
+    const delayMs = Math.min(
+      Math.max(getViewerOnlyCutoffDate().getTime() - Date.now(), 0),
+      VIEWER_ONLY_RECHECK_MS
+    );
+    const timeout = window.setTimeout(() => {
+      setViewerOnlyMode(isViewerOnlyMode());
+      setDownloadPanelOpen(false);
+      setPendingPreflight(null);
+    }, delayMs);
+
+    return () => window.clearTimeout(timeout);
+  }, [isDownloading, viewerOnlyMode]);
 
   useEffect(() => {
     if (progress.isRunning) {
@@ -372,7 +403,8 @@ function App() {
 
   const retryRequest = downloadDraft ?? lastDownloadRequest;
   const canRetryDownload = Boolean(
-    retryRequest?.filePath.trim() &&
+    !viewerOnlyMode &&
+      retryRequest?.filePath.trim() &&
       (() => {
         const r = retryRequest;
         if (!r) return false;
@@ -440,6 +472,10 @@ function App() {
     eventIds: string[] = [],
     knownCreatorAccountId?: string
   ) => {
+    if (viewerOnlyMode) {
+      return;
+    }
+
     const selectedSources = getSelectedDownloadSources(downloadSources);
     const trimmedUser = username.trim();
     const trimmedCreator = knownCreatorAccountId?.trim();
@@ -919,7 +955,7 @@ function App() {
   };
 
   const handleConfirmDownload = useCallback(async () => {
-    if (!pendingPreflight || !window.electronAPI) {
+    if (viewerOnlyMode || !pendingPreflight || !window.electronAPI) {
       return;
     }
 
@@ -1083,6 +1119,7 @@ function App() {
     pendingPreflight,
     reportDownloadResult,
     setCleanCompletionProgress,
+    viewerOnlyMode,
   ]);
 
   const handleSkipDownload = useCallback(() => {
@@ -1099,7 +1136,7 @@ function App() {
   }, [addLog, pendingPreflight, setCleanCompletionProgress]);
 
   const handleRetryDownload = useCallback(async () => {
-    if (!retryRequest || isDownloading) {
+    if (viewerOnlyMode || !retryRequest || isDownloading) {
       return;
     }
 
@@ -1114,23 +1151,26 @@ function App() {
       retryRequest.eventIds ?? [],
       retryRequest.knownCreatorAccountId
     );
-  }, [handleDownload, isDownloading, retryRequest]);
+  }, [handleDownload, isDownloading, retryRequest, viewerOnlyMode]);
 
   const openDownloadPanelPlain = useCallback(() => {
+    if (viewerOnlyMode) {
+      return;
+    }
     setEventDownloadPanelPrefill(null);
     setDownloadPanelOpen(true);
-  }, []);
+  }, [viewerOnlyMode]);
 
   const handleDownloadPanelOpenChange = useCallback((nextOpen: boolean) => {
-    setDownloadPanelOpen(nextOpen);
+    setDownloadPanelOpen(viewerOnlyMode ? false : nextOpen);
     if (!nextOpen) {
       setEventDownloadPanelPrefill(null);
     }
-  }, []);
+  }, [viewerOnlyMode]);
 
   const startQuickEventPhotoDownload = useCallback(
     async (intent: EventDownloadIntent) => {
-      if (!window.electronAPI || intent.kind !== 'eventAlbum') {
+      if (viewerOnlyMode || !window.electronAPI || intent.kind !== 'eventAlbum') {
         return;
       }
       const filePath = settings.outputRoot || '';
@@ -1159,11 +1199,15 @@ function App() {
       handleDownload,
       settings.outputPathConfiguredForDownload,
       settings.outputRoot,
+      viewerOnlyMode,
     ]
   );
 
   const handleOpenDownloadPanelFromViewer = useCallback(
     (intent?: EventDownloadIntent) => {
+      if (viewerOnlyMode) {
+        return;
+      }
       if (intent?.kind === 'eventAlbum') {
         if (settings.outputPathConfiguredForDownload) {
           void startQuickEventPhotoDownload(intent);
@@ -1183,6 +1227,7 @@ function App() {
       openDownloadPanelPlain,
       settings.outputPathConfiguredForDownload,
       startQuickEventPhotoDownload,
+      viewerOnlyMode,
     ]
   );
 
@@ -1294,7 +1339,7 @@ function App() {
         />
 
         <CustomTitleBar
-          onDownloadClick={openDownloadPanelPlain}
+          onDownloadClick={viewerOnlyMode ? undefined : openDownloadPanelPlain}
           onStatsClick={() => setStatsDialogOpen(true)}
           settings={settings}
           onUpdateSettings={updateSettings}
@@ -1305,16 +1350,17 @@ function App() {
           debugMenuOpen={debugMenuOpen}
           onDebugMenuOpenChange={setDebugMenuOpen}
           resultsScrollRequestId={resultsScrollRequestId}
-          onRetryDownload={handleRetryDownload}
-          canRetryDownload={canRetryDownload}
+          onRetryDownload={viewerOnlyMode ? undefined : handleRetryDownload}
+          canRetryDownload={!viewerOnlyMode && canRetryDownload}
           isRetryingDownload={isDownloading}
-          onOpenDownloadPanel={openDownloadPanelPlain}
+          onOpenDownloadPanel={viewerOnlyMode ? undefined : openDownloadPanelPlain}
           onOpenOutputFolder={handleOpenPathInExplorer}
           outputExplorerPath={effectiveOutputExplorerPath}
           libraryMode={libraryMode}
           onLibraryModeChange={setLibraryMode}
           libraryMoveEnabled={LIBRARY_MOVE_ENABLED}
           onOpenLibraryMove={() => setLibraryMoveDialogOpen(true)}
+          viewerOnlyMode={viewerOnlyMode}
         />
 
         <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden pt-14">
@@ -1322,34 +1368,36 @@ function App() {
             incident={activeIncident}
             outputExplorerPath={effectiveOutputExplorerPath}
             onDismiss={dismissIncident}
-            onRetryDownload={handleRetryDownload}
-            canRetryDownload={canRetryDownload}
+            onRetryDownload={viewerOnlyMode ? undefined : handleRetryDownload}
+            canRetryDownload={!viewerOnlyMode && canRetryDownload}
             isRetrying={isDownloading}
-            onOpenDownloadPanel={openDownloadPanelPlain}
+            onOpenDownloadPanel={viewerOnlyMode ? undefined : openDownloadPanelPlain}
             onOpenOperationResults={openOperationResults}
             onOpenPathInExplorer={handleOpenPathInExplorer}
           />
           {/* Header space removed - using custom title bar instead */}
 
           {/* Download Panel Modal */}
-          <ErrorBoundary sectionName="Download panel">
-            <DownloadPanel
-              open={downloadPanelOpen}
-              onOpenChange={handleDownloadPanelOpenChange}
-              onDownload={handleDownload}
-              onDraftChange={handleDownloadDraftChange}
-              onCancel={handleCancelDownload}
-              isDownloading={isDownloading || !!pendingPreflight}
-              showCancel={isDownloading}
-              settings={settings}
-              libraryMode={libraryMode}
-              onUpdateSettings={updateSettings}
-              eventDownloadPrefill={eventDownloadPanelPrefill}
-              onEventDownloadPrefillConsumed={() =>
-                setEventDownloadPanelPrefill(null)
-              }
-            />
-          </ErrorBoundary>
+          {!viewerOnlyMode && (
+            <ErrorBoundary sectionName="Download panel">
+              <DownloadPanel
+                open={downloadPanelOpen}
+                onOpenChange={handleDownloadPanelOpenChange}
+                onDownload={handleDownload}
+                onDraftChange={handleDownloadDraftChange}
+                onCancel={handleCancelDownload}
+                isDownloading={isDownloading || !!pendingPreflight}
+                showCancel={isDownloading}
+                settings={settings}
+                libraryMode={libraryMode}
+                onUpdateSettings={updateSettings}
+                eventDownloadPrefill={eventDownloadPanelPrefill}
+                onEventDownloadPrefillConsumed={() =>
+                  setEventDownloadPanelPrefill(null)
+                }
+              />
+            </ErrorBoundary>
+          )}
 
           {/* Stats Dialog */}
           <ErrorBoundary sectionName="Stats">
@@ -1368,12 +1416,18 @@ function App() {
                 progress={progress}
                 onClose={() => setShowProgressPanel(false)}
                 onOpenOperationResults={openOperationResults}
-                onOpenDownloadPanel={openDownloadPanelPlain}
+                onOpenDownloadPanel={
+                  viewerOnlyMode ? undefined : openDownloadPanelPlain
+                }
                 onCancelDownload={handleCancelDownload}
-                onConfirmDownload={handleConfirmDownload}
+                onConfirmDownload={
+                  viewerOnlyMode ? undefined : handleConfirmDownload
+                }
                 onSkipDownload={handleSkipDownload}
-                onRetryDownload={handleRetryDownload}
-                canRetryDownload={canRetryDownload}
+                onRetryDownload={
+                  viewerOnlyMode ? undefined : handleRetryDownload
+                }
+                canRetryDownload={!viewerOnlyMode && canRetryDownload}
                 isRetrying={isDownloading}
               />
             </div>
@@ -1413,11 +1467,16 @@ function App() {
                 scrollContainerRef={photoScrollRef}
                 headerMode={headerMode}
                 onOpenActivityMenu={handleOpenActivityMenu}
-                onOpenDownloadPanel={handleOpenDownloadPanelFromViewer}
+                onOpenDownloadPanel={
+                  viewerOnlyMode
+                    ? undefined
+                    : handleOpenDownloadPanelFromViewer
+                }
                 onRevealOutputFolder={handleRevealOutputFolder}
                 onPhotosLoadError={handlePhotosLoadError}
                 onPhotosLoadSuccess={clearPhotosIncident}
                 cdnBase={settings.cdnBase}
+                viewerOnlyMode={viewerOnlyMode}
               />
             </ErrorBoundary>
           </div>

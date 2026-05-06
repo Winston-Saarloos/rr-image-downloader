@@ -35,6 +35,7 @@ interface PhotoDetailModalProps {
   eventMap?: Map<string, string>;
   cdnBase?: string;
   imageComments?: ImageCommentDto[];
+  allowRemoteImages?: boolean;
 }
 
 type OptionalElectronAPI = {
@@ -54,9 +55,17 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   eventMap = new Map(),
   cdnBase = DEFAULT_CDN_BASE,
   imageComments = [],
+  allowRemoteImages = true,
 }) => {
   const { getPhotoRoom, getPhotoTaggedUsers, getPhotoImageUrl, getPhotoEvent } =
-    usePhotoMetadata(roomMap, accountMap, eventMap, cdnBase, usernameMap);
+    usePhotoMetadata(
+      roomMap,
+      accountMap,
+      eventMap,
+      cdnBase,
+      usernameMap,
+      allowRemoteImages
+    );
   const { isFavorite, toggleFavorite } = useFavorites();
   const electronAPI = (window as Window & { electronAPI?: OptionalElectronAPI })
     .electronAPI;
@@ -350,20 +359,22 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
             <div className="pt-2 border-t text-sm text-muted-foreground">
               <p>Photo ID: {photo.Id}</p>
               {photo.ImageName && <p>Image: {photo.ImageName}</p>}
-              <p>
-                URL:
-                <button
-                  className="text-blue-500 hover:text-blue-600 underline ml-1 cursor-pointer"
-                  onClick={() => {
-                    const url = `https://rec.net/image/${photo.Id}`;
-                    if (electronAPI) {
-                      void electronAPI.openExternal?.(url);
-                    }
-                  }}
-                >
-                  https://rec.net/image/{photo.Id}
-                </button>
-              </p>
+              {allowRemoteImages && (
+                <p>
+                  URL:
+                  <button
+                    className="text-blue-500 hover:text-blue-600 underline ml-1 cursor-pointer"
+                    onClick={() => {
+                      const url = `https://rec.net/image/${photo.Id}`;
+                      if (electronAPI) {
+                        void electronAPI.openExternal?.(url);
+                      }
+                    }}
+                  >
+                    https://rec.net/image/{photo.Id}
+                  </button>
+                </p>
+              )}
             </div>
           </div>
         </div>

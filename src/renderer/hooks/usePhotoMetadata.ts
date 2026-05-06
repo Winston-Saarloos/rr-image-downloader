@@ -78,7 +78,8 @@ export const usePhotoMetadata = (
   accountMap?: Map<string, string>,
   eventMap?: Map<string, string>,
   cdnBase = DEFAULT_CDN_BASE,
-  usernameMap?: Map<string, string>
+  usernameMap?: Map<string, string>,
+  allowRemoteImages = true
 ) => {
   const fallbackMap = useMemo(() => new Map<string, string>(), []);
   const safeRoomMap = roomMap ?? fallbackMap;
@@ -150,13 +151,13 @@ export const usePhotoMetadata = (
         return `local://${encodedPath}`;
       }
 
-      if (photo.ImageName) {
+      if (allowRemoteImages && photo.ImageName) {
         return buildCdnImageUrl(cdnBase, photo.ImageName);
       }
 
       return '';
     },
-    [cdnBase]
+    [allowRemoteImages, cdnBase]
   );
 
   const getPhotoEvent = useCallback(
