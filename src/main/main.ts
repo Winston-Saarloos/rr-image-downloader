@@ -37,24 +37,40 @@ import {
 import type { DownloadSourceSelection } from '../shared/download-sources';
 import { EventDto } from './models/EventDto';
 import { ImageCommentDto } from './models/ImageCommentDto';
+import {
+  isViewerOnlyMode,
+  VIEWER_ONLY_MODE_ERROR,
+} from '../shared/viewer-only-mode';
 import { pathsEffectivelyEqual } from './services/library-move';
 
 // Keep a global reference of the window object
 let mainWindow: BrowserWindow | null = null;
 let recNetService: RecNetService;
 
+function getViewerOnlyNetworkError(): string | null {
+  return isViewerOnlyMode() ? VIEWER_ONLY_MODE_ERROR : null;
+}
+
+function viewerOnlyApiResponse<T>(): ApiResponse<T> {
+  return { success: false, error: VIEWER_ONLY_MODE_ERROR };
+}
+
+function emptyMetadataSyncResult(): MetadataSyncResult {
+  return {
+    accountsProcessed: 0,
+    creatorsProcessed: 0,
+    eventsProcessed: 0,
+    roomsProcessed: 0,
+  };
+}
+
 /** Serialize metadata image sync jobs (launch, debug force, output path change). */
 let metadataSyncMutex: Promise<void> = Promise.resolve();
 
 function enqueueMetadataSync(force: boolean): Promise<MetadataSyncResult> {
   const next = metadataSyncMutex.then(async (): Promise<MetadataSyncResult> => {
-    if (!recNetService) {
-      return {
-        accountsProcessed: 0,
-        creatorsProcessed: 0,
-        eventsProcessed: 0,
-        roomsProcessed: 0,
-      };
+    if (!recNetService || isViewerOnlyMode()) {
+      return emptyMetadataSyncResult();
     }
     const wc = mainWindow?.webContents;
     wc?.send('metadata-sync-state', { phase: 'running' });
@@ -64,12 +80,12 @@ function enqueueMetadataSync(force: boolean): Promise<MetadataSyncResult> {
       wc?.send('metadata-sync-state', { phase: 'idle' });
     }
   });
-  metadataSyncMutex = next.then(() => {}).catch(() => {});
+  metadataSyncMutex = next.then(() => undefined).catch(() => undefined);
   return next;
 }
 
 function scheduleInitialMetadataSync(): void {
-  if (!mainWindow || mainWindow.isDestroyed()) {
+  if (!mainWindow || mainWindow.isDestroyed() || isViewerOnlyMode()) {
     return;
   }
   const wc = mainWindow.webContents;
@@ -388,6 +404,11 @@ function registerLocalFileProtocol() {
 
 // Setup auto-updater event handlers
 function setupAutoUpdater() {
+  if (isViewerOnlyMode()) {
+    console.log('Auto-updater disabled in viewer-only mode');
+    return;
+  }
+
   if (isDev) {
     console.log('Auto-updater disabled in development mode');
     return;
@@ -504,6 +525,9 @@ ipcMain.handle(
     _event: IpcMainInvokeEvent,
     opts?: { force?: boolean }
   ): Promise<ApiResponse<MetadataSyncResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const data = await enqueueMetadataSync(Boolean(opts?.force));
       return { success: true, data };
@@ -520,6 +544,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: CollectPhotosParams
   ): Promise<ApiResponse<CollectionResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const outputErr = await getOutputWriteBlockedError();
       if (outputErr) {
@@ -548,6 +575,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: CollectFeedPhotosParams
   ): Promise<ApiResponse<CollectionResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const outputErr = await getOutputWriteBlockedError();
       if (outputErr) {
@@ -577,6 +607,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: ValidateProfileHistoryAccessParams & { accountId: string }
   ): Promise<ApiResponse<ProfileHistoryCollectionResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const outputErr = await getOutputWriteBlockedError();
       if (outputErr) {
@@ -599,6 +632,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: BuildDownloadPreflightParams
   ): Promise<ApiResponse<DownloadPreflightSummary>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const outputErr = await getOutputWriteBlockedError();
       if (outputErr) {
@@ -621,6 +657,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const outputErr = await getOutputWriteBlockedError();
       if (outputErr) {
@@ -643,6 +682,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: DownloadPhotosParams
   ): Promise<ApiResponse<DownloadResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const outputErr = await getOutputWriteBlockedError();
       if (outputErr) {
@@ -665,6 +707,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: ValidateProfileHistoryAccessParams & { accountId: string }
   ): Promise<ApiResponse<DownloadResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const outputErr = await getOutputWriteBlockedError();
       if (outputErr) {
@@ -687,6 +732,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: LookupRoomParams
   ): Promise<ApiResponse<RoomDto>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const result = await recNetService.lookupRoomByName(
         params.roomName,
@@ -705,6 +753,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: DownloadRoomPhotoBatchParams
   ): Promise<ApiResponse<RoomPhotoBatchResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const outputErr = await getOutputWriteBlockedError();
       if (outputErr) {
@@ -724,6 +775,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: DiscoverEventsForUsernameParams
   ): Promise<ApiResponse<EventDiscoveryResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const outputErr = await getOutputWriteBlockedError();
       if (outputErr) {
@@ -747,6 +801,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: DownloadEventPhotosParams
   ): Promise<ApiResponse<EventPhotoBatchResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const outputErr = await getOutputWriteBlockedError();
       if (outputErr) {
@@ -766,6 +823,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     params: ValidateProfileHistoryAccessParams
   ): Promise<ApiResponse<ProfileHistoryAccessResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const result = await recNetService.validateProfileHistoryAccess(
         params.username,
@@ -877,6 +937,9 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     accountId: string
   ): Promise<ApiResponse<AccountInfo>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const result = await recNetService.lookupAccountById(accountId);
       return { success: true, data: result };
@@ -894,6 +957,9 @@ ipcMain.handle(
     username: string,
     token?: string
   ): Promise<ApiResponse<AccountInfo>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const result = await recNetService.lookupAccountByUsername(username, token);
       return { success: true, data: result };
@@ -926,6 +992,9 @@ ipcMain.handle(
     username: string,
     token?: string
   ): Promise<ApiResponse<AccountInfo[]>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
     try {
       const result = token
         ? await recNetService.searchAccounts(username, token)
@@ -1743,6 +1812,9 @@ const ALLOWED_EXTERNAL_URL_PREFIXES = [
 ipcMain.handle(
   'open-external',
   async (event: IpcMainInvokeEvent, url: string): Promise<void> => {
+    if (getViewerOnlyNetworkError()) {
+      throw new Error(VIEWER_ONLY_MODE_ERROR);
+    }
     let parsed: URL;
     try {
       parsed = new URL(url);
@@ -1793,6 +1865,9 @@ ipcMain.handle(
 
 // Auto-updater IPC handlers
 ipcMain.handle('check-for-updates', async (): Promise<void> => {
+  if (getViewerOnlyNetworkError()) {
+    throw new Error(VIEWER_ONLY_MODE_ERROR);
+  }
   if (!isDev) {
     try {
       await autoUpdater.checkForUpdates();
@@ -1804,6 +1879,9 @@ ipcMain.handle('check-for-updates', async (): Promise<void> => {
 });
 
 ipcMain.handle('download-update', async (): Promise<void> => {
+  if (getViewerOnlyNetworkError()) {
+    throw new Error(VIEWER_ONLY_MODE_ERROR);
+  }
   if (!isDev) {
     try {
       await autoUpdater.downloadUpdate();
@@ -1815,6 +1893,9 @@ ipcMain.handle('download-update', async (): Promise<void> => {
 });
 
 ipcMain.handle('install-update', async (): Promise<void> => {
+  if (getViewerOnlyNetworkError()) {
+    throw new Error(VIEWER_ONLY_MODE_ERROR);
+  }
   if (!isDev) {
     autoUpdater.quitAndInstall(false, true);
   }

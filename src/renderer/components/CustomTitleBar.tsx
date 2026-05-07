@@ -32,7 +32,7 @@ import {
 } from './ui/select';
 
 interface CustomTitleBarProps {
-  onDownloadClick: () => void;
+  onDownloadClick?: () => void;
   onStatsClick: () => void;
   settings: RecNetSettings;
   onUpdateSettings: (settings: Partial<RecNetSettings>) => Promise<void>;
@@ -64,6 +64,7 @@ interface CustomTitleBarProps {
   /** When false, the library move row is shown but the button stays disabled. */
   libraryMoveEnabled?: boolean;
   onOpenLibraryMove?: () => void;
+  viewerOnlyMode?: boolean;
   metadataSyncPhase?: 'idle' | 'running';
   onForceMetadataSync?: () => void | Promise<void>;
 }
@@ -90,6 +91,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
   onLibraryModeChange,
   libraryMoveEnabled = false,
   onOpenLibraryMove,
+  viewerOnlyMode = false,
   metadataSyncPhase = 'idle',
   onForceMetadataSync,
 }) => {
@@ -210,16 +212,18 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
             >
               <BarChart3 className="h-4 w-4" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={onDownloadClick}
-              aria-label="Download"
-            >
-              <Download className="h-4 w-4" />
-            </Button>
-            <UpdateIndicator />
+            {onDownloadClick && !viewerOnlyMode && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={onDownloadClick}
+                aria-label="Download"
+              >
+                <Download className="h-4 w-4" />
+              </Button>
+            )}
+            {!viewerOnlyMode && <UpdateIndicator />}
             <Button
               variant="ghost"
               size="icon"

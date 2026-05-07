@@ -8,6 +8,7 @@ interface EventCoverImageProps {
   cdnBase?: string;
   className?: string;
   iconClassName?: string;
+  allowRemoteFallback?: boolean;
 }
 
 export const EventCoverImage: React.FC<EventCoverImageProps> = ({
@@ -15,6 +16,7 @@ export const EventCoverImage: React.FC<EventCoverImageProps> = ({
   cdnBase = DEFAULT_CDN_BASE,
   className = 'h-full w-full object-cover',
   iconClassName = 'h-8 w-8',
+  allowRemoteFallback = true,
 }) => {
   const sources = useMemo(() => {
     const nextSources: string[] = [];
@@ -24,7 +26,7 @@ export const EventCoverImage: React.FC<EventCoverImageProps> = ({
     }
 
     const imageName = event.imageName?.trim();
-    if (imageName && imageName.toLowerCase() !== 'null') {
+    if (allowRemoteFallback && imageName && imageName.toLowerCase() !== 'null') {
       const cdnUrl = buildCdnImageUrl(cdnBase, imageName);
       if (cdnUrl && !nextSources.includes(cdnUrl)) {
         nextSources.push(cdnUrl);
@@ -32,7 +34,7 @@ export const EventCoverImage: React.FC<EventCoverImageProps> = ({
     }
 
     return nextSources;
-  }, [cdnBase, event.imageName, event.localImagePath]);
+  }, [allowRemoteFallback, cdnBase, event.imageName, event.localImagePath]);
 
   const [sourceIndex, setSourceIndex] = useState(0);
 
