@@ -27,6 +27,8 @@ import type {
   RoomPhotoSort,
   LibraryMoveProgress,
   LibraryMoveResult,
+  MetadataSyncResult,
+  MetadataSyncState,
 } from './types';
 import type { DownloadSourceSelection } from './download-sources';
 
@@ -112,6 +114,16 @@ export interface ElectronAPI {
   cancelOperation: () => Promise<boolean>;
   onProgress: (callback: (event: unknown, progress: Progress) => void) => void;
   removeProgressListener: (callback: (event: unknown, progress: Progress) => void) => void;
+
+  syncMetadataAssets: (opts?: {
+    force?: boolean;
+  }) => Promise<ApiResponse<MetadataSyncResult>>;
+  onMetadataSyncState: (
+    callback: (event: unknown, state: MetadataSyncState) => void
+  ) => void;
+  removeMetadataSyncStateListener: (
+    callback: (event: unknown, state: MetadataSyncState) => void
+  ) => void;
 
   lookupAccountById: (accountId: string) => Promise<ApiResponse<AccountInfo>>;
   lookupAccountByUsername: (

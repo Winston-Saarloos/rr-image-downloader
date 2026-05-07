@@ -54,6 +54,15 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.removeListener('progress-update', callback);
   },
 
+  syncMetadataAssets: (opts) =>
+    ipcRenderer.invoke('sync-metadata-assets', opts ?? {}),
+  onMetadataSyncState: (callback) => {
+    ipcRenderer.on('metadata-sync-state', callback);
+  },
+  removeMetadataSyncStateListener: (callback) => {
+    ipcRenderer.removeListener('metadata-sync-state', callback);
+  },
+
   lookupAccountById: (accountId) => ipcRenderer.invoke('lookup-account-by-id', accountId),
   lookupAccountByUsername: (username: string, token?: string) =>
     ipcRenderer.invoke('lookup-account-by-username', username, token),

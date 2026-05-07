@@ -77,6 +77,22 @@ export interface LibraryMoveProgress {
   operationLog?: string[];
 }
 
+/** Result of scanning the library for missing metadata images (CDN assets). */
+export interface MetadataSyncResult {
+  accountsProcessed: number;
+  /** Event-creator shared profile/banner under `events/<creatorId>/metadata/`. */
+  creatorsProcessed: number;
+  eventsProcessed: number;
+  roomsProcessed: number;
+}
+
+export type MetadataSyncPhase = 'idle' | 'running';
+
+export interface MetadataSyncState {
+  phase: MetadataSyncPhase;
+  error?: string;
+}
+
 export interface LibraryMoveResult {
   success: boolean;
   /** Absolute path the library was moved from (resolved source root). */

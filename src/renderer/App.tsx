@@ -22,6 +22,7 @@ import {
   EventPhotoBatchResult,
   EventDownloadIntent,
   EventDownloadPanelPrefill,
+  MetadataSyncState,
 } from '../shared/types';
 import {
   DownloadSourceSelection,
@@ -97,6 +98,9 @@ function App() {
     useState<EventDownloadPanelPrefill | null>(null);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const [debugMenuOpen, setDebugMenuOpen] = useState(false);
+  const [metadataSyncPhase, setMetadataSyncPhase] = useState<
+    'idle' | 'running'
+  >('idle');
   const [libraryMoveDialogOpen, setLibraryMoveDialogOpen] = useState(false);
   const [resultsScrollRequestId, setResultsScrollRequestId] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -137,6 +141,19 @@ function App() {
   useEffect(() => {
     loadSettings();
     setupProgressMonitoring();
+  }, []);
+
+  useEffect(() => {
+    if (!window.electronAPI?.onMetadataSyncState) {
+      return;
+    }
+    const handler = (_event: unknown, state: MetadataSyncState) => {
+      setMetadataSyncPhase(state.phase);
+    };
+    window.electronAPI.onMetadataSyncState(handler);
+    return () => {
+      window.electronAPI.removeMetadataSyncStateListener(handler);
+    };
   }, []);
 
   useEffect(() => {
@@ -215,6 +232,29 @@ function App() {
     },
     []
   );
+
+  const handleForceMetadataSync = useCallback(async () => {
+    if (!window.electronAPI?.syncMetadataAssets) {
+      return;
+    }
+    addLog('Running metadata image sync (force)...', 'info');
+    try {
+      const result = await window.electronAPI.syncMetadataAssets({
+        force: true,
+      });
+      if (result.success && result.data) {
+        addLog(
+          `Metadata sync finished: ${result.data.accountsProcessed} user library folder(s), ${result.data.creatorsProcessed} event creator(s), ${result.data.eventsProcessed} event album(s), ${result.data.roomsProcessed} room folder(s).`,
+          'success'
+        );
+      } else {
+        addLog(result.error ?? 'Metadata sync failed', 'error');
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      addLog(`Metadata sync failed: ${msg}`, 'error');
+    }
+  }, [addLog]);
 
   const dismissIncident = useCallback(() => setActiveIncident(null), []);
 
@@ -1315,6 +1355,8 @@ function App() {
           onLibraryModeChange={setLibraryMode}
           libraryMoveEnabled={LIBRARY_MOVE_ENABLED}
           onOpenLibraryMove={() => setLibraryMoveDialogOpen(true)}
+          metadataSyncPhase={metadataSyncPhase}
+          onForceMetadataSync={handleForceMetadataSync}
         />
 
         <div className="container mx-auto px-4 py-4 max-w-7xl h-screen flex flex-col overflow-hidden pt-14">
