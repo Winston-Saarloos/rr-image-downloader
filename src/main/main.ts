@@ -32,6 +32,7 @@ import {
   RoomPhotoBatchResult,
   RoomPhotoSort,
   LibraryMoveResult,
+  MetadataSyncResult,
 } from '../shared/types';
 import type { DownloadSourceSelection } from '../shared/download-sources';
 import { EventDto } from './models/EventDto';
@@ -40,6 +41,7 @@ import {
   isViewerOnlyMode,
   VIEWER_ONLY_MODE_ERROR,
 } from '../shared/viewer-only-mode';
+import { pathsEffectivelyEqual } from './services/library-move';
 
 // Keep a global reference of the window object
 let mainWindow: BrowserWindow | null = null;
@@ -51,6 +53,52 @@ function getViewerOnlyNetworkError(): string | null {
 
 function viewerOnlyApiResponse<T>(): ApiResponse<T> {
   return { success: false, error: VIEWER_ONLY_MODE_ERROR };
+}
+
+function emptyMetadataSyncResult(): MetadataSyncResult {
+  return {
+    accountsProcessed: 0,
+    creatorsProcessed: 0,
+    eventsProcessed: 0,
+    roomsProcessed: 0,
+  };
+}
+
+/** Serialize metadata image sync jobs (launch, debug force, output path change). */
+let metadataSyncMutex: Promise<void> = Promise.resolve();
+
+function enqueueMetadataSync(force: boolean): Promise<MetadataSyncResult> {
+  const next = metadataSyncMutex.then(async (): Promise<MetadataSyncResult> => {
+    if (!recNetService || isViewerOnlyMode()) {
+      return emptyMetadataSyncResult();
+    }
+    const wc = mainWindow?.webContents;
+    wc?.send('metadata-sync-state', { phase: 'running' });
+    try {
+      return await recNetService.syncMetadataLibraryAssets({ force });
+    } finally {
+      wc?.send('metadata-sync-state', { phase: 'idle' });
+    }
+  });
+  metadataSyncMutex = next.then(() => undefined).catch(() => undefined);
+  return next;
+}
+
+function scheduleInitialMetadataSync(): void {
+  if (!mainWindow || mainWindow.isDestroyed() || isViewerOnlyMode()) {
+    return;
+  }
+  const wc = mainWindow.webContents;
+  const start = () => {
+    setTimeout(() => {
+      void enqueueMetadataSync(false);
+    }, 500);
+  };
+  if (wc.isLoading()) {
+    wc.once('did-finish-load', start);
+  } else {
+    start();
+  }
 }
 const isDev = process.argv.includes('--dev');
 
@@ -451,6 +499,8 @@ app.whenReady().then(() => {
   // Setup auto-updater
   setupAutoUpdater();
 
+  scheduleInitialMetadataSync();
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -468,6 +518,24 @@ app.on('window-all-closed', () => {
 async function getOutputWriteBlockedError(): Promise<string | null> {
   return recNetService.getOutputConfigurationError();
 }
+
+ipcMain.handle(
+  'sync-metadata-assets',
+  async (
+    _event: IpcMainInvokeEvent,
+    opts?: { force?: boolean }
+  ): Promise<ApiResponse<MetadataSyncResult>> => {
+    if (getViewerOnlyNetworkError()) {
+      return viewerOnlyApiResponse();
+    }
+    try {
+      const data = await enqueueMetadataSync(Boolean(opts?.force));
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+);
 
 // IPC handlers for communication with renderer process
 ipcMain.handle(
@@ -794,9 +862,32 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     settings: Partial<RecNetSettings>
   ): Promise<RecNetSettings> => {
-    return await recNetService.updateSettings(settings);
+    const before = await recNetService.getSettings();
+    const prevRoot = (before.resolvedOutputRoot ?? '').trim();
+    const updated = await recNetService.updateSettings(settings);
+    const nextRoot = (updated.resolvedOutputRoot ?? '').trim();
+    if (
+      updated.outputPathConfiguredForDownload &&
+      nextRoot &&
+      metadataOutputRootChanged(prevRoot, nextRoot)
+    ) {
+      void enqueueMetadataSync(false);
+    }
+    return updated;
   }
 );
+
+function metadataOutputRootChanged(prev: string, next: string): boolean {
+  const n = next.trim();
+  if (!n) {
+    return false;
+  }
+  const p = prev.trim();
+  if (!p) {
+    return true;
+  }
+  return !pathsEffectivelyEqual(p, n);
+}
 
 ipcMain.handle(
   'library-move-start',

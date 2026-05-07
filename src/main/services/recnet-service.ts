@@ -26,6 +26,7 @@ import {
   RoomPhotoSort,
   LibraryMoveProgress,
   LibraryMoveResult,
+  MetadataSyncResult,
 } from '../../shared/types';
 import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import {
@@ -120,6 +121,9 @@ type FolderMetaV1 = {
   accountId: string;
   updatedAt: string;
   owner?: FolderMetaOwner;
+  /** Absolute paths under accountDir/metadata/profile.* / banner.* */
+  ownerLocalProfileImagePath?: string;
+  ownerLocalBannerImagePath?: string;
   cache?: Record<string, unknown>;
 };
 
@@ -140,6 +144,8 @@ type RoomFolderMetaV1 = {
       }
     >
   >;
+  /** Absolute path to metadata/room-image.* */
+  localRoomImagePath?: string;
   cache?: Record<string, unknown>;
 };
 
@@ -157,6 +163,9 @@ type EventFolderMetaV1 = {
   hasPhotos: boolean;
   isDownloaded: boolean;
   updatedAt: string;
+  /** Absolute path to event cover file (see metadata/metadata.json for details). */
+  localEventCoverPath?: string;
+  coverSource?: 'event' | 'room';
 };
 
 type BulkDataStorageContext = {
@@ -195,6 +204,54 @@ const EVENT_PHOTO_PAGE_SIZE = 100;
 // RecNet API returns 429s for this if requested too frequently.
 // Serialized globally: one in-flight request and minimum gap between starts.
 const IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS = 250;
+const METADATA_SUBDIR = 'metadata';
+const METADATA_MANIFEST_FILE = 'metadata.json';
+
+/** CDN image entry written next to files under metadata/ */
+type MetadataImageEntryV1 = {
+  /** Rec Room CDN image filename */
+  imageName: string;
+  /** File name only, under the same metadata/ directory */
+  relativePath: string;
+  /** Absolute path on disk */
+  absolutePath: string;
+};
+
+type UserLibraryMetadataManifestV1 = {
+  schemaVersion: 1;
+  kind: 'user-library';
+  updatedAt: string;
+  profile?: MetadataImageEntryV1;
+  banner?: MetadataImageEntryV1;
+};
+
+type EventCreatorMetadataManifestV1 = {
+  schemaVersion: 1;
+  kind: 'event-creator';
+  creatorAccountId: string;
+  updatedAt: string;
+  profile?: MetadataImageEntryV1;
+  banner?: MetadataImageEntryV1;
+};
+
+type EventAlbumMetadataManifestV1 = {
+  schemaVersion: 1;
+  kind: 'event-album';
+  eventId: string;
+  updatedAt: string;
+  cover?: MetadataImageEntryV1 & { source?: 'event' | 'room' };
+  /** Server filenames; files live under events/<creatorId>/metadata/ */
+  creatorProfileImageName?: string | null;
+  creatorBannerImageName?: string | null;
+};
+
+type RoomListingMetadataManifestV1 = {
+  schemaVersion: 1;
+  kind: 'room-listing';
+  roomId: string;
+  updatedAt: string;
+  roomImage?: MetadataImageEntryV1;
+};
 
 type PersistedRecNetSettings = Omit<
   RecNetSettings,
@@ -2810,29 +2867,550 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  private async downloadEventCoverImage(
-    event: EventDto,
-    eventDir: string,
-    token?: string,
-    operation?: CurrentOperation
-  ): Promise<string | undefined> {
-    const imageName = this.normalizeImageName(event.ImageName);
-    if (!imageName) {
+  /** Single path segment; uses Rec Room's CDN filename (basename). */
+  private safeMetadataFilename(imageName: string): string {
+    const n = this.normalizeImageName(imageName);
+    if (!n) {
+      return '';
+    }
+    const base = path.basename(n.replace(/\\/g, '/'));
+    if (!base || base === '.' || base === '..') {
+      return '';
+    }
+    return base;
+  }
+
+  /**
+   * Download a CDN image into destDir using the original filename (basename).
+   * Does not use the global download operation (safe for background library sync).
+   */
+  private async downloadMetadataAssetToDir(
+    imageName: string | null | undefined,
+    destDir: string,
+    force: boolean,
+    token?: string
+  ): Promise<MetadataImageEntryV1 | undefined> {
+    const normalized = this.normalizeImageName(imageName);
+    if (!normalized) {
       return undefined;
     }
-
-    const imagePath = path.join(eventDir, 'event-image.jpg');
-    if (await this.pathExistsWithContent(imagePath)) {
-      return imagePath;
+    const fileName = this.safeMetadataFilename(normalized);
+    if (!fileName) {
+      return undefined;
     }
-
-    const attempt = await this.downloadPhotoWithRetry(imageName, token, operation);
-    if (attempt.response?.success && attempt.response.value) {
-      await fs.writeFile(imagePath, Buffer.from(attempt.response.value));
-      return imagePath;
+    const destPath = path.join(destDir, fileName);
+    if (!force && (await this.pathExistsWithContent(destPath))) {
+      return {
+        imageName: normalized,
+        relativePath: fileName,
+        absolutePath: destPath,
+      };
     }
-
+    try {
+      const attempt = await this.downloadPhotoWithRetry(
+        normalized,
+        token,
+        undefined
+      );
+      if (attempt.response?.success && attempt.response.value) {
+        await fs.ensureDir(destDir);
+        await fs.writeFile(destPath, Buffer.from(attempt.response.value));
+        return {
+          imageName: normalized,
+          relativePath: fileName,
+          absolutePath: destPath,
+        };
+      }
+    } catch (error) {
+      console.log(
+        `Metadata sync: failed to download ${normalized}: ${
+          (error as Error).message
+        }`
+      );
+    }
     return undefined;
+  }
+
+  private async writeMetadataManifest(
+    manifestPath: string,
+    payload: unknown
+  ): Promise<void> {
+    await fs.ensureDir(path.dirname(manifestPath));
+    await fs.writeJson(manifestPath, payload, { spaces: 2 });
+  }
+
+  private async syncMetadataDelay(): Promise<void> {
+    const ms = this.settings.interPageDelayMs ?? 0;
+    if (ms > 0) {
+      await this.delay(ms, undefined);
+    }
+  }
+
+  private async syncUserLibraryMetadataAssets(
+    accountDir: string,
+    accountId: string,
+    force: boolean,
+    token?: string
+  ): Promise<boolean> {
+    const accountsJsonPath = path.join(accountDir, `${accountId}_accounts.json`);
+    if (!(await fs.pathExists(accountsJsonPath))) {
+      return false;
+    }
+    let accountsData: PlayerResult[] = [];
+    try {
+      const raw = (await fs.readJson(accountsJsonPath)) as PlayerResult[];
+      accountsData = Array.isArray(raw) ? this.normalizeAccounts(raw) : [];
+    } catch {
+      return false;
+    }
+    const ownerRow = accountsData.find(
+      a => this.normalizeId(a.accountId) === this.normalizeId(accountId)
+    );
+    if (!ownerRow) {
+      return false;
+    }
+
+    const metadataDirPath = path.join(accountDir, METADATA_SUBDIR);
+    await fs.ensureDir(metadataDirPath);
+
+    const existing = await this.readFolderMeta(accountDir);
+    const profile = await this.downloadMetadataAssetToDir(
+      ownerRow.profileImage,
+      metadataDirPath,
+      force,
+      token
+    );
+    await this.syncMetadataDelay();
+    const banner = await this.downloadMetadataAssetToDir(
+      ownerRow.bannerImage,
+      metadataDirPath,
+      force,
+      token
+    );
+
+    const manifest: UserLibraryMetadataManifestV1 = {
+      schemaVersion: 1,
+      kind: 'user-library',
+      updatedAt: new Date().toISOString(),
+      profile,
+      banner,
+    };
+    await this.writeMetadataManifest(
+      path.join(metadataDirPath, METADATA_MANIFEST_FILE),
+      manifest
+    );
+
+    await this.writeFolderMeta(accountDir, accountId, {
+      ownerLocalProfileImagePath:
+        profile?.absolutePath ?? existing?.ownerLocalProfileImagePath,
+      ownerLocalBannerImagePath:
+        banner?.absolutePath ?? existing?.ownerLocalBannerImagePath,
+    });
+    return true;
+  }
+
+  private async loadCreatorPlayerResultForEvents(
+    creatorAccountId: string
+  ): Promise<PlayerResult | null> {
+    const creatorDir = this.getCreatorEventsDirectory(creatorAccountId);
+    const creatorJsonPath = path.join(creatorDir, 'creator.json');
+    if (await fs.pathExists(creatorJsonPath)) {
+      try {
+        const raw = (await fs.readJson(creatorJsonPath)) as PlayerResult;
+        const n = this.normalizeAccounts([raw]);
+        return n[0] ?? null;
+      } catch {
+        // fall through
+      }
+    }
+    const normalizedCreatorId = this.normalizeId(creatorAccountId);
+    if (!(await fs.pathExists(creatorDir))) {
+      return null;
+    }
+    const entries = await fs.readdir(creatorDir, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name === METADATA_SUBDIR) {
+        continue;
+      }
+      const eventId = e.name;
+      const accountsPath = path.join(
+        creatorDir,
+        eventId,
+        `${eventId}_accounts.json`
+      );
+      if (!(await fs.pathExists(accountsPath))) {
+        continue;
+      }
+      try {
+        const rawAcc = (await fs.readJson(accountsPath)) as PlayerResult[];
+        const accList = Array.isArray(rawAcc)
+          ? this.normalizeAccounts(rawAcc)
+          : [];
+        const creator = accList.find(
+          a => this.normalizeId(a.accountId) === normalizedCreatorId
+        );
+        if (creator) {
+          return creator;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  private async syncCreatorSharedMetadataAssets(
+    creatorAccountId: string,
+    force: boolean,
+    token?: string
+  ): Promise<boolean> {
+    const creator = await this.loadCreatorPlayerResultForEvents(
+      creatorAccountId
+    );
+    if (!creator) {
+      return false;
+    }
+    const metadataDir = path.join(
+      this.getCreatorEventsDirectory(creatorAccountId),
+      METADATA_SUBDIR
+    );
+    await fs.ensureDir(metadataDir);
+
+    const profile = await this.downloadMetadataAssetToDir(
+      creator.profileImage,
+      metadataDir,
+      force,
+      token
+    );
+    await this.syncMetadataDelay();
+    const banner = await this.downloadMetadataAssetToDir(
+      creator.bannerImage,
+      metadataDir,
+      force,
+      token
+    );
+
+    const manifest: EventCreatorMetadataManifestV1 = {
+      schemaVersion: 1,
+      kind: 'event-creator',
+      creatorAccountId: this.normalizeId(creatorAccountId),
+      updatedAt: new Date().toISOString(),
+      profile,
+      banner,
+    };
+    await this.writeMetadataManifest(
+      path.join(metadataDir, METADATA_MANIFEST_FILE),
+      manifest
+    );
+    return true;
+  }
+
+  private async syncEventFolderMetadataAssets(
+    creatorAccountId: string,
+    eventId: string,
+    force: boolean,
+    token?: string
+  ): Promise<boolean> {
+    const eventDir = this.getEventDirectory(creatorAccountId, eventId);
+    const photosJsonPath = path.join(eventDir, `${eventId}_photos.json`);
+    if (!(await fs.pathExists(photosJsonPath))) {
+      return false;
+    }
+    let photoList: unknown;
+    try {
+      photoList = await fs.readJson(photosJsonPath);
+    } catch {
+      return false;
+    }
+    if (!Array.isArray(photoList) || photoList.length === 0) {
+      return false;
+    }
+
+    const manifest = await this.readCreatorEventsManifest(creatorAccountId);
+    const event = manifest.find(
+      e => this.normalizeId(e.PlayerEventId) === this.normalizeId(eventId)
+    );
+    if (!event) {
+      return false;
+    }
+
+    const metadataDirPath = path.join(eventDir, METADATA_SUBDIR);
+    await fs.ensureDir(metadataDirPath);
+
+    let coverSource: 'event' | 'room' | undefined;
+    let coverImageName = this.normalizeImageName(event.ImageName);
+    if (!coverImageName) {
+      const roomsJsonPath = path.join(eventDir, `${eventId}_rooms.json`);
+      if (await fs.pathExists(roomsJsonPath)) {
+        try {
+          const rawRooms = (await fs.readJson(roomsJsonPath)) as RoomDto[];
+          const roomsList = Array.isArray(rawRooms)
+            ? this.normalizeRooms(rawRooms)
+            : [];
+          const room = roomsList.find(
+            r => this.normalizeId(r.RoomId) === this.normalizeId(event.RoomId)
+          );
+          coverImageName = this.normalizeImageName(room?.ImageName);
+          if (coverImageName) {
+            coverSource = 'room';
+          }
+        } catch {
+          // ignore
+        }
+      }
+    } else {
+      coverSource = 'event';
+    }
+
+    const coverEntry = await this.downloadMetadataAssetToDir(
+      coverImageName,
+      metadataDirPath,
+      force,
+      token
+    );
+    await this.syncMetadataDelay();
+
+    const creatorMetaPath = path.join(
+      this.getCreatorEventsDirectory(creatorAccountId),
+      METADATA_SUBDIR,
+      METADATA_MANIFEST_FILE
+    );
+    let creatorProfileImageName: string | null = null;
+    let creatorBannerImageName: string | null = null;
+    if (await fs.pathExists(creatorMetaPath)) {
+      try {
+        const cm = (await fs.readJson(
+          creatorMetaPath
+        )) as EventCreatorMetadataManifestV1;
+        creatorProfileImageName = cm.profile?.imageName ?? null;
+        creatorBannerImageName = cm.banner?.imageName ?? null;
+      } catch {
+        // ignore
+      }
+    }
+
+    let coverForManifest:
+      | (MetadataImageEntryV1 & { source?: 'event' | 'room' })
+      | undefined;
+    if (coverEntry) {
+      coverForManifest = { ...coverEntry, source: coverSource };
+    }
+
+    const albumManifest: EventAlbumMetadataManifestV1 = {
+      schemaVersion: 1,
+      kind: 'event-album',
+      eventId: this.normalizeId(eventId),
+      updatedAt: new Date().toISOString(),
+      cover: coverForManifest,
+      creatorProfileImageName,
+      creatorBannerImageName,
+    };
+    await this.writeMetadataManifest(
+      path.join(metadataDirPath, METADATA_MANIFEST_FILE),
+      albumManifest
+    );
+
+    const existing = await this.readEventFolderMeta(eventDir);
+    await this.writeEventFolderMeta(eventDir, event, {
+      photoCount: existing?.photoCount ?? 0,
+      downloadedPhotoCount: existing?.downloadedPhotoCount ?? 0,
+      hasPhotos: existing?.hasPhotos ?? false,
+      isDownloaded: existing?.isDownloaded ?? false,
+      localEventCoverPath:
+        coverEntry?.absolutePath ?? existing?.localEventCoverPath,
+      coverSource: coverSource ?? existing?.coverSource,
+    });
+    return true;
+  }
+
+  private async syncRoomFolderMetadataAssets(
+    roomId: string,
+    force: boolean,
+    token?: string
+  ): Promise<boolean> {
+    const roomDir = this.getRoomDirectory(roomId);
+    const photosJsonPath = path.join(roomDir, `${roomId}_photos.json`);
+    if (!(await fs.pathExists(photosJsonPath))) {
+      return false;
+    }
+    let photoList: unknown;
+    try {
+      photoList = await fs.readJson(photosJsonPath);
+    } catch {
+      return false;
+    }
+    if (!Array.isArray(photoList) || photoList.length === 0) {
+      return false;
+    }
+
+    const roomsJsonPath = path.join(roomDir, `${roomId}_rooms.json`);
+    if (!(await fs.pathExists(roomsJsonPath))) {
+      return false;
+    }
+    let room: RoomDto | undefined;
+    try {
+      const rawRooms = (await fs.readJson(roomsJsonPath)) as RoomDto[];
+      const roomsList = Array.isArray(rawRooms)
+        ? this.normalizeRooms(rawRooms)
+        : [];
+      room =
+        roomsList.find(
+          r => this.normalizeId(r.RoomId) === this.normalizeId(roomId)
+        ) ?? roomsList[0];
+    } catch {
+      return false;
+    }
+    if (!room) {
+      return false;
+    }
+
+    const imageName = this.normalizeImageName(room.ImageName);
+    if (!imageName) {
+      return false;
+    }
+
+    const metadataDirPath = path.join(roomDir, METADATA_SUBDIR);
+    await fs.ensureDir(metadataDirPath);
+    const roomImage = await this.downloadMetadataAssetToDir(
+      imageName,
+      metadataDirPath,
+      force,
+      token
+    );
+    const manifest: RoomListingMetadataManifestV1 = {
+      schemaVersion: 1,
+      kind: 'room-listing',
+      roomId: this.normalizeId(roomId),
+      updatedAt: new Date().toISOString(),
+      roomImage,
+    };
+    await this.writeMetadataManifest(
+      path.join(metadataDirPath, METADATA_MANIFEST_FILE),
+      manifest
+    );
+    if (roomImage) {
+      await this.writeRoomFolderMeta(roomDir, room, {
+        localRoomImagePath: roomImage.absolutePath,
+      });
+    }
+    return true;
+  }
+
+  /**
+   * Walks the output library and downloads missing metadata images (profile/banner,
+   * event covers, room listing images). Safe to run in the background on app launch.
+   */
+  async syncMetadataLibraryAssets(params?: {
+    force?: boolean;
+    token?: string;
+  }): Promise<MetadataSyncResult> {
+    await this.ensureSettingsLoaded();
+    const force = Boolean(params?.force);
+    const token = params?.token?.trim() || undefined;
+    const root = this.getResolvedOutputRoot().trim();
+    const result: MetadataSyncResult = {
+      accountsProcessed: 0,
+      creatorsProcessed: 0,
+      eventsProcessed: 0,
+      roomsProcessed: 0,
+    };
+
+    if (!root || !(await fs.pathExists(root))) {
+      return result;
+    }
+
+    try {
+      const top = await fs.readdir(root, { withFileTypes: true });
+      for (const entry of top) {
+        if (!entry.isDirectory()) {
+          continue;
+        }
+        const name = entry.name;
+        if (name === 'rooms' || name === 'events') {
+          continue;
+        }
+        const accountDir = path.join(root, name);
+        const did = await this.syncUserLibraryMetadataAssets(
+          accountDir,
+          name,
+          force,
+          token
+        );
+        if (did) {
+          result.accountsProcessed++;
+        }
+        await this.syncMetadataDelay();
+      }
+
+      const eventsRoot = this.getEventsRoot();
+      if (await fs.pathExists(eventsRoot)) {
+        const creators = await fs.readdir(eventsRoot, { withFileTypes: true });
+        for (const c of creators) {
+          if (!c.isDirectory()) {
+            continue;
+          }
+          const creatorId = c.name;
+          const creatorDir = path.join(eventsRoot, creatorId);
+          const creatorSynced = await this.syncCreatorSharedMetadataAssets(
+            creatorId,
+            force,
+            token
+          );
+          if (creatorSynced) {
+            result.creatorsProcessed++;
+          }
+          await this.syncMetadataDelay();
+
+          const eventDirs = await fs.readdir(creatorDir, {
+            withFileTypes: true,
+          });
+          for (const ed of eventDirs) {
+            if (!ed.isDirectory() || ed.name === METADATA_SUBDIR) {
+              continue;
+            }
+            const eid = ed.name;
+            const did = await this.syncEventFolderMetadataAssets(
+              creatorId,
+              eid,
+              force,
+              token
+            );
+            if (did) {
+              result.eventsProcessed++;
+            }
+            await this.syncMetadataDelay();
+          }
+        }
+      }
+
+      const roomsRoot = this.getRoomsRoot();
+      if (await fs.pathExists(roomsRoot)) {
+        const roomEntries = await fs.readdir(roomsRoot, {
+          withFileTypes: true,
+        });
+        for (const re of roomEntries) {
+          if (!re.isDirectory()) {
+            continue;
+          }
+          const rid = re.name;
+          const did = await this.syncRoomFolderMetadataAssets(
+            rid,
+            force,
+            token
+          );
+          if (did) {
+            result.roomsProcessed++;
+          }
+          await this.syncMetadataDelay();
+        }
+      }
+    } catch (error) {
+      console.log(
+        `Metadata library sync failed: ${(error as Error).message}`
+      );
+    }
+
+    return result;
   }
 
   private async downloadProfileHistoryImage(
@@ -3152,6 +3730,11 @@ export class RecNetService extends EventEmitter {
       ),
     };
     next.cache = { ...(existing?.cache ?? {}), ...(patch.cache ?? {}) };
+    next.ownerLocalProfileImagePath =
+      patch.ownerLocalProfileImagePath ??
+      existing?.ownerLocalProfileImagePath;
+    next.ownerLocalBannerImagePath =
+      patch.ownerLocalBannerImagePath ?? existing?.ownerLocalBannerImagePath;
 
     await fs.writeJson(metaPath, next, { spaces: 2 });
   }
@@ -3229,11 +3812,67 @@ export class RecNetService extends EventEmitter {
       isDownloaded: existing?.isDownloaded ?? false,
       updatedAt: new Date().toISOString(),
       ...patch,
+      localEventCoverPath:
+        patch.localEventCoverPath ?? existing?.localEventCoverPath,
+      coverSource: patch.coverSource ?? existing?.coverSource,
     };
 
     await fs.ensureDir(eventDir);
     await fs.writeJson(this.getFolderMetaPath(eventDir), next, { spaces: 2 });
     return next;
+  }
+
+  private async resolveLocalEventCoverPath(
+    eventDir: string,
+    meta?: EventFolderMetaV1 | null
+  ): Promise<string | undefined> {
+    if (
+      meta?.localEventCoverPath &&
+      (await this.pathExistsWithContent(meta.localEventCoverPath))
+    ) {
+      return meta.localEventCoverPath;
+    }
+    const md = path.join(eventDir, METADATA_SUBDIR);
+    const manifestPath = path.join(md, METADATA_MANIFEST_FILE);
+    if (await fs.pathExists(manifestPath)) {
+      try {
+        const man = (await fs.readJson(
+          manifestPath
+        )) as EventAlbumMetadataManifestV1;
+        const abs = man.cover?.absolutePath;
+        if (abs && (await this.pathExistsWithContent(abs))) {
+          return abs;
+        }
+        const rel = man.cover?.relativePath;
+        if (rel) {
+          const p = path.join(md, rel);
+          if (await this.pathExistsWithContent(p)) {
+            return p;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    if (await fs.pathExists(md)) {
+      try {
+        const files = await fs.readdir(md);
+        const cover = files.find(f => /^event-cover\./i.test(f));
+        if (cover) {
+          const p = path.join(md, cover);
+          if (await this.pathExistsWithContent(p)) {
+            return p;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    const legacy = path.join(eventDir, 'event-image.jpg');
+    if (await this.pathExistsWithContent(legacy)) {
+      return legacy;
+    }
+    return undefined;
   }
 
   private async readCreatorEventsManifest(
@@ -3320,6 +3959,8 @@ export class RecNetService extends EventEmitter {
         ...(patch.roomPhotoCursors ?? {}),
       },
       cache: { ...(existing?.cache ?? {}), ...(patch.cache ?? {}) },
+      localRoomImagePath:
+        patch.localRoomImagePath ?? existing?.localRoomImagePath,
     };
 
     await fs.writeJson(this.getFolderMetaPath(roomDir), next, { spaces: 2 });
@@ -4988,8 +5629,11 @@ export class RecNetService extends EventEmitter {
         const eventDir = this.getEventDirectory(id, event.PlayerEventId);
         const meta = await this.readEventFolderMeta(eventDir);
         const availableEvent = this.eventToAvailableEvent(event, meta);
-        const localImagePath = path.join(eventDir, 'event-image.jpg');
-        if (await this.pathExistsWithContent(localImagePath)) {
+        const localImagePath = await this.resolveLocalEventCoverPath(
+          eventDir,
+          meta
+        );
+        if (localImagePath) {
           availableEvent.localImagePath = localImagePath;
         }
         available.push(availableEvent);
@@ -5274,12 +5918,6 @@ export class RecNetService extends EventEmitter {
         await fs.ensureDir(eventDir);
         await fs.ensureDir(photosDir);
         await this.writeEventFolderMeta(eventDir, event);
-        const localImagePath = await this.downloadEventCoverImage(
-          event,
-          eventDir,
-          params.token,
-          operation
-        );
 
         const eventPhotos: Photo[] = [];
         let skip = 0;
@@ -5445,8 +6083,9 @@ export class RecNetService extends EventEmitter {
               : downloadedPhotoCount >= normalizedEventPhotos.length,
         });
         const availableEvent = this.eventToAvailableEvent(event, meta);
-        if (localImagePath) {
-          availableEvent.localImagePath = localImagePath;
+        const coverPath = await this.resolveLocalEventCoverPath(eventDir, meta);
+        if (coverPath) {
+          availableEvent.localImagePath = coverPath;
         }
         downloadedEvents.push(availableEvent);
         this.logDownloadBatchSummary(trace, downloadStats);

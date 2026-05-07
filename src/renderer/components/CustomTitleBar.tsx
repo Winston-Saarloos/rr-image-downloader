@@ -1,5 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Minus, Square, X, Download, BarChart3, Settings } from 'lucide-react';
+import {
+  Minus,
+  Square,
+  X,
+  Download,
+  BarChart3,
+  Settings,
+  Loader2,
+} from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { ThemeToggle } from './ThemeToggle';
 import { UpdateIndicator } from './UpdateIndicator';
@@ -57,6 +65,8 @@ interface CustomTitleBarProps {
   libraryMoveEnabled?: boolean;
   onOpenLibraryMove?: () => void;
   viewerOnlyMode?: boolean;
+  metadataSyncPhase?: 'idle' | 'running';
+  onForceMetadataSync?: () => void | Promise<void>;
 }
 
 export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
@@ -82,6 +92,8 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
   libraryMoveEnabled = false,
   onOpenLibraryMove,
   viewerOnlyMode = false,
+  metadataSyncPhase = 'idle',
+  onForceMetadataSync,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
   const resultsSectionRef = useRef<HTMLDivElement | null>(null);
@@ -172,6 +184,12 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
               (e.target as HTMLImageElement).style.display = 'none';
             }}
           />
+          {metadataSyncPhase === 'running' && (
+            <Loader2
+              className="h-4 w-4 shrink-0 animate-spin text-muted-foreground"
+              aria-hidden
+            />
+          )}
           <span className="text-sm font-semibold text-foreground">
             Photo Downloader & Viewer
           </span>
@@ -259,6 +277,27 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
                 // Logging handled by parent component
               }}
             />
+            {onForceMetadataSync && (
+              <div className="rounded-md border p-3 space-y-2">
+                <p className="text-sm font-medium">Metadata images</p>
+                <p className="text-xs text-muted-foreground">
+                  Download profile, banner, event cover, and room listing images
+                  into each folder&apos;s metadata directory. Runs automatically
+                  once when the app opens; use this to refresh or retry.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={metadataSyncPhase === 'running'}
+                  onClick={() => void onForceMetadataSync()}
+                >
+                  {metadataSyncPhase === 'running'
+                    ? 'Syncing metadata images…'
+                    : 'Force metadata image sync'}
+                </Button>
+              </div>
+            )}
             {onOpenLibraryMove && (
               <div
                 className={`rounded-md border p-3 space-y-2 ${!libraryMoveEnabled ? 'opacity-80' : ''}`}
