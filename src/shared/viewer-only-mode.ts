@@ -1,5 +1,5 @@
 export const VIEWER_ONLY_CUTOFF_YEAR = 2026;
-export const VIEWER_ONLY_CUTOFF_MONTH_INDEX = 6;
+export const VIEWER_ONLY_CUTOFF_MONTH_INDEX = 5;
 export const VIEWER_ONLY_CUTOFF_DAY = 2;
 
 export const VIEWER_ONLY_MODE_ERROR =
