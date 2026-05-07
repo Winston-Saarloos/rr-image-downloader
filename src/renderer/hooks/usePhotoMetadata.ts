@@ -144,6 +144,26 @@ export const usePhotoMetadata = (
     [safeAccountMap, safeUsernameMap]
   );
 
+  const getPhotoPhotographer = useCallback(
+    (photo: Photo): TaggedUserInfo | null => {
+      const normalizedPlayerId = normalizeId(photo.PlayerId);
+      if (!normalizedPlayerId) {
+        return null;
+      }
+
+      const displayName =
+        getMapValue(safeAccountMap, normalizedPlayerId) || normalizedPlayerId;
+      const username = getMapValue(safeUsernameMap, normalizedPlayerId) || '';
+
+      return {
+        id: normalizedPlayerId,
+        displayName,
+        username,
+      };
+    },
+    [safeAccountMap, safeUsernameMap]
+  );
+
   const getPhotoImageUrl = useCallback(
     (photo: Photo): string => {
       if (photo.localFilePath) {
@@ -182,6 +202,7 @@ export const usePhotoMetadata = (
     getPhotoRoom,
     getPhotoUsers,
     getPhotoTaggedUsers,
+    getPhotoPhotographer,
     getPhotoImageUrl,
     getPhotoEvent,
   };

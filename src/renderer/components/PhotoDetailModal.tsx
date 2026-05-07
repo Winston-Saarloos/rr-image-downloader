@@ -13,7 +13,6 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '../components/ui/dialog';
@@ -21,7 +20,7 @@ import { Button } from '../components/ui/button';
 import { Chip } from '../components/ui/chip';
 import { ImageCommentDto, Photo } from '../../shared/types';
 import { format, isValid, parseISO } from 'date-fns';
-import { DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
+import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import { usePhotoMetadata } from '../hooks/usePhotoMetadata';
 import { useFavorites } from '../hooks/useFavorites';
 
@@ -32,6 +31,7 @@ interface PhotoDetailModalProps {
   roomMap?: Map<string, string>;
   accountMap?: Map<string, string>;
   usernameMap?: Map<string, string>;
+  accountProfileImageMap?: Map<string, string>;
   eventMap?: Map<string, string>;
   cdnBase?: string;
   imageComments?: ImageCommentDto[];
@@ -52,20 +52,26 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   roomMap = new Map(),
   accountMap = new Map(),
   usernameMap = new Map(),
+  accountProfileImageMap = new Map(),
   eventMap = new Map(),
   cdnBase = DEFAULT_CDN_BASE,
   imageComments = [],
   allowRemoteImages = true,
 }) => {
-  const { getPhotoRoom, getPhotoTaggedUsers, getPhotoImageUrl, getPhotoEvent } =
-    usePhotoMetadata(
-      roomMap,
-      accountMap,
-      eventMap,
-      cdnBase,
-      usernameMap,
-      allowRemoteImages
-    );
+  const {
+    getPhotoRoom,
+    getPhotoTaggedUsers,
+    getPhotoPhotographer,
+    getPhotoImageUrl,
+    getPhotoEvent,
+  } = usePhotoMetadata(
+    roomMap,
+    accountMap,
+    eventMap,
+    cdnBase,
+    usernameMap,
+    allowRemoteImages
+  );
   const { isFavorite, toggleFavorite } = useFavorites();
   const electronAPI = (window as Window & { electronAPI?: OptionalElectronAPI })
     .electronAPI;
@@ -96,6 +102,14 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   const extended = photo as Photo & { Description?: string };
   const room = getPhotoRoom(photo);
   const taggedUsers = getPhotoTaggedUsers(photo);
+  const photographer = getPhotoPhotographer(photo);
+  const photographerProfileImageName = photographer
+    ? accountProfileImageMap.get(photographer.id)?.trim() || ''
+    : '';
+  const photographerProfileImageUrl =
+    photographerProfileImageName && allowRemoteImages
+      ? buildCdnImageUrl(cdnBase, photographerProfileImageName)
+      : '';
   const description = extended.Description || '';
   const imageUrl = getPhotoImageUrl(photo);
   const createdAt = photo.CreatedAt ? new Date(photo.CreatedAt) : null;
@@ -140,20 +154,55 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <DialogTitle>Photo Details</DialogTitle>
-              <DialogDescription>
-                View full resolution and details
-              </DialogDescription>
+          <DialogTitle className="sr-only">Photo details</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          {photographer && (
+            <div className="flex items-center gap-3 rounded-lg border border-border/80 bg-muted/30 px-3 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-muted-foreground">
+                  {photographerProfileImageUrl ? (
+                    <img
+                      src={photographerProfileImageUrl}
+                      alt={`${photographer.displayName} profile`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <User className="h-6 w-6" strokeWidth={1.75} />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-medium uppercase text-muted-foreground">
+                    Taken By
+                  </div>
+                  <div className="truncate font-semibold">
+                    {photographer.displayName}
+                  </div>
+                  {photographer.username ? (
+                    <div className="truncate text-sm text-muted-foreground">
+                      @{photographer.username}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             </div>
-            <div className="mt-4">
+          )}
+
+          {imageUrl && (
+            <div className="relative w-full">
+              <img
+                src={imageUrl}
+                alt={`Photo ${photo.Id}`}
+                className="w-full h-auto rounded-lg"
+              />
               <Button
-                variant={favorited ? 'default' : 'outline'}
+                variant="secondary"
                 size="icon"
-                className={
-                  favorited ? 'bg-red-500 hover:bg-red-600 text-white' : ''
-                }
+                className={`absolute right-3 top-3 h-10 w-10 rounded-full shadow-lg ${
+                  favorited
+                    ? 'bg-red-500 hover:bg-red-600 text-white'
+                    : 'bg-background/85 hover:bg-background text-muted-foreground'
+                }`}
                 onClick={handleFavoriteClick}
                 aria-label={
                   favorited ? 'Remove from favorites' : 'Add to favorites'
@@ -163,17 +212,6 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
                   className={`h-5 w-5 ${favorited ? 'fill-current' : ''}`}
                 />
               </Button>
-            </div>
-          </div>
-        </DialogHeader>
-        <div className="space-y-4">
-          {imageUrl && (
-            <div className="relative w-full">
-              <img
-                src={imageUrl}
-                alt={`Photo ${photo.Id}`}
-                className="w-full h-auto rounded-lg"
-              />
             </div>
           )}
           {description && (

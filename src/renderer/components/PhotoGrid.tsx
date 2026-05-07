@@ -50,7 +50,13 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   allowRemoteImages = true,
 }) => {
   const deferredSearchQuery = useDeferredValue(searchQuery);
-  const { getPhotoRoom, getPhotoUsers, getPhotoImageUrl, getPhotoEvent } =
+  const {
+    getPhotoRoom,
+    getPhotoUsers,
+    getPhotoPhotographer,
+    getPhotoImageUrl,
+    getPhotoEvent,
+  } =
     usePhotoMetadata(
       roomMap,
       accountMap,
@@ -113,6 +119,8 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
       sortedPhotos.map(photo => {
         const room = getPhotoRoom(photo).toLowerCase();
         const users = getPhotoUsers(photo).join(' ').toLowerCase();
+        const photographer =
+          getPhotoPhotographer(photo)?.displayName.toLowerCase() || '';
         const description = (photo.Description || '').toLowerCase();
         const eventInfo = getPhotoEvent(photo);
         const eventLabel = (
@@ -120,10 +128,16 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
         ).toLowerCase();
         return {
           photo,
-          key: `${room} ${users} ${description} ${eventLabel}`,
+          key: `${room} ${users} ${photographer} ${description} ${eventLabel}`,
         };
       }),
-    [sortedPhotos, getPhotoRoom, getPhotoUsers, getPhotoEvent]
+    [
+      sortedPhotos,
+      getPhotoRoom,
+      getPhotoUsers,
+      getPhotoPhotographer,
+      getPhotoEvent,
+    ]
   );
 
   const filteredPhotos = useMemo(() => {
@@ -332,6 +346,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
           {virtualPhotos.map((photo, index) => {
             const room = getPhotoRoom(photo);
             const users = getPhotoUsers(photo);
+            const photographer = getPhotoPhotographer(photo)?.displayName;
             const imageUrl = getPhotoImageUrl(photo);
             const eventInfo = getPhotoEvent(photo);
             const formattedDate = photo.CreatedAt
@@ -345,6 +360,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
                 onClick={onPhotoClick}
                 room={room}
                 users={users}
+                photographer={photographer}
                 imageUrl={imageUrl}
                 formattedDate={formattedDate}
                 eventName={eventInfo.name}
@@ -448,6 +464,8 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
                   {photos.map(photo => {
                     const room = getPhotoRoom(photo);
                     const users = getPhotoUsers(photo);
+                    const photographer =
+                      getPhotoPhotographer(photo)?.displayName;
                     const imageUrl = getPhotoImageUrl(photo);
                     const eventInfo = getPhotoEvent(photo);
                     const formattedDate = photo.CreatedAt
@@ -461,6 +479,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
                         onClick={onPhotoClick}
                         room={room}
                         users={users}
+                        photographer={photographer}
                         imageUrl={imageUrl}
                         formattedDate={formattedDate}
                         eventName={eventInfo.name}
