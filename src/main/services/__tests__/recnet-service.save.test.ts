@@ -152,6 +152,26 @@ describe('RecNetService - File Saving Functionality', () => {
       expect(settings.outputRoot).toBe('');
       expect(settings.resolvedOutputRoot).toBe('');
       expect(settings.outputPathConfiguredForDownload).toBe(false);
+      expect(settings.backgroundMetadataSyncEnabled).toBe(false);
+    });
+
+    it('persists background metadata sync only when explicitly enabled', async () => {
+      jest.clearAllMocks();
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+
+      const localService = new RecNetService();
+      await localService.updateSettings({
+        backgroundMetadataSyncEnabled: true,
+      });
+
+      const savedSettings = mockedFs.writeJson.mock.calls.at(-1)?.[1] as Record<
+        string,
+        unknown
+      >;
+      const settings = await localService.getSettings();
+
+      expect(settings.backgroundMetadataSyncEnabled).toBe(true);
+      expect(savedSettings.backgroundMetadataSyncEnabled).toBe(true);
     });
 
     it('migrates relative outputRoot on load to empty and rewrites disk', async () => {

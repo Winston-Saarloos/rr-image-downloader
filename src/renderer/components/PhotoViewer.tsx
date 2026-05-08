@@ -392,7 +392,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                 account.displayName || account.username || id;
               accountMapping.set(id, displayName);
               usernameMapping.set(id, account.username || '');
-              profileImageMapping.set(id, account.profileImage || '');
+              profileImageMapping.set(id, account.localProfileImagePath || '');
             });
             setAccountMap(accountMapping);
             setUsernameMap(usernameMapping);
@@ -431,7 +431,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
               account.displayName || account.username || id;
             accountMapping.set(id, displayName);
             usernameMapping.set(id, account.username || '');
-            profileImageMapping.set(id, account.profileImage || '');
+            profileImageMapping.set(id, account.localProfileImagePath || '');
           });
           setAccountMap(accountMapping);
           setUsernameMap(usernameMapping);
@@ -1188,7 +1188,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                         <EventCoverImage
                           event={event}
                           cdnBase={cdnBase}
-                          allowRemoteFallback={!viewerOnlyMode}
+                          allowRemoteFallback={false}
                         />
                       </div>
                       <div className="space-y-3 p-4">
@@ -1349,7 +1349,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
               accountMap={accountMap}
               eventMap={eventMap}
               cdnBase={cdnBase}
-              allowRemoteImages={!viewerOnlyMode}
+              allowRemoteImages={false}
               onScrollPositionChange={onScrollPositionChange}
               scrollContainerRef={activeScrollRef}
               accountId={accountId}
@@ -1369,7 +1369,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         eventMap={eventMap}
         cdnBase={cdnBase}
         imageComments={imageComments}
-        allowRemoteImages={!viewerOnlyMode}
+        allowRemoteImages={false}
       />
     </div>
   );

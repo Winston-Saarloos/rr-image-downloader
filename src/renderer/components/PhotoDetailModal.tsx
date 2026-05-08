@@ -20,7 +20,7 @@ import { Button } from '../components/ui/button';
 import { Chip } from '../components/ui/chip';
 import { ImageCommentDto, Photo } from '../../shared/types';
 import { format, isValid, parseISO } from 'date-fns';
-import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
+import { DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import { usePhotoMetadata } from '../hooks/usePhotoMetadata';
 import { useFavorites } from '../hooks/useFavorites';
 
@@ -56,7 +56,7 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   eventMap = new Map(),
   cdnBase = DEFAULT_CDN_BASE,
   imageComments = [],
-  allowRemoteImages = true,
+  allowRemoteImages = false,
 }) => {
   const {
     getPhotoRoom,
@@ -103,12 +103,12 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   const room = getPhotoRoom(photo);
   const taggedUsers = getPhotoTaggedUsers(photo);
   const photographer = getPhotoPhotographer(photo);
-  const photographerProfileImageName = photographer
+  const photographerProfileImagePath = photographer
     ? accountProfileImageMap.get(photographer.id)?.trim() || ''
     : '';
   const photographerProfileImageUrl =
-    photographerProfileImageName && allowRemoteImages
-      ? buildCdnImageUrl(cdnBase, photographerProfileImageName)
+    photographerProfileImagePath
+      ? `local://${encodeURIComponent(photographerProfileImagePath)}`
       : '';
   const description = extended.Description || '';
   const imageUrl = getPhotoImageUrl(photo);

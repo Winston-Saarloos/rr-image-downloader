@@ -29,7 +29,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../components/ui/dialog';
-import { buildCdnImageUrl } from '../../shared/cdnUrl';
 import {
   AccountInfo,
   AvailableEvent,
@@ -733,11 +732,6 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
   const profileHistoryEnabled = tokenStatus === 'verified';
   const feedPhotosVisibilitySuffix =
     tokenStatus === 'verified' ? '(Public & Private)' : '(Public)';
-  const resolvedProfilePhotoUrl =
-    usernameStatus === 'found' && resolvedAccount
-      ? buildCdnImageUrl(settings.cdnBase, resolvedAccount.profileImage)
-      : '';
-
   const renderDownloadType = (params: {
     id: string;
     title: string;
@@ -1005,20 +999,12 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({
                 <div className="flex min-h-[3.75rem] items-center">
                   {usernameStatus === 'found' && resolvedAccount && (
                     <Card className="flex w-full flex-row items-center gap-2.5 p-2.5 shadow-none">
-                      {resolvedProfilePhotoUrl ? (
-                        <img
-                          src={resolvedProfilePhotoUrl}
-                          alt=""
-                          className="size-10 shrink-0 rounded-full object-cover ring-1 ring-border"
-                        />
-                      ) : (
-                        <div
-                          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted ring-1 ring-border"
-                          aria-hidden
-                        >
-                          <UserRound className="size-5 text-muted-foreground" />
-                        </div>
-                      )}
+                      <div
+                        className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted ring-1 ring-border"
+                        aria-hidden
+                      >
+                        <UserRound className="size-5 text-muted-foreground" />
+                      </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium leading-tight">
                           {resolvedAccount.displayName}

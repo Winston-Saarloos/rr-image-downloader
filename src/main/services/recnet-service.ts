@@ -27,6 +27,7 @@ import {
   LibraryMoveProgress,
   LibraryMoveResult,
   MetadataSyncResult,
+  MetadataSyncState,
 } from '../../shared/types';
 import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 import {
@@ -53,6 +54,54 @@ import {
   removePartialLibraryCopy,
   runLibraryMove,
 } from './library-move';
+
+type MetadataSyncProgress = Omit<MetadataSyncState, 'phase'>;
+type MetadataSyncProgressReporter = (
+  progress: Partial<MetadataSyncProgress>
+) => void;
+
+interface MetadataSyncAssetTracker {
+  report: MetadataSyncProgressReporter;
+  downloadedAssets: number;
+  skippedAssets: number;
+  failedAssets: number;
+}
+
+class MetadataSyncCancelledError extends Error {
+  constructor() {
+    super('Metadata sync cancelled');
+  }
+}
+
+function throwIfMetadataSyncAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new MetadataSyncCancelledError();
+  }
+}
+
+function createMetadataSyncAssetTracker(
+  report: MetadataSyncProgressReporter | undefined,
+  force: boolean
+): MetadataSyncAssetTracker | undefined {
+  if (!report) {
+    return undefined;
+  }
+
+  const tracker: MetadataSyncAssetTracker = {
+    report: progress =>
+      report({
+        ...progress,
+        downloadedAssets: progress.downloadedAssets ?? tracker.downloadedAssets,
+        skippedAssets: progress.skippedAssets ?? tracker.skippedAssets,
+        failedAssets: progress.failedAssets ?? tracker.failedAssets,
+        force,
+      }),
+    downloadedAssets: 0,
+    skippedAssets: 0,
+    failedAssets: 0,
+  };
+  return tracker;
+}
 
 /** Absolute directory used for reads/writes; empty if `outputRoot` is unset. */
 export function computeResolvedOutputRoot(outputRoot: string): string {
@@ -121,7 +170,7 @@ type FolderMetaV1 = {
   accountId: string;
   updatedAt: string;
   owner?: FolderMetaOwner;
-  /** Absolute paths under accountDir/metadata/profile.* / banner.* */
+  /** Absolute paths for owner metadata images. */
   ownerLocalProfileImagePath?: string;
   ownerLocalBannerImagePath?: string;
   cache?: Record<string, unknown>;
@@ -189,6 +238,7 @@ const DEFAULT_SETTINGS: RecNetSettings = {
   cdnBase: DEFAULT_CDN_BASE,
   interPageDelayMs: 100,
   maxConcurrentDownloads: 3,
+  backgroundMetadataSyncEnabled: false,
 };
 
 const PHOTO_DOWNLOAD_RETRY_COUNT = 3;
@@ -206,6 +256,8 @@ const EVENT_PHOTO_PAGE_SIZE = 100;
 const IMAGE_COMMENT_REQUEST_MIN_INTERVAL_MS = 250;
 const METADATA_SUBDIR = 'metadata';
 const METADATA_MANIFEST_FILE = 'metadata.json';
+const ACCOUNT_METADATA_MANIFEST_FILE = 'accounts-metadata.json';
+const ACCOUNT_METADATA_RECORDS_FILE = 'accounts.json';
 
 /** CDN image entry written next to files under metadata/ */
 type MetadataImageEntryV1 = {
@@ -217,12 +269,24 @@ type MetadataImageEntryV1 = {
   absolutePath: string;
 };
 
+type MetadataAssetSyncResult = {
+  entry?: MetadataImageEntryV1;
+  attemptedDownload: boolean;
+};
+
 type UserLibraryMetadataManifestV1 = {
   schemaVersion: 1;
   kind: 'user-library';
   updatedAt: string;
   profile?: MetadataImageEntryV1;
   banner?: MetadataImageEntryV1;
+  accounts?: Record<
+    string,
+    {
+      profile?: MetadataImageEntryV1;
+      banner?: MetadataImageEntryV1;
+    }
+  >;
 };
 
 type EventCreatorMetadataManifestV1 = {
@@ -243,6 +307,13 @@ type EventAlbumMetadataManifestV1 = {
   /** Server filenames; files live under events/<creatorId>/metadata/ */
   creatorProfileImageName?: string | null;
   creatorBannerImageName?: string | null;
+  accounts?: Record<
+    string,
+    {
+      profile?: MetadataImageEntryV1;
+      banner?: MetadataImageEntryV1;
+    }
+  >;
 };
 
 type RoomListingMetadataManifestV1 = {
@@ -251,7 +322,38 @@ type RoomListingMetadataManifestV1 = {
   roomId: string;
   updatedAt: string;
   roomImage?: MetadataImageEntryV1;
+  accounts?: Record<
+    string,
+    {
+      profile?: MetadataImageEntryV1;
+      banner?: MetadataImageEntryV1;
+    }
+  >;
 };
+
+type CentralAccountMetadataManifestV1 = {
+  schemaVersion: 1;
+  kind: 'account-metadata';
+  updatedAt: string;
+  accounts: Record<
+    string,
+    {
+      profile?: MetadataImageEntryV1;
+      banner?: MetadataImageEntryV1;
+    }
+  >;
+};
+
+type CentralAccountRecordsV1 = {
+  schemaVersion: 1;
+  kind: 'account-records';
+  updatedAt: string;
+  accounts: Record<string, PlayerResult>;
+};
+
+type AccountAssetMetadataManifest = Partial<UserLibraryMetadataManifestV1> &
+  Partial<EventAlbumMetadataManifestV1> &
+  Partial<RoomListingMetadataManifestV1>;
 
 type PersistedRecNetSettings = Omit<
   RecNetSettings,
@@ -297,6 +399,7 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
     interPageDelayMs,
     maxPhotosToDownload,
     maxConcurrentDownloads,
+    backgroundMetadataSyncEnabled: raw.backgroundMetadataSyncEnabled === true,
   };
 }
 
@@ -322,6 +425,10 @@ function extractPersistedRecNetSettings(
       Number.isFinite(raw.maxPhotosToDownload) &&
       raw.maxPhotosToDownload > 0
         ? Math.floor(raw.maxPhotosToDownload)
+        : undefined,
+    backgroundMetadataSyncEnabled:
+      typeof raw.backgroundMetadataSyncEnabled === 'boolean'
+        ? raw.backgroundMetadataSyncEnabled
         : undefined,
   };
 }
@@ -467,6 +574,8 @@ export class RecNetService extends EventEmitter {
       outputRoot: this.settings.outputRoot,
       cdnBase: this.settings.cdnBase,
       maxPhotosToDownload: this.settings.maxPhotosToDownload,
+      backgroundMetadataSyncEnabled:
+        this.settings.backgroundMetadataSyncEnabled,
     };
   }
 
@@ -1603,7 +1712,8 @@ export class RecNetService extends EventEmitter {
 
   async downloadPhotos(
     accountId: string,
-    token?: string
+    token?: string,
+    metadataProgress?: MetadataSyncProgressReporter
   ): Promise<DownloadResult> {
     await this.ensureSettingsLoaded();
     const operation = this.startOperation();
@@ -1848,6 +1958,32 @@ export class RecNetService extends EventEmitter {
         recoveredAfterRetry,
       };
       this.logDownloadBatchSummary(trace, downloadStats);
+      if (this.settings.backgroundMetadataSyncEnabled) {
+        metadataProgress?.({
+          currentStep: 'Syncing user metadata images',
+          currentItemLabel: `User ${accountId}`,
+          current: 0,
+          total: 1,
+          downloadedAssets: 0,
+          skippedAssets: 0,
+          failedAssets: 0,
+          force: false,
+        });
+        await this.syncUserLibraryMetadataAssets(
+          accountDir,
+          accountId,
+          false,
+          token,
+          createMetadataSyncAssetTracker(metadataProgress, false)
+        );
+        metadataProgress?.({
+          currentStep: 'Synced user metadata images',
+          currentItemLabel: `User ${accountId}`,
+          current: 1,
+          total: 1,
+          force: false,
+        });
+      }
 
       return {
         accountId,
@@ -1870,7 +2006,8 @@ export class RecNetService extends EventEmitter {
 
   async downloadFeedPhotos(
     accountId: string,
-    token?: string
+    token?: string,
+    metadataProgress?: MetadataSyncProgressReporter
   ): Promise<DownloadResult> {
     await this.ensureSettingsLoaded();
     if (this.currentOperation?.cancelled) {
@@ -2121,6 +2258,32 @@ export class RecNetService extends EventEmitter {
         recoveredAfterRetry,
       };
       this.logDownloadBatchSummary(trace, downloadStats);
+      if (this.settings.backgroundMetadataSyncEnabled) {
+        metadataProgress?.({
+          currentStep: 'Syncing user metadata images',
+          currentItemLabel: `User ${accountId}`,
+          current: 0,
+          total: 1,
+          downloadedAssets: 0,
+          skippedAssets: 0,
+          failedAssets: 0,
+          force: false,
+        });
+        await this.syncUserLibraryMetadataAssets(
+          accountDir,
+          accountId,
+          false,
+          token,
+          createMetadataSyncAssetTracker(metadataProgress, false)
+        );
+        metadataProgress?.({
+          currentStep: 'Synced user metadata images',
+          currentItemLabel: `User ${accountId}`,
+          current: 1,
+          total: 1,
+          force: false,
+        });
+      }
 
       return {
         accountId,
@@ -2867,7 +3030,7 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  /** Single path segment; uses Rec Room's CDN filename (basename). */
+  /** Single path segment; uses Rec Room's CDN filename (basename) saved as jpg. */
   private safeMetadataFilename(imageName: string): string {
     const n = this.normalizeImageName(imageName);
     if (!n) {
@@ -2877,7 +3040,9 @@ export class RecNetService extends EventEmitter {
     if (!base || base === '.' || base === '..') {
       return '';
     }
-    return base;
+    const parsed = path.parse(base);
+    const stem = parsed.name || base;
+    return `${stem}.jpg`;
   }
 
   /**
@@ -2888,47 +3053,99 @@ export class RecNetService extends EventEmitter {
     imageName: string | null | undefined,
     destDir: string,
     force: boolean,
-    token?: string
-  ): Promise<MetadataImageEntryV1 | undefined> {
+    token?: string,
+    tracker?: MetadataSyncAssetTracker,
+    assetLabel?: string,
+    signal?: AbortSignal,
+    downloadSemaphore?: Semaphore
+  ): Promise<MetadataAssetSyncResult> {
+    throwIfMetadataSyncAborted(signal);
     const normalized = this.normalizeImageName(imageName);
     if (!normalized) {
-      return undefined;
+      return { attemptedDownload: false };
     }
     const fileName = this.safeMetadataFilename(normalized);
     if (!fileName) {
-      return undefined;
+      return { attemptedDownload: false };
     }
     const destPath = path.join(destDir, fileName);
     if (!force && (await this.pathExistsWithContent(destPath))) {
+      if (tracker) {
+        tracker.skippedAssets++;
+        tracker.report({
+          currentAssetLabel: `${assetLabel ?? 'Image'} already exists: ${fileName}`,
+          skippedAssets: tracker.skippedAssets,
+        });
+      }
       return {
-        imageName: normalized,
-        relativePath: fileName,
-        absolutePath: destPath,
-      };
-    }
-    try {
-      const attempt = await this.downloadPhotoWithRetry(
-        normalized,
-        token,
-        undefined
-      );
-      if (attempt.response?.success && attempt.response.value) {
-        await fs.ensureDir(destDir);
-        await fs.writeFile(destPath, Buffer.from(attempt.response.value));
-        return {
+        entry: {
           imageName: normalized,
           relativePath: fileName,
           absolutePath: destPath,
+        },
+        attemptedDownload: false,
+      };
+    }
+    try {
+      tracker?.report({
+        currentAssetLabel: `Downloading ${assetLabel ?? 'image'}: ${fileName}`,
+      });
+      throwIfMetadataSyncAborted(signal);
+      await downloadSemaphore?.acquire();
+      let attempt: PhotoDownloadAttempt;
+      try {
+        attempt = await this.downloadPhotoWithRetry(
+          normalized,
+          token,
+          undefined,
+          signal
+        );
+      } finally {
+        downloadSemaphore?.release();
+      }
+      throwIfMetadataSyncAborted(signal);
+      if (attempt.response?.success && attempt.response.value) {
+        await fs.ensureDir(destDir);
+        throwIfMetadataSyncAborted(signal);
+        await fs.writeFile(destPath, Buffer.from(attempt.response.value));
+        if (tracker) {
+          tracker.downloadedAssets++;
+          tracker.report({
+            currentAssetLabel: `Downloaded ${assetLabel ?? 'image'}: ${fileName}`,
+            downloadedAssets: tracker.downloadedAssets,
+          });
+        }
+        return {
+          entry: {
+            imageName: normalized,
+            relativePath: fileName,
+            absolutePath: destPath,
+          },
+          attemptedDownload: true,
         };
       }
+      if (tracker) {
+        tracker.failedAssets++;
+        tracker.report({
+          currentAssetLabel: `Failed ${assetLabel ?? 'image'}: ${fileName}`,
+          failedAssets: tracker.failedAssets,
+        });
+      }
     } catch (error) {
+      if (tracker) {
+        tracker.failedAssets++;
+        tracker.report({
+          currentAssetLabel: `Failed ${assetLabel ?? 'image'}: ${fileName}`,
+          failedAssets: tracker.failedAssets,
+        });
+      }
       console.log(
         `Metadata sync: failed to download ${normalized}: ${
           (error as Error).message
         }`
       );
     }
-    return undefined;
+    return { attemptedDownload: true };
   }
 
   private async writeMetadataManifest(
@@ -2939,19 +3156,484 @@ export class RecNetService extends EventEmitter {
     await fs.writeJson(manifestPath, payload, { spaces: 2 });
   }
 
-  private async syncMetadataDelay(): Promise<void> {
-    const ms = this.settings.interPageDelayMs ?? 0;
-    if (ms > 0) {
-      await this.delay(ms, undefined);
+  private async delayWithAbortSignal(
+    ms: number,
+    signal?: AbortSignal
+  ): Promise<void> {
+    throwIfMetadataSyncAborted(signal);
+    if (ms <= 0) {
+      return;
     }
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(new MetadataSyncCancelledError());
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private async runWithMetadataDownloadConcurrency<T>(
+    items: T[],
+    signal: AbortSignal | undefined,
+    worker: (item: T, index: number) => Promise<void>
+  ): Promise<void> {
+    const workerCount = Math.min(
+      Math.max(1, this.settings.maxConcurrentDownloads),
+      items.length
+    );
+    let nextIndex = 0;
+
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (true) {
+          throwIfMetadataSyncAborted(signal);
+          const index = nextIndex;
+          nextIndex++;
+          if (index >= items.length) {
+            return;
+          }
+          await worker(items[index], index);
+        }
+      })
+    );
+  }
+
+  private async syncAccountMetadataAssets(
+    accounts: PlayerResult[],
+    metadataDirPath: string,
+    force: boolean,
+    token?: string,
+    tracker?: MetadataSyncAssetTracker,
+    signal?: AbortSignal,
+    includeBanners = false,
+    downloadSemaphore?: Semaphore
+  ): Promise<
+    Record<
+      string,
+      {
+        profile?: MetadataImageEntryV1;
+        banner?: MetadataImageEntryV1;
+      }
+    >
+  > {
+    const accountAssets: Record<
+      string,
+      {
+        profile?: MetadataImageEntryV1;
+        banner?: MetadataImageEntryV1;
+      }
+    > = {};
+    const accountsDir = path.join(metadataDirPath, 'accounts');
+    const tasks: Array<
+      Promise<{
+        accountId: string;
+        kind: 'profile' | 'banner';
+        entry?: MetadataImageEntryV1;
+      }>
+    > = [];
+
+    for (const account of accounts) {
+      throwIfMetadataSyncAborted(signal);
+      const accountId = this.normalizeId(account.accountId);
+      if (!accountId) {
+        continue;
+      }
+
+      const accountDir = path.join(accountsDir, this.sanitizeFileStem(accountId));
+      const displayName =
+        account.displayName || account.username || `account ${accountId}`;
+      tasks.push(
+        this.downloadMetadataAssetToDir(
+          account.profileImage,
+          accountDir,
+          force,
+          token,
+          tracker,
+          `${displayName} profile`,
+          signal,
+          downloadSemaphore
+        ).then(result => ({
+          accountId,
+          kind: 'profile' as const,
+          entry: result.entry,
+        }))
+      );
+
+      if (includeBanners) {
+        tasks.push(
+          this.downloadMetadataAssetToDir(
+            account.bannerImage,
+            accountDir,
+            force,
+            token,
+            tracker,
+            `${displayName} banner`,
+            signal,
+            downloadSemaphore
+          ).then(result => ({
+            accountId,
+            kind: 'banner' as const,
+            entry: result.entry,
+          }))
+        );
+      }
+    }
+
+    const syncedAssets = await Promise.all(tasks);
+    for (const { accountId, kind, entry } of syncedAssets) {
+      if (!entry) {
+        continue;
+      }
+      accountAssets[accountId] = {
+        ...(accountAssets[accountId] ?? {}),
+        [kind]: entry,
+      };
+    }
+
+    return accountAssets;
+  }
+
+  private getRootMetadataDirectory(): string {
+    return path.join(this.getResolvedOutputRoot(), METADATA_SUBDIR);
+  }
+
+  private getCentralAccountMetadataManifestPath(): string {
+    return path.join(
+      this.getRootMetadataDirectory(),
+      ACCOUNT_METADATA_MANIFEST_FILE
+    );
+  }
+
+  private getCentralAccountRecordsPath(): string {
+    return path.join(this.getRootMetadataDirectory(), ACCOUNT_METADATA_RECORDS_FILE);
+  }
+
+  private async readCentralAccountMetadataManifest(): Promise<CentralAccountMetadataManifestV1 | null> {
+    const manifestPath = this.getCentralAccountMetadataManifestPath();
+    if (!(await fs.pathExists(manifestPath))) {
+      return null;
+    }
+
+    try {
+      const raw = (await fs.readJson(
+        manifestPath
+      )) as Partial<CentralAccountMetadataManifestV1>;
+      if (!raw || raw.schemaVersion !== 1 || raw.kind !== 'account-metadata') {
+        return null;
+      }
+      return {
+        schemaVersion: 1,
+        kind: 'account-metadata',
+        updatedAt: raw.updatedAt || new Date().toISOString(),
+        accounts: raw.accounts ?? {},
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async readCentralAccountRecords(): Promise<CentralAccountRecordsV1 | null> {
+    const recordsPath = this.getCentralAccountRecordsPath();
+    if (!(await fs.pathExists(recordsPath))) {
+      return null;
+    }
+
+    try {
+      const raw = (await fs.readJson(recordsPath)) as Partial<CentralAccountRecordsV1>;
+      if (!raw || raw.schemaVersion !== 1 || raw.kind !== 'account-records') {
+        return null;
+      }
+      return {
+        schemaVersion: 1,
+        kind: 'account-records',
+        updatedAt: raw.updatedAt || new Date().toISOString(),
+        accounts: raw.accounts ?? {},
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeCentralAccountRecords(
+    accounts: PlayerResult[]
+  ): Promise<CentralAccountRecordsV1> {
+    const existing = await this.readCentralAccountRecords();
+    const nextAccounts: Record<string, PlayerResult> = {
+      ...(existing?.accounts ?? {}),
+    };
+
+    for (const account of this.normalizeAccounts(accounts)) {
+      if (account.accountId) {
+        nextAccounts[account.accountId] = account;
+      }
+    }
+
+    const records: CentralAccountRecordsV1 = {
+      schemaVersion: 1,
+      kind: 'account-records',
+      updatedAt: new Date().toISOString(),
+      accounts: nextAccounts,
+    };
+    await this.writeMetadataManifest(this.getCentralAccountRecordsPath(), records);
+    return records;
+  }
+
+  private async syncCentralAccountMetadataAssets(
+    accounts: PlayerResult[],
+    force: boolean,
+    token?: string,
+    tracker?: MetadataSyncAssetTracker,
+    signal?: AbortSignal,
+    includeBanners = false,
+    downloadSemaphore?: Semaphore
+  ): Promise<CentralAccountMetadataManifestV1> {
+    throwIfMetadataSyncAborted(signal);
+    const metadataDirPath = this.getRootMetadataDirectory();
+    await fs.ensureDir(metadataDirPath);
+
+    const existing = await this.readCentralAccountMetadataManifest();
+    const nextAccounts: CentralAccountMetadataManifestV1['accounts'] = {
+      ...(existing?.accounts ?? {}),
+    };
+    const uniqueAccounts = new Map<string, PlayerResult>();
+    for (const account of this.normalizeAccounts(accounts)) {
+      if (account.accountId) {
+        uniqueAccounts.set(account.accountId, account);
+      }
+    }
+    await this.writeCentralAccountRecords(Array.from(uniqueAccounts.values()));
+
+    const synced = await this.syncAccountMetadataAssets(
+      Array.from(uniqueAccounts.values()),
+      metadataDirPath,
+      force,
+      token,
+      tracker,
+      signal,
+      includeBanners,
+      downloadSemaphore
+    );
+    for (const [accountId, assets] of Object.entries(synced)) {
+      nextAccounts[accountId] = assets;
+    }
+
+    const manifest: CentralAccountMetadataManifestV1 = {
+      schemaVersion: 1,
+      kind: 'account-metadata',
+      updatedAt: new Date().toISOString(),
+      accounts: nextAccounts,
+    };
+    await this.writeMetadataManifest(
+      this.getCentralAccountMetadataManifestPath(),
+      manifest
+    );
+    return manifest;
+  }
+
+  private async resolveCentralAccountAssetPaths(
+    account: PlayerResult,
+    manifest?: CentralAccountMetadataManifestV1 | null
+  ): Promise<{
+    localProfileImagePath?: string;
+    localBannerImagePath?: string;
+  }> {
+    const accountId = this.normalizeId(account.accountId);
+    if (!accountId) {
+      return {};
+    }
+
+    const metadataDirPath = this.getRootMetadataDirectory();
+    const centralManifest =
+      manifest === undefined
+        ? await this.readCentralAccountMetadataManifest()
+        : manifest;
+    const accountManifest = centralManifest?.accounts?.[accountId];
+    let localProfileImagePath = await this.resolveMetadataEntryPath(
+      metadataDirPath,
+      accountManifest?.profile
+    );
+    let localBannerImagePath = await this.resolveMetadataEntryPath(
+      metadataDirPath,
+      accountManifest?.banner
+    );
+
+    if (!localProfileImagePath) {
+      const fileName = this.safeMetadataFilename(account.profileImage);
+      const candidate = fileName
+        ? path.join(
+            metadataDirPath,
+            'accounts',
+            this.sanitizeFileStem(accountId),
+            fileName
+          )
+        : '';
+      if (candidate && (await this.pathExistsWithContent(candidate))) {
+        localProfileImagePath = candidate;
+      }
+    }
+
+    if (!localBannerImagePath) {
+      const fileName = this.safeMetadataFilename(account.bannerImage);
+      const candidate = fileName
+        ? path.join(
+            metadataDirPath,
+            'accounts',
+            this.sanitizeFileStem(accountId),
+            fileName
+          )
+        : '';
+      if (candidate && (await this.pathExistsWithContent(candidate))) {
+        localBannerImagePath = candidate;
+      }
+    }
+
+    return { localProfileImagePath, localBannerImagePath };
+  }
+
+  private async resolveMetadataEntryPath(
+    metadataDirPath: string,
+    entry?: MetadataImageEntryV1
+  ): Promise<string | undefined> {
+    const absolutePath = entry?.absolutePath;
+    if (absolutePath && (await this.pathExistsWithContent(absolutePath))) {
+      return absolutePath;
+    }
+
+    const relativePath = entry?.relativePath;
+    if (relativePath) {
+      const localPath = path.join(metadataDirPath, relativePath);
+      if (await this.pathExistsWithContent(localPath)) {
+        return localPath;
+      }
+    }
+
+    return undefined;
+  }
+
+  private async attachLocalAccountAssetPaths(
+    accounts: PlayerResult[],
+    libraryDir: string
+  ): Promise<PlayerResult[]> {
+    const metadataDirPath = path.join(libraryDir, METADATA_SUBDIR);
+    const manifestPath = path.join(metadataDirPath, METADATA_MANIFEST_FILE);
+    let manifest: AccountAssetMetadataManifest | null = null;
+    if (await fs.pathExists(manifestPath)) {
+      try {
+        manifest = (await fs.readJson(
+          manifestPath
+        )) as AccountAssetMetadataManifest;
+      } catch {
+        manifest = null;
+      }
+    }
+    const folderMeta = await this.readFolderMeta(libraryDir);
+
+    const decorated: PlayerResult[] = [];
+    const centralManifest = await this.readCentralAccountMetadataManifest();
+    const centralRecords = await this.readCentralAccountRecords();
+    for (const account of this.normalizeAccounts(accounts)) {
+      const accountId = this.normalizeId(account.accountId);
+      const centralAccount = centralRecords?.accounts?.[accountId];
+      const mergedAccount: PlayerResult = {
+        ...account,
+        ...(centralAccount ?? {}),
+        accountId,
+      };
+      const centralPaths = await this.resolveCentralAccountAssetPaths(
+        mergedAccount,
+        centralManifest
+      );
+      const accountManifest = manifest?.accounts?.[accountId];
+      let localProfileImagePath =
+        centralPaths.localProfileImagePath ??
+        (await this.resolveMetadataEntryPath(
+          metadataDirPath,
+          accountManifest?.profile
+        ));
+      let localBannerImagePath =
+        centralPaths.localBannerImagePath ??
+        (await this.resolveMetadataEntryPath(
+          metadataDirPath,
+          accountManifest?.banner
+        ));
+
+      if (!localProfileImagePath) {
+        const fileName = this.safeMetadataFilename(account.profileImage);
+        const candidate = fileName
+          ? path.join(
+              metadataDirPath,
+              'accounts',
+              this.sanitizeFileStem(accountId),
+              fileName
+            )
+          : '';
+        if (candidate && (await this.pathExistsWithContent(candidate))) {
+          localProfileImagePath = candidate;
+        }
+      }
+
+      if (!localBannerImagePath) {
+        const fileName = this.safeMetadataFilename(account.bannerImage);
+        const candidate = fileName
+          ? path.join(
+              metadataDirPath,
+              'accounts',
+              this.sanitizeFileStem(accountId),
+              fileName
+            )
+          : '';
+        if (candidate && (await this.pathExistsWithContent(candidate))) {
+          localBannerImagePath = candidate;
+        }
+      }
+
+      if (folderMeta?.accountId === accountId) {
+        localProfileImagePath =
+          localProfileImagePath ??
+          (folderMeta.ownerLocalProfileImagePath &&
+          (await this.pathExistsWithContent(folderMeta.ownerLocalProfileImagePath))
+            ? folderMeta.ownerLocalProfileImagePath
+            : await this.resolveMetadataEntryPath(
+                metadataDirPath,
+                manifest?.profile
+              ));
+        localBannerImagePath =
+          localBannerImagePath ??
+          (folderMeta.ownerLocalBannerImagePath &&
+          (await this.pathExistsWithContent(folderMeta.ownerLocalBannerImagePath))
+            ? folderMeta.ownerLocalBannerImagePath
+            : await this.resolveMetadataEntryPath(
+                metadataDirPath,
+                manifest?.banner
+              ));
+      }
+
+      decorated.push({
+        ...mergedAccount,
+        localProfileImagePath,
+        localBannerImagePath,
+      });
+    }
+
+    return decorated;
   }
 
   private async syncUserLibraryMetadataAssets(
     accountDir: string,
     accountId: string,
     force: boolean,
-    token?: string
+    token?: string,
+    tracker?: MetadataSyncAssetTracker,
+    syncAccounts = true,
+    signal?: AbortSignal,
+    downloadSemaphore?: Semaphore
   ): Promise<boolean> {
+    throwIfMetadataSyncAborted(signal);
     const accountsJsonPath = path.join(accountDir, `${accountId}_accounts.json`);
     if (!(await fs.pathExists(accountsJsonPath))) {
       return false;
@@ -2974,26 +3656,26 @@ export class RecNetService extends EventEmitter {
     await fs.ensureDir(metadataDirPath);
 
     const existing = await this.readFolderMeta(accountDir);
-    const profile = await this.downloadMetadataAssetToDir(
-      ownerRow.profileImage,
-      metadataDirPath,
-      force,
-      token
-    );
-    await this.syncMetadataDelay();
-    const banner = await this.downloadMetadataAssetToDir(
-      ownerRow.bannerImage,
-      metadataDirPath,
-      force,
-      token
-    );
+    const centralManifest = syncAccounts
+      ? await this.syncCentralAccountMetadataAssets(
+          accountsData,
+          force,
+          token,
+          tracker,
+          signal,
+          false,
+          downloadSemaphore
+        )
+      : await this.readCentralAccountMetadataManifest();
+    const ownerAssets =
+      centralManifest?.accounts[this.normalizeId(ownerRow.accountId)];
 
     const manifest: UserLibraryMetadataManifestV1 = {
       schemaVersion: 1,
       kind: 'user-library',
       updatedAt: new Date().toISOString(),
-      profile,
-      banner,
+      profile: ownerAssets?.profile,
+      banner: ownerAssets?.banner,
     };
     await this.writeMetadataManifest(
       path.join(metadataDirPath, METADATA_MANIFEST_FILE),
@@ -3002,9 +3684,9 @@ export class RecNetService extends EventEmitter {
 
     await this.writeFolderMeta(accountDir, accountId, {
       ownerLocalProfileImagePath:
-        profile?.absolutePath ?? existing?.ownerLocalProfileImagePath,
+        ownerAssets?.profile?.absolutePath ?? existing?.ownerLocalProfileImagePath,
       ownerLocalBannerImagePath:
-        banner?.absolutePath ?? existing?.ownerLocalBannerImagePath,
+        ownerAssets?.banner?.absolutePath ?? existing?.ownerLocalBannerImagePath,
     });
     return true;
   }
@@ -3062,8 +3744,13 @@ export class RecNetService extends EventEmitter {
   private async syncCreatorSharedMetadataAssets(
     creatorAccountId: string,
     force: boolean,
-    token?: string
+    token?: string,
+    tracker?: MetadataSyncAssetTracker,
+    syncAccounts = true,
+    signal?: AbortSignal,
+    downloadSemaphore?: Semaphore
   ): Promise<boolean> {
+    throwIfMetadataSyncAborted(signal);
     const creator = await this.loadCreatorPlayerResultForEvents(
       creatorAccountId
     );
@@ -3076,27 +3763,27 @@ export class RecNetService extends EventEmitter {
     );
     await fs.ensureDir(metadataDir);
 
-    const profile = await this.downloadMetadataAssetToDir(
-      creator.profileImage,
-      metadataDir,
-      force,
-      token
-    );
-    await this.syncMetadataDelay();
-    const banner = await this.downloadMetadataAssetToDir(
-      creator.bannerImage,
-      metadataDir,
-      force,
-      token
-    );
+    const centralManifest = syncAccounts
+      ? await this.syncCentralAccountMetadataAssets(
+          [creator],
+          force,
+          token,
+          tracker,
+          signal,
+          true,
+          downloadSemaphore
+        )
+      : await this.readCentralAccountMetadataManifest();
+    const creatorAssets =
+      centralManifest?.accounts[this.normalizeId(creator.accountId)];
 
     const manifest: EventCreatorMetadataManifestV1 = {
       schemaVersion: 1,
       kind: 'event-creator',
       creatorAccountId: this.normalizeId(creatorAccountId),
       updatedAt: new Date().toISOString(),
-      profile,
-      banner,
+      profile: creatorAssets?.profile,
+      banner: creatorAssets?.banner,
     };
     await this.writeMetadataManifest(
       path.join(metadataDir, METADATA_MANIFEST_FILE),
@@ -3109,8 +3796,13 @@ export class RecNetService extends EventEmitter {
     creatorAccountId: string,
     eventId: string,
     force: boolean,
-    token?: string
+    token?: string,
+    tracker?: MetadataSyncAssetTracker,
+    syncAccounts = true,
+    signal?: AbortSignal,
+    downloadSemaphore?: Semaphore
   ): Promise<boolean> {
+    throwIfMetadataSyncAborted(signal);
     const eventDir = this.getEventDirectory(creatorAccountId, eventId);
     const photosJsonPath = path.join(eventDir, `${eventId}_photos.json`);
     if (!(await fs.pathExists(photosJsonPath))) {
@@ -3122,7 +3814,7 @@ export class RecNetService extends EventEmitter {
     } catch {
       return false;
     }
-    if (!Array.isArray(photoList) || photoList.length === 0) {
+    if (!Array.isArray(photoList)) {
       return false;
     }
 
@@ -3162,13 +3854,17 @@ export class RecNetService extends EventEmitter {
       coverSource = 'event';
     }
 
-    const coverEntry = await this.downloadMetadataAssetToDir(
+    const coverResult = await this.downloadMetadataAssetToDir(
       coverImageName,
       metadataDirPath,
       force,
-      token
+      token,
+      tracker,
+      `event ${eventId} cover`,
+      signal,
+      downloadSemaphore
     );
-    await this.syncMetadataDelay();
+    const coverEntry = coverResult.entry;
 
     const creatorMetaPath = path.join(
       this.getCreatorEventsDirectory(creatorAccountId),
@@ -3186,6 +3882,24 @@ export class RecNetService extends EventEmitter {
         creatorBannerImageName = cm.banner?.imageName ?? null;
       } catch {
         // ignore
+      }
+    }
+
+    const accountsJsonPath = path.join(eventDir, `${eventId}_accounts.json`);
+    if (syncAccounts && (await fs.pathExists(accountsJsonPath))) {
+      try {
+        const rawAccounts = (await fs.readJson(accountsJsonPath)) as PlayerResult[];
+        await this.syncCentralAccountMetadataAssets(
+          Array.isArray(rawAccounts) ? this.normalizeAccounts(rawAccounts) : [],
+          force,
+          token,
+          tracker,
+          signal,
+          false,
+          downloadSemaphore
+        );
+      } catch {
+        // Account images are best-effort metadata.
       }
     }
 
@@ -3226,8 +3940,13 @@ export class RecNetService extends EventEmitter {
   private async syncRoomFolderMetadataAssets(
     roomId: string,
     force: boolean,
-    token?: string
+    token?: string,
+    tracker?: MetadataSyncAssetTracker,
+    syncAccounts = true,
+    signal?: AbortSignal,
+    downloadSemaphore?: Semaphore
   ): Promise<boolean> {
+    throwIfMetadataSyncAborted(signal);
     const roomDir = this.getRoomDirectory(roomId);
     const photosJsonPath = path.join(roomDir, `${roomId}_photos.json`);
     if (!(await fs.pathExists(photosJsonPath))) {
@@ -3271,12 +3990,34 @@ export class RecNetService extends EventEmitter {
 
     const metadataDirPath = path.join(roomDir, METADATA_SUBDIR);
     await fs.ensureDir(metadataDirPath);
-    const roomImage = await this.downloadMetadataAssetToDir(
+    const roomImageResult = await this.downloadMetadataAssetToDir(
       imageName,
       metadataDirPath,
       force,
-      token
+      token,
+      tracker,
+      `${room.Name || roomId} room image`,
+      signal,
+      downloadSemaphore
     );
+    const roomImage = roomImageResult.entry;
+    const accountsJsonPath = path.join(roomDir, `${roomId}_accounts.json`);
+    if (syncAccounts && (await fs.pathExists(accountsJsonPath))) {
+      try {
+        const rawAccounts = (await fs.readJson(accountsJsonPath)) as PlayerResult[];
+        await this.syncCentralAccountMetadataAssets(
+          Array.isArray(rawAccounts) ? this.normalizeAccounts(rawAccounts) : [],
+          force,
+          token,
+          tracker,
+          signal,
+          false,
+          downloadSemaphore
+        );
+      } catch {
+        // Account images are best-effort metadata.
+      }
+    }
     const manifest: RoomListingMetadataManifestV1 = {
       schemaVersion: 1,
       kind: 'room-listing',
@@ -3297,16 +4038,21 @@ export class RecNetService extends EventEmitter {
   }
 
   /**
-   * Walks the output library and downloads missing metadata images (profile/banner,
+   * Walks the output library and downloads missing metadata images (profile images,
    * event covers, room listing images). Safe to run in the background on app launch.
    */
   async syncMetadataLibraryAssets(params?: {
     force?: boolean;
     token?: string;
+    signal?: AbortSignal;
+    onProgress?: MetadataSyncProgressReporter;
   }): Promise<MetadataSyncResult> {
     await this.ensureSettingsLoaded();
     const force = Boolean(params?.force);
     const token = params?.token?.trim() || undefined;
+    const signal = params?.signal;
+    const report = params?.onProgress;
+    throwIfMetadataSyncAborted(signal);
     const root = this.getResolvedOutputRoot().trim();
     const result: MetadataSyncResult = {
       accountsProcessed: 0,
@@ -3316,95 +4062,314 @@ export class RecNetService extends EventEmitter {
     };
 
     if (!root || !(await fs.pathExists(root))) {
+      report?.({
+        currentStep: 'No output folder found',
+        current: 0,
+        total: 0,
+        force,
+      });
       return result;
     }
 
+    const tracker = createMetadataSyncAssetTracker(report, force) ?? {
+      report: () => undefined,
+      downloadedAssets: 0,
+      skippedAssets: 0,
+      failedAssets: 0,
+    };
+    const downloadSemaphore = new Semaphore(this.settings.maxConcurrentDownloads);
+    let current = 0;
+    let total = 0;
+    const emitStep = (
+      currentStep: string,
+      currentItemLabel?: string,
+      nextCurrent = current
+    ) => {
+      report?.({
+        currentStep,
+        currentItemLabel,
+        currentAssetLabel: undefined,
+        current: nextCurrent,
+        total,
+        downloadedAssets: tracker.downloadedAssets,
+        skippedAssets: tracker.skippedAssets,
+        failedAssets: tracker.failedAssets,
+        force,
+      });
+    };
+
     try {
+      throwIfMetadataSyncAborted(signal);
       const top = await fs.readdir(root, { withFileTypes: true });
-      for (const entry of top) {
-        if (!entry.isDirectory()) {
-          continue;
+      const accountNames = top
+        .filter(
+          entry =>
+            entry.isDirectory() &&
+            entry.name !== 'rooms' &&
+            entry.name !== 'events'
+        )
+        .map(entry => entry.name);
+      const accountRowsById = new Map<string, PlayerResult>();
+      const imageOwnerAccountIds = new Set<string>();
+      const collectAccountsFromFile = async (
+        accountJsonPath: string
+      ): Promise<void> => {
+        throwIfMetadataSyncAborted(signal);
+        if (!(await fs.pathExists(accountJsonPath))) {
+          return;
         }
-        const name = entry.name;
-        if (name === 'rooms' || name === 'events') {
-          continue;
+        try {
+          const raw = (await fs.readJson(accountJsonPath)) as
+            | PlayerResult
+            | PlayerResult[];
+          const accountRows = Array.isArray(raw) ? raw : raw ? [raw] : [];
+          const accounts =
+            accountRows.length > 0 ? this.normalizeAccounts(accountRows) : [];
+          for (const account of accounts) {
+            if (account.accountId) {
+              accountRowsById.set(account.accountId, account);
+            }
+          }
+        } catch {
+          // Ignore malformed context files during best-effort background sync.
         }
-        const accountDir = path.join(root, name);
-        const did = await this.syncUserLibraryMetadataAssets(
-          accountDir,
-          name,
-          force,
-          token
+      };
+      const collectImageOwnerIdsFromFile = async (
+        photosJsonPath: string
+      ): Promise<void> => {
+        throwIfMetadataSyncAborted(signal);
+        if (!(await fs.pathExists(photosJsonPath))) {
+          return;
+        }
+        try {
+          const raw = (await fs.readJson(photosJsonPath)) as Photo[];
+          const photos = Array.isArray(raw) ? this.normalizePhotos(raw) : [];
+          for (const photo of photos) {
+            const playerId = this.normalizeId(photo.PlayerId);
+            if (playerId) {
+              imageOwnerAccountIds.add(playerId);
+            }
+          }
+        } catch {
+          // Ignore malformed photo files during best-effort background sync.
+        }
+      };
+
+      for (const name of accountNames) {
+        throwIfMetadataSyncAborted(signal);
+        await collectAccountsFromFile(
+          path.join(root, name, `${name}_accounts.json`)
         );
-        if (did) {
-          result.accountsProcessed++;
-        }
-        await this.syncMetadataDelay();
+        await collectImageOwnerIdsFromFile(
+          path.join(root, name, `${name}_photos.json`)
+        );
+        await collectImageOwnerIdsFromFile(
+          path.join(root, name, `${name}_feed.json`)
+        );
       }
 
+      const eventCreators: string[] = [];
+      const eventFolders: Array<{ creatorId: string; eventId: string }> = [];
       const eventsRoot = this.getEventsRoot();
       if (await fs.pathExists(eventsRoot)) {
         const creators = await fs.readdir(eventsRoot, { withFileTypes: true });
         for (const c of creators) {
+          throwIfMetadataSyncAborted(signal);
           if (!c.isDirectory()) {
             continue;
           }
-          const creatorId = c.name;
-          const creatorDir = path.join(eventsRoot, creatorId);
-          const creatorSynced = await this.syncCreatorSharedMetadataAssets(
-            creatorId,
-            force,
-            token
-          );
-          if (creatorSynced) {
-            result.creatorsProcessed++;
-          }
-          await this.syncMetadataDelay();
-
+          eventCreators.push(c.name);
+          const creatorDir = path.join(eventsRoot, c.name);
+          await collectAccountsFromFile(path.join(creatorDir, 'creator.json'));
           const eventDirs = await fs.readdir(creatorDir, {
             withFileTypes: true,
           });
           for (const ed of eventDirs) {
-            if (!ed.isDirectory() || ed.name === METADATA_SUBDIR) {
-              continue;
+            throwIfMetadataSyncAborted(signal);
+            if (ed.isDirectory() && ed.name !== METADATA_SUBDIR) {
+              eventFolders.push({ creatorId: c.name, eventId: ed.name });
+              await collectAccountsFromFile(
+                path.join(creatorDir, ed.name, `${ed.name}_accounts.json`)
+              );
+              await collectImageOwnerIdsFromFile(
+                path.join(creatorDir, ed.name, `${ed.name}_photos.json`)
+              );
             }
-            const eid = ed.name;
-            const did = await this.syncEventFolderMetadataAssets(
-              creatorId,
-              eid,
-              force,
-              token
-            );
-            if (did) {
-              result.eventsProcessed++;
-            }
-            await this.syncMetadataDelay();
           }
         }
       }
 
+      const roomIds: string[] = [];
       const roomsRoot = this.getRoomsRoot();
       if (await fs.pathExists(roomsRoot)) {
         const roomEntries = await fs.readdir(roomsRoot, {
           withFileTypes: true,
         });
         for (const re of roomEntries) {
-          if (!re.isDirectory()) {
-            continue;
+          throwIfMetadataSyncAborted(signal);
+          if (re.isDirectory()) {
+            roomIds.push(re.name);
+            await collectAccountsFromFile(
+              path.join(roomsRoot, re.name, `${re.name}_accounts.json`)
+            );
+            await collectImageOwnerIdsFromFile(
+              path.join(roomsRoot, re.name, `${re.name}_photos.json`)
+            );
           }
-          const rid = re.name;
-          const did = await this.syncRoomFolderMetadataAssets(
-            rid,
+        }
+      }
+
+      total =
+        accountNames.length +
+        eventCreators.length +
+        eventFolders.length +
+        roomIds.length;
+      emitStep('Scanning metadata folders', undefined, 0);
+
+      const imageOwnerAccounts = Array.from(imageOwnerAccountIds)
+        .map(accountId => accountRowsById.get(accountId))
+        .filter((account): account is PlayerResult => Boolean(account));
+
+      if (imageOwnerAccounts.length > 0) {
+        throwIfMetadataSyncAborted(signal);
+        emitStep(
+          'Syncing image owner metadata',
+          `${imageOwnerAccounts.length} image owner(s)`,
+          0
+        );
+        await this.syncCentralAccountMetadataAssets(
+          imageOwnerAccounts,
+          force,
+          token,
+          tracker,
+          signal,
+          false,
+          downloadSemaphore
+        );
+        emitStep(
+          'Synced image owner metadata',
+          `${imageOwnerAccounts.length} image owner(s)`,
+          0
+        );
+      }
+
+      await this.runWithMetadataDownloadConcurrency(
+        accountNames,
+        signal,
+        async name => {
+          throwIfMetadataSyncAborted(signal);
+          const accountDir = path.join(root, name);
+          emitStep('Syncing user library metadata', `User ${name}`);
+          const did = await this.syncUserLibraryMetadataAssets(
+            accountDir,
+            name,
             force,
-            token
+            token,
+            tracker,
+            false,
+            signal,
+            downloadSemaphore
+          );
+          if (did) {
+            result.accountsProcessed++;
+          }
+          current++;
+          emitStep('Synced user library metadata', `User ${name}`);
+        }
+      );
+
+      await this.runWithMetadataDownloadConcurrency(
+        eventCreators,
+        signal,
+        async creatorId => {
+          throwIfMetadataSyncAborted(signal);
+          emitStep('Syncing event creator metadata', `Creator ${creatorId}`);
+          const creatorSynced = await this.syncCreatorSharedMetadataAssets(
+            creatorId,
+            force,
+            token,
+            tracker,
+            true,
+            signal,
+            downloadSemaphore
+          );
+          if (creatorSynced) {
+            result.creatorsProcessed++;
+          }
+          current++;
+          emitStep('Synced event creator metadata', `Creator ${creatorId}`);
+        }
+      );
+
+      await this.runWithMetadataDownloadConcurrency(
+        eventFolders,
+        signal,
+        async ({ creatorId, eventId }) => {
+          throwIfMetadataSyncAborted(signal);
+          emitStep('Syncing event album metadata', `Event ${eventId}`);
+          const did = await this.syncEventFolderMetadataAssets(
+            creatorId,
+            eventId,
+            force,
+            token,
+            tracker,
+            false,
+            signal,
+            downloadSemaphore
+          );
+          if (did) {
+            result.eventsProcessed++;
+          }
+          current++;
+          emitStep('Synced event album metadata', `Event ${eventId}`);
+        }
+      );
+
+      await this.runWithMetadataDownloadConcurrency(
+        roomIds,
+        signal,
+        async roomId => {
+          throwIfMetadataSyncAborted(signal);
+          emitStep('Syncing room metadata', `Room ${roomId}`);
+          const did = await this.syncRoomFolderMetadataAssets(
+            roomId,
+            force,
+            token,
+            tracker,
+            false,
+            signal,
+            downloadSemaphore
           );
           if (did) {
             result.roomsProcessed++;
           }
-          await this.syncMetadataDelay();
+          current++;
+          emitStep('Synced room metadata', `Room ${roomId}`);
         }
-      }
+      );
     } catch (error) {
+      if (error instanceof MetadataSyncCancelledError) {
+        report?.({
+          currentStep: 'Metadata sync cancelled',
+          current,
+          total,
+          downloadedAssets: tracker.downloadedAssets,
+          skippedAssets: tracker.skippedAssets,
+          failedAssets: tracker.failedAssets,
+          force,
+        });
+        throw error;
+      }
+      report?.({
+        currentStep: 'Metadata sync failed',
+        current,
+        total,
+        downloadedAssets: tracker.downloadedAssets,
+        skippedAssets: tracker.skippedAssets,
+        failedAssets: tracker.failedAssets,
+        force,
+        error: (error as Error).message,
+      });
       console.log(
         `Metadata library sync failed: ${(error as Error).message}`
       );
@@ -4582,13 +5547,15 @@ export class RecNetService extends EventEmitter {
   private async downloadPhotoWithRetry(
     imageName: string,
     token?: string,
-    operation?: CurrentOperation
+    operation?: CurrentOperation,
+    signal?: AbortSignal
   ): Promise<PhotoDownloadAttempt> {
     let attempts = 0;
     let lastResponse: PhotoDownloadAttempt['response'];
     let lastError: Error | undefined;
 
     while (attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS) {
+      throwIfMetadataSyncAborted(signal);
       if (operation?.cancelled || this.currentOperation?.cancelled) {
         throw this.createOperationCancelledError();
       }
@@ -4601,10 +5568,11 @@ export class RecNetService extends EventEmitter {
           this.settings.cdnBase,
           token,
           {
-            signal: operation?.controller.signal,
+            signal: signal ?? operation?.controller.signal,
             timeoutMs: PHOTO_DOWNLOAD_TIMEOUT_MS,
           }
         );
+        throwIfMetadataSyncAborted(signal);
         if (this.isCancelledResponse(response)) {
           throw this.createOperationCancelledError();
         }
@@ -4676,7 +5644,11 @@ export class RecNetService extends EventEmitter {
       }
 
       if (attempts < PHOTO_DOWNLOAD_MAX_ATTEMPTS) {
-        await this.delay(PHOTO_DOWNLOAD_RETRY_DELAY_MS, operation);
+        if (signal) {
+          await this.delayWithAbortSignal(PHOTO_DOWNLOAD_RETRY_DELAY_MS, signal);
+        } else {
+          await this.delay(PHOTO_DOWNLOAD_RETRY_DELAY_MS, operation);
+        }
       }
     }
 
@@ -4930,6 +5902,7 @@ export class RecNetService extends EventEmitter {
               if (owner && shouldWriteOwnerMeta) {
                 await this.writeFolderMeta(accountDir, accountId, { owner });
               }
+              await this.writeCentralAccountRecords(cachedAccounts);
             }
           } catch (error) {
             console.log(
@@ -5001,6 +5974,7 @@ export class RecNetService extends EventEmitter {
           await fs.writeJson(accountsJsonPath, mergedAccounts, {
             spaces: 2,
           });
+          await this.writeCentralAccountRecords(mergedAccounts);
 
           const owner = this.computeOwnerFromAccounts(
             mergedAccounts,
@@ -5774,7 +6748,57 @@ export class RecNetService extends EventEmitter {
     }
     try {
       const raw = (await fs.readJson(jsonPath)) as PlayerResult[];
-      return Array.isArray(raw) ? this.normalizeAccounts(raw) : [];
+      return Array.isArray(raw)
+        ? this.attachLocalAccountAssetPaths(
+            this.normalizeAccounts(raw),
+            eventDir
+          )
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async loadUserAccountsData(accountId: string): Promise<PlayerResult[]> {
+    await this.ensureSettingsLoaded();
+    const normalizedAccountId = this.normalizeId(accountId);
+    if (!normalizedAccountId) {
+      return [];
+    }
+    const accountDir = path.join(this.getResolvedOutputRoot(), normalizedAccountId);
+    const jsonPath = path.join(accountDir, `${normalizedAccountId}_accounts.json`);
+    if (!(await fs.pathExists(jsonPath))) {
+      return [];
+    }
+    try {
+      const raw = (await fs.readJson(jsonPath)) as PlayerResult[];
+      return Array.isArray(raw)
+        ? this.attachLocalAccountAssetPaths(
+            this.normalizeAccounts(raw),
+            accountDir
+          )
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async loadRoomAccountsData(roomId: string): Promise<PlayerResult[]> {
+    await this.ensureSettingsLoaded();
+    const normalizedRoomId = this.normalizeId(roomId);
+    if (!normalizedRoomId) {
+      return [];
+    }
+    const roomDir = this.getRoomDirectory(normalizedRoomId);
+    const jsonPath = path.join(roomDir, `${normalizedRoomId}_accounts.json`);
+    if (!(await fs.pathExists(jsonPath))) {
+      return [];
+    }
+    try {
+      const raw = (await fs.readJson(jsonPath)) as PlayerResult[];
+      return Array.isArray(raw)
+        ? this.attachLocalAccountAssetPaths(this.normalizeAccounts(raw), roomDir)
+        : [];
     } catch {
       return [];
     }
@@ -5849,11 +6873,14 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async downloadEventPhotos(params: {
-    creatorAccountId: string;
-    eventIds: string[];
-    token?: string;
-  }): Promise<EventPhotoBatchResult> {
+  async downloadEventPhotos(
+    params: {
+      creatorAccountId: string;
+      eventIds: string[];
+      token?: string;
+    },
+    metadataProgress?: MetadataSyncProgressReporter
+  ): Promise<EventPhotoBatchResult> {
     await this.ensureSettingsLoaded();
     const operation = this.startOperation();
     const creatorAccountId = this.normalizeId(params.creatorAccountId);
@@ -6082,8 +7109,38 @@ export class RecNetService extends EventEmitter {
               ? true
               : downloadedPhotoCount >= normalizedEventPhotos.length,
         });
+        if (this.settings.backgroundMetadataSyncEnabled) {
+          metadataProgress?.({
+            currentStep: 'Syncing event metadata images',
+            currentItemLabel: event.Name || `Event ${eventId}`,
+            current: eventIndex,
+            total: eventIds.length,
+            downloadedAssets: 0,
+            skippedAssets: 0,
+            failedAssets: 0,
+            force: false,
+          });
+          await this.syncEventFolderMetadataAssets(
+            creatorAccountId,
+            eventId,
+            false,
+            params.token,
+            createMetadataSyncAssetTracker(metadataProgress, false)
+          );
+          metadataProgress?.({
+            currentStep: 'Synced event metadata images',
+            currentItemLabel: event.Name || `Event ${eventId}`,
+            current: eventIndex + 1,
+            total: eventIds.length,
+            force: false,
+          });
+        }
         const availableEvent = this.eventToAvailableEvent(event, meta);
-        const coverPath = await this.resolveLocalEventCoverPath(eventDir, meta);
+        const syncedMeta = await this.readEventFolderMeta(eventDir);
+        const coverPath = await this.resolveLocalEventCoverPath(
+          eventDir,
+          syncedMeta ?? meta
+        );
         if (coverPath) {
           availableEvent.localImagePath = coverPath;
         }
@@ -6136,18 +7193,21 @@ export class RecNetService extends EventEmitter {
     }
   }
 
-  async downloadRoomPhotoBatch(params: {
-    roomName: string;
-    token?: string;
-    startSkip?: number;
-    batchPages?: number;
-    pageSize?: number;
-    sort?: RoomPhotoSort;
-    forceAccountsRefresh?: boolean;
-    forceRoomsRefresh?: boolean;
-    forceEventsRefresh?: boolean;
-    forceImageCommentsRefresh?: boolean;
-  }): Promise<RoomPhotoBatchResult> {
+  async downloadRoomPhotoBatch(
+    params: {
+      roomName: string;
+      token?: string;
+      startSkip?: number;
+      batchPages?: number;
+      pageSize?: number;
+      sort?: RoomPhotoSort;
+      forceAccountsRefresh?: boolean;
+      forceRoomsRefresh?: boolean;
+      forceEventsRefresh?: boolean;
+      forceImageCommentsRefresh?: boolean;
+    },
+    metadataProgress?: MetadataSyncProgressReporter
+  ): Promise<RoomPhotoBatchResult> {
     await this.ensureSettingsLoaded();
     const operation = this.startOperation();
     const pageSize = Math.min(
@@ -6420,6 +7480,31 @@ export class RecNetService extends EventEmitter {
           },
         },
       });
+      if (this.settings.backgroundMetadataSyncEnabled) {
+        metadataProgress?.({
+          currentStep: 'Syncing room metadata images',
+          currentItemLabel: roomName,
+          current: 0,
+          total: 1,
+          downloadedAssets: 0,
+          skippedAssets: 0,
+          failedAssets: 0,
+          force: false,
+        });
+        await this.syncRoomFolderMetadataAssets(
+          roomId,
+          false,
+          params.token,
+          createMetadataSyncAssetTracker(metadataProgress, false)
+        );
+        metadataProgress?.({
+          currentStep: 'Synced room metadata images',
+          currentItemLabel: roomName,
+          current: 1,
+          total: 1,
+          force: false,
+        });
+      }
       this.logDownloadBatchSummary(trace, downloadStats);
       this.setOperationComplete();
 

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
 import { AvailableEvent } from '../../shared/types';
-import { buildCdnImageUrl, DEFAULT_CDN_BASE } from '../../shared/cdnUrl';
 
 interface EventCoverImageProps {
   event: AvailableEvent;
@@ -13,10 +12,8 @@ interface EventCoverImageProps {
 
 export const EventCoverImage: React.FC<EventCoverImageProps> = ({
   event,
-  cdnBase = DEFAULT_CDN_BASE,
   className = 'h-full w-full object-cover',
   iconClassName = 'h-8 w-8',
-  allowRemoteFallback = true,
 }) => {
   const sources = useMemo(() => {
     const nextSources: string[] = [];
@@ -25,16 +22,8 @@ export const EventCoverImage: React.FC<EventCoverImageProps> = ({
       nextSources.push(`local://${encodeURIComponent(event.localImagePath)}`);
     }
 
-    const imageName = event.imageName?.trim();
-    if (allowRemoteFallback && imageName && imageName.toLowerCase() !== 'null') {
-      const cdnUrl = buildCdnImageUrl(cdnBase, imageName);
-      if (cdnUrl && !nextSources.includes(cdnUrl)) {
-        nextSources.push(cdnUrl);
-      }
-    }
-
     return nextSources;
-  }, [allowRemoteFallback, cdnBase, event.imageName, event.localImagePath]);
+  }, [event.localImagePath]);
 
   const [sourceIndex, setSourceIndex] = useState(0);
 

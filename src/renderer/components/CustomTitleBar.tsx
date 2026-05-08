@@ -30,6 +30,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from './ui/tooltip';
+import type { MetadataSyncState } from '../../shared/types';
 
 interface CustomTitleBarProps {
   onDownloadClick?: () => void;
@@ -66,6 +73,7 @@ interface CustomTitleBarProps {
   onOpenLibraryMove?: () => void;
   viewerOnlyMode?: boolean;
   metadataSyncPhase?: 'idle' | 'running';
+  metadataSyncState?: MetadataSyncState;
   onForceMetadataSync?: () => void | Promise<void>;
 }
 
@@ -93,6 +101,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
   onOpenLibraryMove,
   viewerOnlyMode = false,
   metadataSyncPhase = 'idle',
+  metadataSyncState,
   onForceMetadataSync,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -147,6 +156,21 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
     }
   };
 
+  const syncCurrent = metadataSyncState?.current ?? 0;
+  const syncTotal = metadataSyncState?.total ?? 0;
+  const syncPercent =
+    syncTotal > 0
+      ? Math.min(100, Math.max(0, Math.round((syncCurrent / syncTotal) * 100)))
+      : null;
+  const syncAssetParts = [
+    `${metadataSyncState?.downloadedAssets ?? 0} downloaded`,
+    `${metadataSyncState?.skippedAssets ?? 0} already local`,
+  ];
+  const syncFailedAssets = metadataSyncState?.failedAssets ?? 0;
+  if (syncFailedAssets > 0) {
+    syncAssetParts.push(`${syncFailedAssets} failed`);
+  }
+
   return (
     <>
       <div
@@ -173,7 +197,10 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
         </div>
 
         {/* Center - Icon and App Name */}
-        <div className="flex items-center gap-2 absolute left-1/2 transform -translate-x-1/2 pointer-events-none">
+        <div
+          className="flex items-center gap-2 absolute left-1/2 transform -translate-x-1/2"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
           <img
             src="/icon.png"
             alt="App Icon"
@@ -185,10 +212,52 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
             }}
           />
           {metadataSyncPhase === 'running' && (
-            <Loader2
-              className="h-4 w-4 shrink-0 animate-spin text-muted-foreground"
-              aria-hidden
-            />
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label="Metadata sync progress"
+                  >
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="center" className="w-72">
+                  <div className="space-y-1.5">
+                    <p className="font-medium">Syncing metadata images</p>
+                    <p className="text-xs text-muted-foreground">
+                      {metadataSyncState?.currentStep ?? 'Preparing sync'}
+                    </p>
+                    {metadataSyncState?.currentItemLabel && (
+                      <p className="text-xs">
+                        {metadataSyncState.currentItemLabel}
+                      </p>
+                    )}
+                    {metadataSyncState?.currentAssetLabel && (
+                      <p className="text-xs text-muted-foreground">
+                        {metadataSyncState.currentAssetLabel}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between text-xs">
+                      <span>
+                        {syncTotal > 0
+                          ? `${syncCurrent} / ${syncTotal} folders checked`
+                          : 'Counting folders'}
+                      </span>
+                      {syncPercent !== null && <span>{syncPercent}%</span>}
+                    </div>
+                    {syncTotal > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {Math.max(0, syncTotal - syncCurrent)} folders remaining
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Images: {syncAssetParts.join(', ')}
+                    </p>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
           <span className="text-sm font-semibold text-foreground">
             Photo Downloader & Viewer
@@ -281,9 +350,10 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
               <div className="rounded-md border p-3 space-y-2">
                 <p className="text-sm font-medium">Metadata images</p>
                 <p className="text-xs text-muted-foreground">
-                  Download profile, banner, event cover, and room listing images
-                  into each folder&apos;s metadata directory. Runs automatically
-                  once when the app opens; use this to refresh or retry.
+                  Download profile, event cover, and room listing images
+                  into each folder&apos;s metadata directory. Enable background
+                  metadata image sync in Settings to run this automatically.
+                  Use this to refresh or retry.
                 </p>
                 <Button
                   type="button"

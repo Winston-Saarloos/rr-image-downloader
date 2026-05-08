@@ -47,7 +47,7 @@ const PhotoGridComponent: React.FC<PhotoGridProps> = ({
   onScrollPositionChange,
   className = '',
   accountId,
-  allowRemoteImages = true,
+  allowRemoteImages = false,
 }) => {
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const {

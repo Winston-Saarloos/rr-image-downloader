@@ -16,4 +16,6 @@ export interface PlayerResult {
   identityFlags: number;
   createdAt: string;
   isMetaPlatformBlocked: boolean;
+  localProfileImagePath?: string;
+  localBannerImagePath?: string;
 }
