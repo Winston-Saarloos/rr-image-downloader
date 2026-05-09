@@ -62,6 +62,8 @@ type MetadataSyncProgressReporter = (
 
 interface MetadataSyncAssetTracker {
   report: MetadataSyncProgressReporter;
+  checkedAssets: number;
+  totalAssets: number;
   downloadedAssets: number;
   skippedAssets: number;
   failedAssets: number;
@@ -91,11 +93,15 @@ function createMetadataSyncAssetTracker(
     report: progress =>
       report({
         ...progress,
+        checkedAssets: progress.checkedAssets ?? tracker.checkedAssets,
+        totalAssets: progress.totalAssets ?? tracker.totalAssets,
         downloadedAssets: progress.downloadedAssets ?? tracker.downloadedAssets,
         skippedAssets: progress.skippedAssets ?? tracker.skippedAssets,
         failedAssets: progress.failedAssets ?? tracker.failedAssets,
         force,
       }),
+    checkedAssets: 0,
+    totalAssets: 0,
     downloadedAssets: 0,
     skippedAssets: 0,
     failedAssets: 0,
@@ -3071,12 +3077,21 @@ export class RecNetService extends EventEmitter {
     if (!fileName) {
       return { attemptedDownload: false };
     }
+    if (tracker) {
+      tracker.totalAssets++;
+      tracker.report({
+        currentAssetLabel: `Checking ${assetLabel ?? 'image'}: ${fileName}`,
+        totalAssets: tracker.totalAssets,
+      });
+    }
     const destPath = path.join(destDir, fileName);
     if (!force && (await this.pathExistsWithContent(destPath))) {
       if (tracker) {
+        tracker.checkedAssets++;
         tracker.skippedAssets++;
         tracker.report({
           currentAssetLabel: `${assetLabel ?? 'Image'} already exists: ${fileName}`,
+          checkedAssets: tracker.checkedAssets,
           skippedAssets: tracker.skippedAssets,
         });
       }
@@ -3112,9 +3127,11 @@ export class RecNetService extends EventEmitter {
         throwIfMetadataSyncAborted(signal);
         await fs.writeFile(destPath, Buffer.from(attempt.response.value));
         if (tracker) {
+          tracker.checkedAssets++;
           tracker.downloadedAssets++;
           tracker.report({
             currentAssetLabel: `Downloaded ${assetLabel ?? 'image'}: ${fileName}`,
+            checkedAssets: tracker.checkedAssets,
             downloadedAssets: tracker.downloadedAssets,
           });
         }
@@ -3128,17 +3145,21 @@ export class RecNetService extends EventEmitter {
         };
       }
       if (tracker) {
+        tracker.checkedAssets++;
         tracker.failedAssets++;
         tracker.report({
           currentAssetLabel: `Failed ${assetLabel ?? 'image'}: ${fileName}`,
+          checkedAssets: tracker.checkedAssets,
           failedAssets: tracker.failedAssets,
         });
       }
     } catch (error) {
       if (tracker) {
+        tracker.checkedAssets++;
         tracker.failedAssets++;
         tracker.report({
           currentAssetLabel: `Failed ${assetLabel ?? 'image'}: ${fileName}`,
+          checkedAssets: tracker.checkedAssets,
           failedAssets: tracker.failedAssets,
         });
       }
@@ -4076,6 +4097,8 @@ export class RecNetService extends EventEmitter {
 
     const tracker = createMetadataSyncAssetTracker(report, force) ?? {
       report: () => undefined,
+      checkedAssets: 0,
+      totalAssets: 0,
       downloadedAssets: 0,
       skippedAssets: 0,
       failedAssets: 0,
@@ -4094,6 +4117,8 @@ export class RecNetService extends EventEmitter {
         currentAssetLabel: undefined,
         current: nextCurrent,
         total,
+        checkedAssets: tracker.checkedAssets,
+        totalAssets: tracker.totalAssets,
         downloadedAssets: tracker.downloadedAssets,
         skippedAssets: tracker.skippedAssets,
         failedAssets: tracker.failedAssets,
@@ -4380,6 +4405,8 @@ export class RecNetService extends EventEmitter {
           currentStep: 'Metadata sync cancelled',
           current,
           total,
+          checkedAssets: tracker.checkedAssets,
+          totalAssets: tracker.totalAssets,
           downloadedAssets: tracker.downloadedAssets,
           skippedAssets: tracker.skippedAssets,
           failedAssets: tracker.failedAssets,
@@ -4391,6 +4418,8 @@ export class RecNetService extends EventEmitter {
         currentStep: 'Metadata sync failed',
         current,
         total,
+        checkedAssets: tracker.checkedAssets,
+        totalAssets: tracker.totalAssets,
         downloadedAssets: tracker.downloadedAssets,
         skippedAssets: tracker.skippedAssets,
         failedAssets: tracker.failedAssets,

@@ -97,6 +97,8 @@ export interface MetadataSyncState {
   total?: number;
   currentItemLabel?: string;
   currentAssetLabel?: string;
+  checkedAssets?: number;
+  totalAssets?: number;
   downloadedAssets?: number;
   skippedAssets?: number;
   failedAssets?: number;

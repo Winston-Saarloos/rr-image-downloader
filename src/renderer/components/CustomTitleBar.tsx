@@ -170,6 +170,14 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
   if (syncFailedAssets > 0) {
     syncAssetParts.push(`${syncFailedAssets} failed`);
   }
+  const syncCheckedAssets = metadataSyncState?.checkedAssets ?? 0;
+  const syncTotalAssets = metadataSyncState?.totalAssets ?? 0;
+  const syncAssetProgress =
+    syncTotalAssets > 0
+      ? `${syncCheckedAssets} / ${syncTotalAssets} images checked`
+      : syncCheckedAssets > 0
+        ? `${syncCheckedAssets} images checked`
+        : 'Counting images';
 
   return (
     <>
@@ -251,9 +259,10 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
                         {Math.max(0, syncTotal - syncCurrent)} folders remaining
                       </p>
                     )}
-                    <p className="text-xs text-muted-foreground">
-                      Images: {syncAssetParts.join(', ')}
-                    </p>
+                    <div className="space-y-0.5 text-xs text-muted-foreground">
+                      <p>{syncAssetProgress}</p>
+                      <p>Images: {syncAssetParts.join(', ')}</p>
+                    </div>
                   </div>
                 </TooltipContent>
               </Tooltip>

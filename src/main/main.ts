@@ -96,6 +96,8 @@ function enqueueMetadataSync(force: boolean): Promise<MetadataSyncResult> {
       currentStep: 'Starting metadata image sync',
       current: 0,
       total: 0,
+      checkedAssets: 0,
+      totalAssets: 0,
       downloadedAssets: 0,
       skippedAssets: 0,
       failedAssets: 0,
