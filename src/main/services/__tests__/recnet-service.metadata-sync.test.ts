@@ -140,6 +140,11 @@ describe('RecNetService - metadata library sync', () => {
       response: { success: true, value: new Uint8Array([1, 2, 3]).buffer },
       attempts: 1,
     });
+    jest
+      .spyOn<any, any>(service as any, 'pathExistsWithContent')
+      .mockImplementation(async (p: unknown) => {
+        return String(p) === path.join(accountDir, 'photos', 'image-1.jpg');
+      });
 
     const result = await service.syncMetadataLibraryAssets({ force: true });
     expect(result.accountsProcessed).toBe(1);
@@ -162,6 +167,81 @@ describe('RecNetService - metadata library sync', () => {
       undefined,
       undefined
     );
+  });
+
+  it('skips user profile metadata sync when only photo metadata exists', async () => {
+    const accountId = '12345';
+    const accountDir = path.join(outputRoot, accountId);
+    mockedFs.pathExists.mockImplementation(async (p: fs.PathLike) => {
+      const s = String(p);
+      return (
+        s === outputRoot ||
+        s === path.join(accountDir, `${accountId}_accounts.json`) ||
+        s === path.join(accountDir, `${accountId}_photos.json`)
+      );
+    });
+    mockedFs.readdir.mockImplementation(async (p: fs.PathLike) => {
+      const s = String(p);
+      if (s === outputRoot) {
+        return [{ name: accountId, isDirectory: () => true }] as any;
+      }
+      return [];
+    });
+    mockedFs.readJson.mockImplementation(async (p: fs.PathLike) => {
+      const s = String(p);
+      if (s.endsWith(`${accountId}_accounts.json`)) {
+        return [
+          {
+            accountId,
+            username: 'u',
+            displayName: 'U',
+            displayEmoji: '',
+            profileImage: 'p.jpg',
+            bannerImage: 'b.jpg',
+            isJunior: false,
+            platforms: 0,
+            personalPronouns: 0,
+            identityFlags: 0,
+            createdAt: '',
+            isMetaPlatformBlocked: false,
+          },
+        ];
+      }
+      if (s.endsWith(`${accountId}_photos.json`)) {
+        return [
+          {
+            Id: 'image-1',
+            Type: 1,
+            Accessibility: 0,
+            AccessibilityLocked: false,
+            ImageName: 'image.jpg',
+            Description: '',
+            PlayerId: accountId,
+            TaggedPlayerIds: [],
+            RoomId: '',
+            PlayerEventId: '',
+            CreatedAt: '',
+            CheerCount: 0,
+            CommentCount: 0,
+          },
+        ];
+      }
+      return [];
+    });
+    jest
+      .spyOn<any, any>(service as any, 'pathExistsWithContent')
+      .mockResolvedValue(false);
+    const downloadSpy = jest
+      .spyOn(service as any, 'downloadPhotoWithRetry')
+      .mockResolvedValue({
+        response: { success: true, value: new Uint8Array([1, 2, 3]).buffer },
+        attempts: 1,
+      });
+
+    const result = await service.syncMetadataLibraryAssets({ force: true });
+
+    expect(result.accountsProcessed).toBe(0);
+    expect(downloadSpy).not.toHaveBeenCalled();
   });
 
   it('saves extensionless metadata images with a jpg extension', async () => {

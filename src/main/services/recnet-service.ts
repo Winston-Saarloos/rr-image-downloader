@@ -4135,16 +4135,30 @@ export class RecNetService extends EventEmitter {
         }
       };
       const collectImageOwnerIdsFromFile = async (
-        photosJsonPath: string
-      ): Promise<void> => {
+        photosJsonPath: string,
+        photosDirPath: string
+      ): Promise<boolean> => {
         throwIfMetadataSyncAborted(signal);
         if (!(await fs.pathExists(photosJsonPath))) {
-          return;
+          return false;
         }
+        let hasDownloadedPhotos = false;
         try {
           const raw = (await fs.readJson(photosJsonPath)) as Photo[];
           const photos = Array.isArray(raw) ? this.normalizePhotos(raw) : [];
           for (const photo of photos) {
+            const photoId = this.normalizeId(photo.Id);
+            if (!photoId) {
+              continue;
+            }
+            const localPhotoPath = path.join(
+              photosDirPath,
+              `${this.sanitizeFileStem(photoId)}.jpg`
+            );
+            if (!(await this.pathExistsWithContent(localPhotoPath))) {
+              continue;
+            }
+            hasDownloadedPhotos = true;
             const playerId = this.normalizeId(photo.PlayerId);
             if (playerId) {
               imageOwnerAccountIds.add(playerId);
@@ -4153,19 +4167,27 @@ export class RecNetService extends EventEmitter {
         } catch {
           // Ignore malformed photo files during best-effort background sync.
         }
+        return hasDownloadedPhotos;
       };
 
+      const accountNamesWithDownloadedPhotos: string[] = [];
       for (const name of accountNames) {
         throwIfMetadataSyncAborted(signal);
+        const accountDir = path.join(root, name);
         await collectAccountsFromFile(
-          path.join(root, name, `${name}_accounts.json`)
+          path.join(accountDir, `${name}_accounts.json`)
         );
-        await collectImageOwnerIdsFromFile(
-          path.join(root, name, `${name}_photos.json`)
+        const hasUserPhotos = await collectImageOwnerIdsFromFile(
+          path.join(accountDir, `${name}_photos.json`),
+          path.join(accountDir, 'photos')
         );
-        await collectImageOwnerIdsFromFile(
-          path.join(root, name, `${name}_feed.json`)
+        const hasFeedPhotos = await collectImageOwnerIdsFromFile(
+          path.join(accountDir, `${name}_feed.json`),
+          path.join(accountDir, 'feed')
         );
+        if (hasUserPhotos || hasFeedPhotos) {
+          accountNamesWithDownloadedPhotos.push(name);
+        }
       }
 
       const eventCreators: string[] = [];
@@ -4192,7 +4214,8 @@ export class RecNetService extends EventEmitter {
                 path.join(creatorDir, ed.name, `${ed.name}_accounts.json`)
               );
               await collectImageOwnerIdsFromFile(
-                path.join(creatorDir, ed.name, `${ed.name}_photos.json`)
+                path.join(creatorDir, ed.name, `${ed.name}_photos.json`),
+                path.join(creatorDir, ed.name, 'photos')
               );
             }
           }
@@ -4213,14 +4236,15 @@ export class RecNetService extends EventEmitter {
               path.join(roomsRoot, re.name, `${re.name}_accounts.json`)
             );
             await collectImageOwnerIdsFromFile(
-              path.join(roomsRoot, re.name, `${re.name}_photos.json`)
+              path.join(roomsRoot, re.name, `${re.name}_photos.json`),
+              path.join(roomsRoot, re.name, 'photos')
             );
           }
         }
       }
 
       total =
-        accountNames.length +
+        accountNamesWithDownloadedPhotos.length +
         eventCreators.length +
         eventFolders.length +
         roomIds.length;
@@ -4254,7 +4278,7 @@ export class RecNetService extends EventEmitter {
       }
 
       await this.runWithMetadataDownloadConcurrency(
-        accountNames,
+        accountNamesWithDownloadedPhotos,
         signal,
         async name => {
           throwIfMetadataSyncAborted(signal);

@@ -1439,7 +1439,7 @@ function App() {
                 onDownload={handleDownload}
                 onDraftChange={handleDownloadDraftChange}
                 onCancel={handleCancelDownload}
-                isDownloading={isDownloading || !!pendingPreflight}
+                isDownloading={isDownloading}
                 showCancel={isDownloading}
                 settings={settings}
                 libraryMode={libraryMode}
