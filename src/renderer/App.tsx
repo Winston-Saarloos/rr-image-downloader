@@ -81,7 +81,7 @@ function App() {
     cdnBase: DEFAULT_CDN_BASE,
     interPageDelayMs: 100,
     maxConcurrentDownloads: 3,
-    backgroundMetadataSyncEnabled: false,
+    backgroundMetadataSyncEnabled: true,
   });
 
   const [progress, setProgress] = useState<Progress>({

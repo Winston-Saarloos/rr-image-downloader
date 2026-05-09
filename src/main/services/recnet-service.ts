@@ -238,7 +238,7 @@ const DEFAULT_SETTINGS: RecNetSettings = {
   cdnBase: DEFAULT_CDN_BASE,
   interPageDelayMs: 100,
   maxConcurrentDownloads: 3,
-  backgroundMetadataSyncEnabled: false,
+  backgroundMetadataSyncEnabled: true,
 };
 
 const PHOTO_DOWNLOAD_RETRY_COUNT = 3;
@@ -399,7 +399,10 @@ function normalizeRecNetSettings(input: unknown): RecNetSettings {
     interPageDelayMs,
     maxPhotosToDownload,
     maxConcurrentDownloads,
-    backgroundMetadataSyncEnabled: raw.backgroundMetadataSyncEnabled === true,
+    backgroundMetadataSyncEnabled:
+      typeof raw.backgroundMetadataSyncEnabled === 'boolean'
+        ? raw.backgroundMetadataSyncEnabled
+        : DEFAULT_SETTINGS.backgroundMetadataSyncEnabled,
   };
 }
 
