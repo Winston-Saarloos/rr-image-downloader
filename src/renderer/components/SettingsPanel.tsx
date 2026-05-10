@@ -66,6 +66,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
+  const handleBackgroundMetadataSyncChange = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    await onUpdateSettings({
+      backgroundMetadataSyncEnabled: e.target.checked,
+    });
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -90,6 +98,28 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             onLog(`Output folder set to: ${path}`, 'info')
           }
         />
+
+        <div className="space-y-2">
+          <div className="flex items-start gap-3 rounded-md border p-3">
+            <input
+              id="background-metadata-sync"
+              type="checkbox"
+              checked={settings.backgroundMetadataSyncEnabled}
+              onChange={handleBackgroundMetadataSyncChange}
+              className="mt-1 h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-ring"
+            />
+            <div className="space-y-1">
+              <Label htmlFor="background-metadata-sync">
+                Background metadata image sync
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Automatically downloads missing profile, event cover, and room
+                listing images after launch, downloads, and library folder
+                changes.
+              </p>
+            </div>
+          </div>
+        </div>
 
         {/* Delay Between Pages */}
         <div className="space-y-2">

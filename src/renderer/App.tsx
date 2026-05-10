@@ -81,6 +81,7 @@ function App() {
     cdnBase: DEFAULT_CDN_BASE,
     interPageDelayMs: 100,
     maxConcurrentDownloads: 3,
+    backgroundMetadataSyncEnabled: true,
   });
 
   const [progress, setProgress] = useState<Progress>({
@@ -109,6 +110,10 @@ function App() {
   const [metadataSyncPhase, setMetadataSyncPhase] = useState<
     'idle' | 'running'
   >('idle');
+  const [metadataSyncState, setMetadataSyncState] =
+    useState<MetadataSyncState>({
+      phase: 'idle',
+    });
   const [libraryMoveDialogOpen, setLibraryMoveDialogOpen] = useState(false);
   const [resultsScrollRequestId, setResultsScrollRequestId] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -180,6 +185,9 @@ function App() {
     }
     const handler = (_event: unknown, state: MetadataSyncState) => {
       setMetadataSyncPhase(state.phase);
+      setMetadataSyncState(previous =>
+        state.phase === 'running' ? { ...previous, ...state } : state
+      );
     };
     window.electronAPI.onMetadataSyncState(handler);
     return () => {
@@ -1402,6 +1410,7 @@ function App() {
           onOpenLibraryMove={() => setLibraryMoveDialogOpen(true)}
           viewerOnlyMode={viewerOnlyMode}
           metadataSyncPhase={metadataSyncPhase}
+          metadataSyncState={metadataSyncState}
           onForceMetadataSync={
             viewerOnlyMode ? undefined : handleForceMetadataSync
           }
@@ -1430,7 +1439,7 @@ function App() {
                 onDownload={handleDownload}
                 onDraftChange={handleDownloadDraftChange}
                 onCancel={handleCancelDownload}
-                isDownloading={isDownloading || !!pendingPreflight}
+                isDownloading={isDownloading}
                 showCancel={isDownloading}
                 settings={settings}
                 libraryMode={libraryMode}

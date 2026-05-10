@@ -1,6 +1,5 @@
 import { useCallback, useMemo } from 'react';
 import {
-  buildCdnImageUrl,
   DEFAULT_CDN_BASE,
 } from '../../shared/cdnUrl';
 import { Photo } from '../../shared/types';
@@ -79,8 +78,10 @@ export const usePhotoMetadata = (
   eventMap?: Map<string, string>,
   cdnBase = DEFAULT_CDN_BASE,
   usernameMap?: Map<string, string>,
-  allowRemoteImages = true
+  allowRemoteImages = false
 ) => {
+  void cdnBase;
+  void allowRemoteImages;
   const fallbackMap = useMemo(() => new Map<string, string>(), []);
   const safeRoomMap = roomMap ?? fallbackMap;
   const safeAccountMap = accountMap ?? fallbackMap;
@@ -144,6 +145,26 @@ export const usePhotoMetadata = (
     [safeAccountMap, safeUsernameMap]
   );
 
+  const getPhotoPhotographer = useCallback(
+    (photo: Photo): TaggedUserInfo | null => {
+      const normalizedPlayerId = normalizeId(photo.PlayerId);
+      if (!normalizedPlayerId) {
+        return null;
+      }
+
+      const displayName =
+        getMapValue(safeAccountMap, normalizedPlayerId) || normalizedPlayerId;
+      const username = getMapValue(safeUsernameMap, normalizedPlayerId) || '';
+
+      return {
+        id: normalizedPlayerId,
+        displayName,
+        username,
+      };
+    },
+    [safeAccountMap, safeUsernameMap]
+  );
+
   const getPhotoImageUrl = useCallback(
     (photo: Photo): string => {
       if (photo.localFilePath) {
@@ -151,13 +172,9 @@ export const usePhotoMetadata = (
         return `local://${encodedPath}`;
       }
 
-      if (allowRemoteImages && photo.ImageName) {
-        return buildCdnImageUrl(cdnBase, photo.ImageName);
-      }
-
       return '';
     },
-    [allowRemoteImages, cdnBase]
+    []
   );
 
   const getPhotoEvent = useCallback(
@@ -182,6 +199,7 @@ export const usePhotoMetadata = (
     getPhotoRoom,
     getPhotoUsers,
     getPhotoTaggedUsers,
+    getPhotoPhotographer,
     getPhotoImageUrl,
     getPhotoEvent,
   };

@@ -128,6 +128,9 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
   const [usernameMap, setUsernameMap] = useState<Map<string, string>>(
     new Map()
   );
+  const [accountProfileImageMap, setAccountProfileImageMap] = useState<
+    Map<string, string>
+  >(new Map());
   const [eventMap, setEventMap] = useState<Map<string, string>>(new Map());
   const [imageComments, setImageComments] = useState<ImageCommentDto[]>([]);
   const [feedPhotos, setFeedPhotos] = useState<Photo[]>([]);
@@ -369,6 +372,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
       if (!selectedEvent) {
         setAccountMap(new Map());
         setUsernameMap(new Map());
+        setAccountProfileImageMap(new Map());
         return;
       }
       try {
@@ -381,27 +385,32 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
             const accounts = result.data as PlayerResult[];
             const accountMapping = new Map<string, string>();
             const usernameMapping = new Map<string, string>();
+            const profileImageMapping = new Map<string, string>();
             accounts.forEach(account => {
               const id = String(account.accountId);
               const displayName =
                 account.displayName || account.username || id;
               accountMapping.set(id, displayName);
               usernameMapping.set(id, account.username || '');
+              profileImageMapping.set(id, account.localProfileImagePath || '');
             });
             setAccountMap(accountMapping);
             setUsernameMap(usernameMapping);
+            setAccountProfileImageMap(profileImageMapping);
           }
         }
       } catch (error) {
         console.error('Failed to load account data:', error);
         setAccountMap(new Map());
         setUsernameMap(new Map());
+        setAccountProfileImageMap(new Map());
       }
       return;
     }
     if (!activeLibraryId) {
       setAccountMap(new Map());
       setUsernameMap(new Map());
+      setAccountProfileImageMap(new Map());
       return;
     }
 
@@ -415,21 +424,25 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
           const accounts = result.data as PlayerResult[];
           const accountMapping = new Map<string, string>();
           const usernameMapping = new Map<string, string>();
+          const profileImageMapping = new Map<string, string>();
           accounts.forEach(account => {
             const id = String(account.accountId);
             const displayName =
               account.displayName || account.username || id;
             accountMapping.set(id, displayName);
             usernameMapping.set(id, account.username || '');
+            profileImageMapping.set(id, account.localProfileImagePath || '');
           });
           setAccountMap(accountMapping);
           setUsernameMap(usernameMapping);
+          setAccountProfileImageMap(profileImageMapping);
         }
       }
     } catch (error) {
       console.error('Failed to load account data:', error);
       setAccountMap(new Map());
       setUsernameMap(new Map());
+      setAccountProfileImageMap(new Map());
     }
   }, [activeLibraryId, electronAPI, libraryMode, selectedEvent]);
 
@@ -1175,7 +1188,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
                         <EventCoverImage
                           event={event}
                           cdnBase={cdnBase}
-                          allowRemoteFallback={!viewerOnlyMode}
+                          allowRemoteFallback={false}
                         />
                       </div>
                       <div className="space-y-3 p-4">
@@ -1336,7 +1349,7 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
               accountMap={accountMap}
               eventMap={eventMap}
               cdnBase={cdnBase}
-              allowRemoteImages={!viewerOnlyMode}
+              allowRemoteImages={false}
               onScrollPositionChange={onScrollPositionChange}
               scrollContainerRef={activeScrollRef}
               accountId={accountId}
@@ -1352,10 +1365,11 @@ export const PhotoViewer: React.FC<PhotoViewerProps> = ({
         roomMap={roomMap}
         accountMap={accountMap}
         usernameMap={usernameMap}
+        accountProfileImageMap={accountProfileImageMap}
         eventMap={eventMap}
         cdnBase={cdnBase}
         imageComments={imageComments}
-        allowRemoteImages={!viewerOnlyMode}
+        allowRemoteImages={false}
       />
     </div>
   );

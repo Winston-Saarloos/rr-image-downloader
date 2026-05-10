@@ -144,7 +144,7 @@ describe('RecNetService - File Saving Functionality', () => {
       expect(rewrittenSettings).not.toHaveProperty('maxConcurrentDownloads');
     });
 
-    it('fresh install leaves output empty and marks download path as not configured', async () => {
+    it('fresh install leaves output empty, marks download path as not configured, and enables metadata sync', async () => {
       jest.clearAllMocks();
       (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
       const localService = new RecNetService();
@@ -152,6 +152,40 @@ describe('RecNetService - File Saving Functionality', () => {
       expect(settings.outputRoot).toBe('');
       expect(settings.resolvedOutputRoot).toBe('');
       expect(settings.outputPathConfiguredForDownload).toBe(false);
+      expect(settings.backgroundMetadataSyncEnabled).toBe(true);
+    });
+
+    it('defaults missing background metadata sync settings to enabled', async () => {
+      jest.clearAllMocks();
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(true);
+      (mockedFs.readJson as jest.Mock).mockResolvedValue({
+        outputRoot: testOutputDir,
+        cdnBase: 'https://cdn.example.com/',
+      });
+
+      const localService = new RecNetService();
+      const settings = await localService.getSettings();
+
+      expect(settings.backgroundMetadataSyncEnabled).toBe(true);
+    });
+
+    it('persists background metadata sync when explicitly disabled', async () => {
+      jest.clearAllMocks();
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(false);
+
+      const localService = new RecNetService();
+      await localService.updateSettings({
+        backgroundMetadataSyncEnabled: false,
+      });
+
+      const savedSettings = mockedFs.writeJson.mock.calls.at(-1)?.[1] as Record<
+        string,
+        unknown
+      >;
+      const settings = await localService.getSettings();
+
+      expect(settings.backgroundMetadataSyncEnabled).toBe(false);
+      expect(savedSettings.backgroundMetadataSyncEnabled).toBe(false);
     });
 
     it('migrates relative outputRoot on load to empty and rewrites disk', async () => {

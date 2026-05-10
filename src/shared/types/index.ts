@@ -22,6 +22,8 @@ export interface RecNetSettings {
   interPageDelayMs?: number;
   maxPhotosToDownload?: number; // Limit for testing - undefined means no limit
   maxConcurrentDownloads: number;
+  /** When true, automatically sync missing metadata images in the background. */
+  backgroundMetadataSyncEnabled: boolean;
 }
 
 export interface BulkDataRefreshOptions {
@@ -80,7 +82,7 @@ export interface LibraryMoveProgress {
 /** Result of scanning the library for missing metadata images (CDN assets). */
 export interface MetadataSyncResult {
   accountsProcessed: number;
-  /** Event-creator shared profile/banner under `events/<creatorId>/metadata/`. */
+  /** Event-creator shared profile metadata under `events/<creatorId>/metadata/`. */
   creatorsProcessed: number;
   eventsProcessed: number;
   roomsProcessed: number;
@@ -90,6 +92,17 @@ export type MetadataSyncPhase = 'idle' | 'running';
 
 export interface MetadataSyncState {
   phase: MetadataSyncPhase;
+  currentStep?: string;
+  current?: number;
+  total?: number;
+  currentItemLabel?: string;
+  currentAssetLabel?: string;
+  checkedAssets?: number;
+  totalAssets?: number;
+  downloadedAssets?: number;
+  skippedAssets?: number;
+  failedAssets?: number;
+  force?: boolean;
   error?: string;
 }
 

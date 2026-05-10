@@ -66,22 +66,97 @@ function emptyMetadataSyncResult(): MetadataSyncResult {
 
 /** Serialize metadata image sync jobs (launch, debug force, output path change). */
 let metadataSyncMutex: Promise<void> = Promise.resolve();
+let activeMetadataSyncAbort: AbortController | null = null;
+
+function cancelActiveMetadataSync(): void {
+  if (activeMetadataSyncAbort && !activeMetadataSyncAbort.signal.aborted) {
+    activeMetadataSyncAbort.abort();
+  }
+}
 
 function enqueueMetadataSync(force: boolean): Promise<MetadataSyncResult> {
   const next = metadataSyncMutex.then(async (): Promise<MetadataSyncResult> => {
     if (!recNetService || isViewerOnlyMode()) {
       return emptyMetadataSyncResult();
     }
+    const settings = await recNetService.getSettings();
+    if (
+      !force &&
+      (!settings.backgroundMetadataSyncEnabled ||
+        !settings.outputPathConfiguredForDownload ||
+        !(settings.resolvedOutputRoot ?? '').trim())
+    ) {
+      return emptyMetadataSyncResult();
+    }
+    const abortController = new AbortController();
+    activeMetadataSyncAbort = abortController;
     const wc = mainWindow?.webContents;
-    wc?.send('metadata-sync-state', { phase: 'running' });
+    wc?.send('metadata-sync-state', {
+      phase: 'running',
+      currentStep: 'Starting metadata image sync',
+      current: 0,
+      total: 0,
+      checkedAssets: 0,
+      totalAssets: 0,
+      downloadedAssets: 0,
+      skippedAssets: 0,
+      failedAssets: 0,
+      force,
+    });
     try {
-      return await recNetService.syncMetadataLibraryAssets({ force });
+      return await recNetService.syncMetadataLibraryAssets({
+        force,
+        signal: abortController.signal,
+        onProgress: progress => {
+          wc?.send('metadata-sync-state', {
+            phase: 'running',
+            ...progress,
+          });
+        },
+      });
     } finally {
+      if (activeMetadataSyncAbort === abortController) {
+        activeMetadataSyncAbort = null;
+      }
       wc?.send('metadata-sync-state', { phase: 'idle' });
     }
   });
   metadataSyncMutex = next.then(() => undefined).catch(() => undefined);
   return next;
+}
+
+async function enqueueBackgroundMetadataSync(): Promise<void> {
+  if (!recNetService || isViewerOnlyMode()) {
+    return;
+  }
+  void enqueueMetadataSync(false);
+}
+
+async function withInlineMetadataSyncIndicator<T>(
+  event: IpcMainInvokeEvent,
+  currentStep: string,
+  work: (
+    onProgress: NonNullable<
+      Parameters<typeof recNetService.syncMetadataLibraryAssets>[0]
+    >['onProgress']
+  ) => Promise<T>
+): Promise<T> {
+  const wc = event.sender;
+  let didReport = false;
+  try {
+    return await work(progress => {
+      didReport = true;
+      wc?.send('metadata-sync-state', {
+        phase: 'running',
+        currentStep,
+        ...progress,
+      });
+    });
+  } finally {
+    if (didReport) {
+      wc?.send('metadata-sync-state', { phase: 'idle' });
+    }
+  }
 }
 
 function scheduleInitialMetadataSync(): void {
@@ -91,7 +166,7 @@ function scheduleInitialMetadataSync(): void {
   const wc = mainWindow.webContents;
   const start = () => {
     setTimeout(() => {
-      void enqueueMetadataSync(false);
+      void enqueueBackgroundMetadataSync();
     }, 500);
   };
   if (wc.isLoading()) {
@@ -665,9 +740,15 @@ ipcMain.handle(
       if (outputErr) {
         return { success: false, error: outputErr };
       }
-      const result = await recNetService.downloadPhotos(
-        params.accountId,
-        params.token
+      const result = await withInlineMetadataSyncIndicator(
+        event,
+        'Waiting for user metadata image sync',
+        onProgress =>
+          recNetService.downloadPhotos(
+            params.accountId,
+            params.token,
+            onProgress
+          )
       );
       return { success: true, data: result };
     } catch (error) {
@@ -690,9 +771,15 @@ ipcMain.handle(
       if (outputErr) {
         return { success: false, error: outputErr };
       }
-      const result = await recNetService.downloadFeedPhotos(
-        params.accountId,
-        params.token
+      const result = await withInlineMetadataSyncIndicator(
+        event,
+        'Waiting for feed metadata image sync',
+        onProgress =>
+          recNetService.downloadFeedPhotos(
+            params.accountId,
+            params.token,
+            onProgress
+          )
       );
       return { success: true, data: result };
     } catch (error) {
@@ -719,6 +806,7 @@ ipcMain.handle(
         params.accountId,
         params.token
       );
+      void enqueueBackgroundMetadataSync();
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -761,7 +849,11 @@ ipcMain.handle(
       if (outputErr) {
         return { success: false, error: outputErr };
       }
-      const result = await recNetService.downloadRoomPhotoBatch(params);
+      const result = await withInlineMetadataSyncIndicator(
+        event,
+        'Waiting for room metadata image sync',
+        onProgress => recNetService.downloadRoomPhotoBatch(params, onProgress)
+      );
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -809,7 +901,11 @@ ipcMain.handle(
       if (outputErr) {
         return { success: false, error: outputErr };
       }
-      const result = await recNetService.downloadEventPhotos(params);
+      const result = await withInlineMetadataSyncIndicator(
+        event,
+        'Waiting for event metadata image sync',
+        onProgress => recNetService.downloadEventPhotos(params, onProgress)
+      );
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -866,12 +962,17 @@ ipcMain.handle(
     const prevRoot = (before.resolvedOutputRoot ?? '').trim();
     const updated = await recNetService.updateSettings(settings);
     const nextRoot = (updated.resolvedOutputRoot ?? '').trim();
+    const backgroundSyncTurnedOn =
+      settings.backgroundMetadataSyncEnabled === true &&
+      before.backgroundMetadataSyncEnabled !== true;
+    if (metadataOutputRootChanged(prevRoot, nextRoot)) {
+      cancelActiveMetadataSync();
+    }
     if (
-      updated.outputPathConfiguredForDownload &&
-      nextRoot &&
-      metadataOutputRootChanged(prevRoot, nextRoot)
+      metadataOutputRootChanged(prevRoot, nextRoot) ||
+      backgroundSyncTurnedOn
     ) {
-      void enqueueMetadataSync(false);
+      void enqueueBackgroundMetadataSync();
     }
     return updated;
   }
@@ -879,11 +980,11 @@ ipcMain.handle(
 
 function metadataOutputRootChanged(prev: string, next: string): boolean {
   const n = next.trim();
-  if (!n) {
+  const p = prev.trim();
+  if (!p && !n) {
     return false;
   }
-  const p = prev.trim();
-  if (!p) {
+  if (!p || !n) {
     return true;
   }
   return !pathsEffectivelyEqual(p, n);
@@ -1387,23 +1488,7 @@ ipcMain.handle(
     roomId: string
   ): Promise<ApiResponse<PlayerResult[]>> => {
     try {
-      const settings = await recNetService.getSettings();
-      const root = (settings.resolvedOutputRoot ?? '').trim();
-      if (!root) {
-        return { success: true, data: [] };
-      }
-      const jsonPath = path.join(
-        root,
-        'rooms',
-        roomId,
-        `${roomId}_accounts.json`
-      );
-      if (!(await fs.pathExists(jsonPath))) {
-        return { success: true, data: [] };
-      }
-      const data: PlayerResult[] = (await fs.readJson(jsonPath)).map(
-        normalizePlayerRecord
-      );
+      const data = await recNetService.loadRoomAccountsData(roomId);
       return { success: true, data };
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -1604,28 +1689,8 @@ ipcMain.handle(
     accountId: string
   ): Promise<ApiResponse<PlayerResult[]>> => {
     try {
-      const settings = await recNetService.getSettings();
-      const root = (settings.resolvedOutputRoot ?? '').trim();
-      if (!root) {
-        return { success: true, data: [] };
-      }
-      const accountDir = path.join(root, accountId);
-      const accountsJsonPath = path.join(
-        accountDir,
-        `${accountId}_accounts.json`
-      );
-
-      if (await fs.pathExists(accountsJsonPath)) {
-        const accountsData: PlayerResult[] = (
-          await fs.readJson(accountsJsonPath)
-        ).map(normalizePlayerRecord);
-        return {
-          success: true,
-          data: accountsData,
-        };
-      } else {
-        return { success: true, data: [] };
-      }
+      const data = await recNetService.loadUserAccountsData(accountId);
+      return { success: true, data };
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }

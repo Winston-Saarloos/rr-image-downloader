@@ -169,6 +169,99 @@ describe('RecNetService - Download Functionality', () => {
       expect(mockedFs.writeFile).toHaveBeenCalledTimes(2);
     });
 
+    it('does not run post-download metadata sync when background sync is disabled', async () => {
+      await service.updateSettings({
+        outputRoot: testOutputDir,
+        backgroundMetadataSyncEnabled: false,
+      });
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 'image1.jpg')];
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+      const photosDir = path.join(testOutputDir, testAccountId, 'photos');
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (p: string) => {
+          if (p === photosJsonPath) return true;
+          if (p === photosDir) return true;
+          if (p === path.join(photosDir, 'photo-1.jpg')) return false;
+          return false;
+        }
+      );
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: true,
+        value: new ArrayBuffer(1024),
+        status: 200,
+      } as GenericResponse<ArrayBuffer>);
+
+      const syncSpy = jest
+        .spyOn(service as any, 'syncUserLibraryMetadataAssets')
+        .mockResolvedValue(true);
+      const metadataProgress = jest.fn();
+
+      await service.downloadPhotos(
+        testAccountId,
+        undefined,
+        metadataProgress
+      );
+
+      expect(syncSpy).not.toHaveBeenCalled();
+      expect(metadataProgress).not.toHaveBeenCalled();
+    });
+
+    it('runs post-download metadata sync when background sync is enabled', async () => {
+      await service.updateSettings({
+        outputRoot: testOutputDir,
+        backgroundMetadataSyncEnabled: true,
+      });
+      const photos: ImageDto[] = [createMockPhoto('photo-1', 'image1.jpg')];
+      const photosJsonPath = path.join(
+        testOutputDir,
+        testAccountId,
+        `${testAccountId}_photos.json`
+      );
+      const photosDir = path.join(testOutputDir, testAccountId, 'photos');
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (p: string) => {
+          if (p === photosJsonPath) return true;
+          if (p === photosDir) return true;
+          if (p === path.join(photosDir, 'photo-1.jpg')) return false;
+          return false;
+        }
+      );
+      (mockedFs.readJson as jest.Mock).mockResolvedValue(photos);
+      (mockedFs.readdir as jest.Mock).mockResolvedValue([]);
+      mockPhotosController.downloadPhoto.mockResolvedValue({
+        success: true,
+        value: new ArrayBuffer(1024),
+        status: 200,
+      } as GenericResponse<ArrayBuffer>);
+
+      const syncSpy = jest
+        .spyOn(service as any, 'syncUserLibraryMetadataAssets')
+        .mockResolvedValue(true);
+      const metadataProgress = jest.fn();
+
+      await service.downloadPhotos(
+        testAccountId,
+        undefined,
+        metadataProgress
+      );
+
+      expect(syncSpy).toHaveBeenCalledTimes(1);
+      expect(metadataProgress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentStep: 'Syncing user metadata images',
+          force: false,
+        })
+      );
+    });
+
     /**
      * Verifies that photos already present on disk are not re-downloaded.
      * This prevents wasting bandwidth and time on duplicate downloads.

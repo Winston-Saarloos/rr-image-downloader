@@ -2,6 +2,7 @@ import React from 'react';
 import {
   MapPin,
   Users,
+  Camera,
   Calendar,
   Heart,
   Ticket,
@@ -18,6 +19,7 @@ export interface PhotoCardProps {
   onClick: (photo: Photo) => void;
   room: string;
   users: string[];
+  photographer?: string;
   imageUrl: string;
   formattedDate?: string;
   eventName?: string;
@@ -31,6 +33,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = React.memo(
     onClick,
     room,
     users,
+    photographer,
     imageUrl,
     formattedDate,
     eventName,
@@ -116,6 +119,12 @@ export const PhotoCard: React.FC<PhotoCardProps> = React.memo(
               <span className="truncate">
                 {eventName || `Event ${eventId}`}
               </span>
+            </div>
+          )}
+          {photographer && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+              <Camera className="h-4 w-4 flex-shrink-0" />
+              <span className="truncate min-w-0">{photographer}</span>
             </div>
           )}
           {users.length > 0 && (
