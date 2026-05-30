@@ -1168,6 +1168,7 @@ export class RecNetService extends EventEmitter {
       const jsonPath = path.join(accountDir, `${accountId}_photos.json`);
       let lastSortValue: string | undefined = undefined;
       let existingPhotoCount = 0;
+      const existingPhotoIds = new Set<string>();
 
       console.log(`Looking for existing photos file at: ${jsonPath}`);
 
@@ -1208,6 +1209,11 @@ export class RecNetService extends EventEmitter {
 
             // Find the newest photo's sort value
             for (const photo of normalizedExisting) {
+              const photoId = this.normalizeId(photo.Id);
+              if (photoId) {
+                existingPhotoIds.add(photoId);
+              }
+
               if (photo.sort) {
                 const currentSort = photo.sort;
                 if (!lastSortValue || currentSort > lastSortValue) {
@@ -1235,14 +1241,13 @@ export class RecNetService extends EventEmitter {
       let iteration = 0;
       let isIncrementalMode = false;
 
-      // If we have existing data, optimize by starting from the end (newest photos)
-      if (lastSortValue && existingPhotoCount > 0) {
+      // If we have existing data, still scan every page and merge by ID.
+      // RecNet's cursor and page ordering semantics are not reliable for
+      // fetching only photos newer than an existing collection.
+      if (existingPhotoCount > 0) {
         isIncrementalMode = true;
         console.log(
-          `Incremental mode: checking for new photos after existing ${existingPhotoCount} photos`
-        );
-        console.log(
-          `Starting from newest photos (after sort value: ${lastSortValue})`
+          `Incremental mode: checking newest pages against ${existingPhotoCount} existing photos`
         );
       } else {
         console.log(`Full collection mode: fetching all photos from beginning`);
@@ -1274,10 +1279,6 @@ export class RecNetService extends EventEmitter {
           accountId
         )}?skip=${skip}&take=${PHOTO_MAX_PAGE_SIZE}&sort=2`;
 
-        if (lastSortValue) {
-          url += `&after=${encodeURIComponent(lastSortValue)}`;
-        }
-
         const photos = this.normalizePhotos(
           await this.runMetadataRequestWithRetry({
             label: `user photos page ${pageNumber}`,
@@ -1292,7 +1293,6 @@ export class RecNetService extends EventEmitter {
                   skip,
                   take: PHOTO_MAX_PAGE_SIZE,
                   sort: 2,
-                  after: lastSortValue,
                 },
                 token,
                 { signal: operation.controller.signal }
@@ -1315,24 +1315,15 @@ export class RecNetService extends EventEmitter {
 
           // Check if photo already exists by ID
           const photoId = this.normalizeId(photo.Id);
-          if (photoId) {
-            for (const existingPhoto of all) {
-              if (this.normalizeId(existingPhoto.Id) === photoId) {
-                shouldAdd = false;
-                break;
-              }
-            }
-          }
-
-          // Also check by sort value for additional safety
-          if (shouldAdd && lastSortValue && photo.sort) {
-            if (photo.sort <= lastSortValue) {
-              shouldAdd = false;
-            }
+          if (photoId && existingPhotoIds.has(photoId)) {
+            shouldAdd = false;
           }
 
           if (shouldAdd) {
             all.push(photo);
+            if (photoId) {
+              existingPhotoIds.add(photoId);
+            }
             newPhotosAdded++;
           }
 
@@ -1356,16 +1347,8 @@ export class RecNetService extends EventEmitter {
           totalSoFar: totalFetched,
           totalInCollection: all.length,
           newestSortValue,
-          incrementalMode: !!lastSortValue,
+          incrementalMode: isIncrementalMode,
         });
-
-        // In incremental mode, if we found no new photos, we can stop early
-        if (isIncrementalMode && newPhotosAdded === 0 && photos.length > 0) {
-          console.log(
-            `No new photos found in incremental check, stopping early`
-          );
-          hasMorePhotos = false;
-        }
 
         if (photos.length < PHOTO_MAX_PAGE_SIZE) {
           // No more photos available
@@ -1503,6 +1486,7 @@ export class RecNetService extends EventEmitter {
 
       const feedJsonPath = path.join(accountDir, `${accountId}_feed.json`);
       const all: Photo[] = [];
+      const existingFeedPhotoIds = new Set<string>();
       let skip = 0;
       let totalFetched = 0;
       const iterationDetails: IterationDetail[] = [];
@@ -1547,6 +1531,11 @@ export class RecNetService extends EventEmitter {
 
             // Find the oldest photo's CreatedAt
             for (const photo of normalizedExisting) {
+              const photoId = this.normalizeId(photo.Id);
+              if (photoId) {
+                existingFeedPhotoIds.add(photoId);
+              }
+
               if (photo.CreatedAt) {
                 const createdAt = new Date(photo.CreatedAt);
                 if (!lastSince || createdAt < lastSince) {
@@ -1573,9 +1562,9 @@ export class RecNetService extends EventEmitter {
       // Determine the since parameter
       let sinceTime: Date;
       if (incremental && lastSince) {
-        sinceTime = lastSince;
+        sinceTime = new Date();
         iterationDetails.push({
-          note: 'incremental_mode_using_oldest_photo_date',
+          note: 'incremental_mode_using_current_time',
           sinceTime: sinceTime.toISOString(),
           incremental: true,
         });
@@ -1646,18 +1635,15 @@ export class RecNetService extends EventEmitter {
 
           let shouldAdd = true;
           const photoId = this.normalizeId(photo.Id);
-          if (photoId) {
-            // Check if this photo already exists
-            for (const existingPhoto of all) {
-              if (this.normalizeId(existingPhoto.Id) === photoId) {
-                shouldAdd = false;
-                break;
-              }
-            }
+          if (photoId && existingFeedPhotoIds.has(photoId)) {
+            shouldAdd = false;
           }
 
           if (shouldAdd) {
             all.push(photo);
+            if (photoId) {
+              existingFeedPhotoIds.add(photoId);
+            }
             newPhotosAdded++;
           }
 

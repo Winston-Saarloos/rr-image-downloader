@@ -1046,6 +1046,208 @@ describe('RecNetService - Download Functionality', () => {
       ).toBe(true);
     });
 
+    it('checks the newest user photo page on reruns so later photos are collected', async () => {
+      jest.spyOn(service, 'fetchAndSaveBulkData').mockResolvedValue({
+        accountsFetched: 0,
+        roomsFetched: 0,
+        eventsFetched: 0,
+        imageCommentsFetched: 0,
+      });
+
+      const accountDir = path.join(testOutputDir, testAccountId);
+      const photosJsonPath = path.join(
+        accountDir,
+        `${testAccountId}_photos.json`
+      );
+      const oldPhotosJsonPath = path.join(
+        testOutputDir,
+        `${testAccountId}_photos.json`
+      );
+      const marchPhoto = {
+        ...createMetadataPhoto('march-photo', 'march.jpg'),
+        CreatedAt: '2026-03-31T12:00:00.000Z',
+        sort: '2026-03-31T12:00:00.000Z',
+      };
+      const mayPhoto = {
+        ...createMetadataPhoto('may-photo', 'may.jpg'),
+        CreatedAt: '2026-05-05T12:00:00.000Z',
+        sort: '2026-05-05T12:00:00.000Z',
+      };
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (target: string) => {
+          if (target === oldPhotosJsonPath) {
+            return false;
+          }
+          return target === photosJsonPath;
+        }
+      );
+      (mockedFs.readJson as jest.Mock).mockImplementation(
+        async (target: string) => {
+          if (target === photosJsonPath) {
+            return [marchPhoto];
+          }
+          throw new Error(`Unexpected readJson path: ${target}`);
+        }
+      );
+      mockPhotosController.fetchPlayerPhotos.mockResolvedValue([
+        mayPhoto,
+        marchPhoto,
+      ]);
+
+      const result = await service.collectPhotos(testAccountId);
+
+      expect(result.totalNewPhotosAdded).toBe(1);
+      expect(result.totalPhotos).toBe(2);
+      expect(mockPhotosController.fetchPlayerPhotos).toHaveBeenCalledWith(
+        testAccountId,
+        { skip: 0, take: 1000, sort: 2 },
+        undefined,
+        expect.any(Object)
+      );
+      expect(mockedFs.writeJson).toHaveBeenCalledWith(
+        photosJsonPath,
+        expect.arrayContaining([
+          expect.objectContaining({ Id: 'march-photo' }),
+          expect.objectContaining({ Id: 'may-photo' }),
+        ]),
+        { spaces: 2 }
+      );
+    });
+
+    it('continues paging user photos on reruns when the first page has no new photos', async () => {
+      jest.spyOn(service, 'fetchAndSaveBulkData').mockResolvedValue({
+        accountsFetched: 0,
+        roomsFetched: 0,
+        eventsFetched: 0,
+        imageCommentsFetched: 0,
+      });
+
+      const accountDir = path.join(testOutputDir, testAccountId);
+      const photosJsonPath = path.join(
+        accountDir,
+        `${testAccountId}_photos.json`
+      );
+      const oldPhotosJsonPath = path.join(
+        testOutputDir,
+        `${testAccountId}_photos.json`
+      );
+      const existingPage = Array.from({ length: 1000 }, (_, index) => ({
+        ...createMetadataPhoto(`old-photo-${index}`, `old-${index}.jpg`),
+        CreatedAt: `2026-03-${String((index % 28) + 1).padStart(2, '0')}T12:00:00.000Z`,
+      }));
+      const mayPhoto = {
+        ...createMetadataPhoto('may-photo', 'may.jpg'),
+        CreatedAt: '2026-05-05T12:00:00.000Z',
+      };
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (target: string) => {
+          if (target === oldPhotosJsonPath) {
+            return false;
+          }
+          return target === photosJsonPath;
+        }
+      );
+      (mockedFs.readJson as jest.Mock).mockImplementation(
+        async (target: string) => {
+          if (target === photosJsonPath) {
+            return existingPage;
+          }
+          throw new Error(`Unexpected readJson path: ${target}`);
+        }
+      );
+      mockPhotosController.fetchPlayerPhotos
+        .mockResolvedValueOnce(existingPage)
+        .mockResolvedValueOnce([mayPhoto]);
+
+      const result = await service.collectPhotos(testAccountId);
+
+      expect(result.totalNewPhotosAdded).toBe(1);
+      expect(mockPhotosController.fetchPlayerPhotos).toHaveBeenCalledTimes(2);
+      expect(mockPhotosController.fetchPlayerPhotos).toHaveBeenNthCalledWith(
+        2,
+        testAccountId,
+        { skip: 1000, take: 1000, sort: 2 },
+        undefined,
+        expect.any(Object)
+      );
+      expect(mockedFs.writeJson).toHaveBeenCalledWith(
+        photosJsonPath,
+        expect.arrayContaining([expect.objectContaining({ Id: 'may-photo' })]),
+        { spaces: 2 }
+      );
+    });
+
+    it('collects newer feed photos on reruns instead of paging from the oldest saved item', async () => {
+      jest.spyOn(service, 'fetchAndSaveBulkData').mockResolvedValue({
+        accountsFetched: 0,
+        roomsFetched: 0,
+        eventsFetched: 0,
+        imageCommentsFetched: 0,
+      });
+
+      const accountDir = path.join(testOutputDir, testAccountId);
+      const feedJsonPath = path.join(
+        accountDir,
+        `${testAccountId}_feed.json`
+      );
+      const oldFeedJsonPath = path.join(
+        testOutputDir,
+        `${testAccountId}_feed.json`
+      );
+      const photosJsonPath = path.join(
+        accountDir,
+        `${testAccountId}_photos.json`
+      );
+      const marchFeedPhoto = {
+        ...createMetadataPhoto('march-feed-photo', 'march-feed.jpg'),
+        CreatedAt: '2026-03-31T12:00:00.000Z',
+      };
+      const mayFeedPhoto = {
+        ...createMetadataPhoto('817846863', '68blo0sw001q37f379wgargvv.jpg'),
+        CreatedAt: '2026-05-29T04:39:13.5210924Z',
+      };
+
+      (mockedFs.pathExists as jest.Mock).mockImplementation(
+        async (target: string) => {
+          if (target === oldFeedJsonPath || target === photosJsonPath) {
+            return false;
+          }
+          return target === feedJsonPath;
+        }
+      );
+      (mockedFs.readJson as jest.Mock).mockImplementation(
+        async (target: string) => {
+          if (target === feedJsonPath) {
+            return [marchFeedPhoto];
+          }
+          throw new Error(`Unexpected readJson path: ${target}`);
+        }
+      );
+      mockPhotosController.fetchFeedPhotos.mockResolvedValue([
+        mayFeedPhoto,
+        marchFeedPhoto,
+      ]);
+
+      const result = await service.collectFeedPhotos(testAccountId);
+      const feedRequestParams =
+        mockPhotosController.fetchFeedPhotos.mock.calls[0][1];
+
+      expect(result.totalNewPhotosAdded).toBe(1);
+      expect(new Date(feedRequestParams.since).getTime()).toBeGreaterThan(
+        new Date(marchFeedPhoto.CreatedAt).getTime()
+      );
+      expect(mockedFs.writeJson).toHaveBeenCalledWith(
+        feedJsonPath,
+        expect.arrayContaining([
+          expect.objectContaining({ Id: 'march-feed-photo' }),
+          expect.objectContaining({ Id: '817846863' }),
+        ]),
+        { spaces: 2 }
+      );
+    });
+
     it('fails metadata collection after exhausting retries', async () => {
       jest.spyOn(service, 'fetchAndSaveBulkData').mockResolvedValue({
         accountsFetched: 0,
