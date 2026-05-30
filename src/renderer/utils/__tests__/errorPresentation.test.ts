@@ -1,5 +1,6 @@
 import {
   classifyError,
+  createOutputFolderUnavailableIncident,
   createUserIncident,
 } from '../errorPresentation';
 
@@ -33,5 +34,18 @@ describe('errorPresentation', () => {
     expect(incident.detail).toBe(
       'This account does not have any feed photos to download.'
     );
+  });
+
+  it('creates a warning incident for unavailable saved output folders', () => {
+    const incident = createOutputFolderUnavailableIncident(
+      'I:\\Rec Room User Images',
+      'The configured output folder is not available. Choose a new folder with Browse.'
+    );
+
+    expect(incident.severity).toBe('warning');
+    expect(incident.source).toBe('settings');
+    expect(incident.title).toBe('Saved output folder unavailable');
+    expect(incident.technicalDetail).toBe('I:\\Rec Room User Images');
+    expect(incident.guidance.join(' ')).toMatch(/disconnected drive/i);
   });
 });

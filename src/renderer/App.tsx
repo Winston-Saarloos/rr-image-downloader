@@ -32,6 +32,7 @@ import {
 import { FavoritesProvider } from './contexts/FavoritesContext';
 import {
   createUserIncident,
+  createOutputFolderUnavailableIncident,
   classifyError,
   toOperationErrorData,
 } from './utils/errorPresentation';
@@ -212,6 +213,18 @@ function App() {
       if (window.electronAPI) {
         const loadedSettings = await window.electronAPI.getSettings();
         setSettings(loadedSettings);
+        if (loadedSettings.outputRootUnavailableMessage) {
+          addLog(
+            `Saved output folder unavailable: ${loadedSettings.outputRootUnavailableMessage}`,
+            'warning'
+          );
+          setActiveIncident(
+            createOutputFolderUnavailableIncident(
+              loadedSettings.outputRoot,
+              loadedSettings.outputRootUnavailableMessage
+            )
+          );
+        }
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -252,6 +265,11 @@ function App() {
         const updatedSettings =
           await window.electronAPI.updateSettings(newSettings);
         setSettings(updatedSettings);
+        if (!updatedSettings.outputRootUnavailableMessage) {
+          setActiveIncident(prev =>
+            prev?.title === 'Saved output folder unavailable' ? null : prev
+          );
+        }
         addLog('Settings updated', 'success');
       }
     } catch (error) {

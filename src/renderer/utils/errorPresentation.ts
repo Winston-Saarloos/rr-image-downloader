@@ -239,3 +239,22 @@ export function createUserIncident(
     technicalDetail: options?.technicalDetail ?? rawMessage,
   };
 }
+
+export function createOutputFolderUnavailableIncident(
+  outputRoot: string,
+  message: string
+): UserFacingIncident {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    source: 'settings',
+    severity: 'warning',
+    category: 'disk',
+    title: 'Saved output folder unavailable',
+    detail: message,
+    guidance: [
+      'Settings loaded, but the library folder could not be opened. It may be on a disconnected drive or a path that no longer exists.',
+      'Use Browse to choose a new output folder. Downloads stay disabled until you do.',
+    ],
+    technicalDetail: outputRoot,
+  };
+}

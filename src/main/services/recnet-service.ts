@@ -126,16 +126,66 @@ export function isOutputRootConfiguredForWrites(outputRoot: string): boolean {
   return path.isAbsolute(root);
 }
 
+function pathExistsSafe(target: string): boolean {
+  try {
+    return fs.pathExistsSync(target);
+  } catch {
+    return false;
+  }
+}
+
+/** False when the drive is missing or the path cannot be created (e.g. disconnected external drive). */
+export function isOutputRootAccessible(outputRoot: string): boolean {
+  const resolved = computeResolvedOutputRoot(outputRoot);
+  if (!resolved) {
+    return false;
+  }
+  try {
+    if (pathExistsSafe(resolved)) {
+      return true;
+    }
+    const root = path.parse(resolved).root;
+    let probe = path.dirname(resolved);
+    while (probe.length >= root.length) {
+      if (pathExistsSafe(probe)) {
+        return true;
+      }
+      if (probe === root) {
+        break;
+      }
+      probe = path.dirname(probe);
+    }
+    return pathExistsSafe(root);
+  } catch {
+    return false;
+  }
+}
+
 export function describeOutputConfigurationError(settings: {
   outputRoot: string;
 }): string | null {
   if (isOutputRootConfiguredForWrites(settings.outputRoot)) {
+    if (!isOutputRootAccessible(settings.outputRoot)) {
+      return 'The configured output folder is not available. Choose a new folder with Browse.';
+    }
     return null;
   }
   if (!settings.outputRoot.trim()) {
     return 'Choose an output folder before downloading or saving data.';
   }
   return 'Choose an absolute output folder path (use Browse) before downloading or saving data.';
+}
+
+export function describeOutputRootUnavailableMessage(
+  outputRoot: string
+): string | null {
+  if (
+    !isOutputRootConfiguredForWrites(outputRoot) ||
+    isOutputRootAccessible(outputRoot)
+  ) {
+    return null;
+  }
+  return describeOutputConfigurationError({ outputRoot });
 }
 
 interface CurrentOperation {
@@ -571,7 +621,14 @@ export class RecNetService extends EventEmitter {
     if (!resolved) {
       return;
     }
-    fs.ensureDirSync(resolved);
+    try {
+      fs.ensureDirSync(resolved);
+    } catch (error) {
+      console.log(
+        'Failed to ensure output directory:',
+        (error as Error).message
+      );
+    }
   }
 
   private syncHttpClientSettings(): void {
@@ -882,13 +939,17 @@ export class RecNetService extends EventEmitter {
     const resolvedOutputRoot = computeResolvedOutputRoot(
       this.settings.outputRoot
     );
-    const outputPathConfiguredForDownload = isOutputRootConfiguredForWrites(
+    const outputPathConfiguredForDownload =
+      isOutputRootConfiguredForWrites(this.settings.outputRoot) &&
+      isOutputRootAccessible(this.settings.outputRoot);
+    const outputRootUnavailableMessage = describeOutputRootUnavailableMessage(
       this.settings.outputRoot
     );
     return {
       ...this.settings,
       resolvedOutputRoot,
       outputPathConfiguredForDownload,
+      outputRootUnavailableMessage,
     };
   }
 
@@ -896,10 +957,15 @@ export class RecNetService extends EventEmitter {
     newSettings: Partial<RecNetSettings>
   ): Promise<RecNetSettings> {
     await this.ensureSettingsLoaded();
-    const { resolvedOutputRoot, outputPathConfiguredForDownload, ...rest } =
-      newSettings;
+    const {
+      resolvedOutputRoot,
+      outputPathConfiguredForDownload,
+      outputRootUnavailableMessage,
+      ...rest
+    } = newSettings;
     void resolvedOutputRoot;
     void outputPathConfiguredForDownload;
+    void outputRootUnavailableMessage;
 
     this.settings = normalizeRecNetSettings({
       ...this.settings,
