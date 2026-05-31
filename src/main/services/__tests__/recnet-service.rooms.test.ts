@@ -261,6 +261,78 @@ describe('RecNetService - Room Photo Batches', () => {
     );
   });
 
+  it('checks newest room photos from the feed head before resuming older pages', async () => {
+    const roomDir = path.join(outputRoot, 'rooms', '2754290');
+    const metadataPath = path.join(roomDir, '2754290_photos.json');
+    const folderMetaPath = path.join(roomDir, 'folder-meta.json');
+
+    (mockedFs.pathExists as jest.Mock).mockImplementation(async filePath => {
+      return filePath === folderMetaPath || filePath === metadataPath;
+    });
+    (mockedFs.readJson as jest.Mock).mockImplementation(async filePath => {
+      if (filePath === folderMetaPath) {
+        return {
+          schemaVersion: 1,
+          roomId: '2754290',
+          roomName: 'TheRoomies',
+          displayLabel: 'TheRoomies',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          nextSkip: 3,
+          roomPhotoCursors: {
+            0: { nextSkip: 3, completed: false },
+          },
+        };
+      }
+      if (filePath === metadataPath) {
+        return [
+          createPhoto('old-1'),
+          createPhoto('old-2'),
+          createPhoto('old-3'),
+        ];
+      }
+      return null;
+    });
+    mockPhotosController.fetchRoomPhotos.mockResolvedValueOnce([
+      createPhoto('new-1'),
+      createPhoto('old-1'),
+      createPhoto('old-2'),
+    ]);
+
+    const result = await service.downloadRoomPhotoBatch({
+      roomName: 'TheRoomies',
+      pageSize: 3,
+      batchPages: 1,
+      sort: 0,
+    });
+
+    expect(result.startSkip).toBe(0);
+    expect(result.nextSkip).toBe(4);
+    expect(result.newPhotosAdded).toBe(1);
+    expect(result.headPhotosChecked).toBe(3);
+    expect(result.previouslyScannedPhotosSkipped).toBe(1);
+    expect(result.resumedFromSavedSkip).toBe(3);
+    expect(result.hasMore).toBe(true);
+    expect(mockPhotosController.fetchRoomPhotos).toHaveBeenCalledWith(
+      '2754290',
+      { skip: 0, take: 3, filter: 1, sort: 0 },
+      undefined,
+      expect.any(Object)
+    );
+    expect(mockedFs.writeJson).toHaveBeenCalledWith(
+      folderMetaPath,
+      expect.objectContaining({
+        nextSkip: 4,
+        roomPhotoCursors: {
+          0: expect.objectContaining({
+            nextSkip: 4,
+            completed: false,
+          }),
+        },
+      }),
+      { spaces: 2 }
+    );
+  });
+
   it('discovers creator events under outputRoot/events/<creatorId>', async () => {
     const event = { ...createEvent(), ImageName: 'null' };
     jest.spyOn(service, 'lookupAccountByUsername').mockResolvedValue({

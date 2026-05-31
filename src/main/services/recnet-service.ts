@@ -7356,16 +7356,19 @@ export class RecNetService extends EventEmitter {
       await fs.ensureDir(photosDir);
       const existingRoomMeta = await this.readRoomFolderMeta(roomDir);
       const roomPhotoCursor = existingRoomMeta?.roomPhotoCursors?.[roomPhotoSort];
+      const savedNextSkip = Math.max(
+        0,
+        roomPhotoCursor?.nextSkip ??
+          (roomPhotoSort === ROOM_PHOTO_DEFAULT_SORT
+            ? existingRoomMeta?.nextSkip
+            : undefined) ??
+          0
+      );
+      const isFreshNewestFirstRun =
+        requestedStartSkip === undefined &&
+        roomPhotoSort === ROOM_PHOTO_DEFAULT_SORT;
       const startSkip =
-        requestedStartSkip ??
-        Math.max(
-          0,
-          roomPhotoCursor?.nextSkip ??
-            (roomPhotoSort === ROOM_PHOTO_DEFAULT_SORT
-              ? existingRoomMeta?.nextSkip
-              : undefined) ??
-            0
-        );
+        requestedStartSkip ?? (isFreshNewestFirstRun ? 0 : savedNextSkip);
 
       let existingPhotos: Photo[] = [];
       if (await fs.pathExists(metadataPath)) {
@@ -7382,10 +7385,12 @@ export class RecNetService extends EventEmitter {
       }
 
       const allPhotosById = new Map<string, Photo>();
+      const existingPhotoIds = new Set<string>();
       for (const photo of existingPhotos) {
         const photoId = this.normalizeId(photo.Id);
         if (photoId) {
           allPhotosById.set(photoId, photo);
+          existingPhotoIds.add(photoId);
         }
       }
 
@@ -7393,6 +7398,9 @@ export class RecNetService extends EventEmitter {
       let photosFetched = 0;
       let pagesFetched = 0;
       let hasMore = true;
+      let leadingNewPhotos = 0;
+      let reachedExistingPhoto = false;
+      let countingHeadInsertions = isFreshNewestFirstRun && savedNextSkip > 0;
 
       for (let pageIndex = 0; pageIndex < batchPages; pageIndex++) {
         if (operation.cancelled) {
@@ -7437,6 +7445,14 @@ export class RecNetService extends EventEmitter {
 
         for (const photo of pagePhotos) {
           const photoId = this.normalizeId(photo.Id);
+          if (photoId && countingHeadInsertions) {
+            if (existingPhotoIds.has(photoId)) {
+              reachedExistingPhoto = true;
+              countingHeadInsertions = false;
+            } else {
+              leadingNewPhotos++;
+            }
+          }
           if (photoId && !allPhotosById.has(photoId)) {
             allPhotosById.set(photoId, photo);
           }
@@ -7576,14 +7592,28 @@ export class RecNetService extends EventEmitter {
         throw this.createOperationCancelledError();
       }
 
-      const nextSkip = startSkip + pagesFetched * pageSize;
+      const fetchedNextSkip = startSkip + pagesFetched * pageSize;
+      const canJumpPastPreviouslyScannedNewestPhotos =
+        isFreshNewestFirstRun && savedNextSkip > 0 && reachedExistingPhoto;
+      const nextSkip = canJumpPastPreviouslyScannedNewestPhotos
+        ? Math.max(fetchedNextSkip, savedNextSkip + leadingNewPhotos)
+        : fetchedNextSkip;
+      const hasMoreAfterJump = canJumpPastPreviouslyScannedNewestPhotos
+        ? roomPhotoCursor?.completed !== true
+        : hasMore;
+      const previouslyScannedPhotosSkipped =
+        canJumpPastPreviouslyScannedNewestPhotos
+          ? Math.max(0, nextSkip - fetchedNextSkip)
+          : 0;
+      const headPhotosChecked =
+        isFreshNewestFirstRun && savedNextSkip > 0 ? photosFetched : 0;
       await this.writeRoomFolderMeta(roomDir, room, {
         nextSkip:
           roomPhotoSort === ROOM_PHOTO_DEFAULT_SORT ? nextSkip : undefined,
         roomPhotoCursors: {
           [roomPhotoSort]: {
             nextSkip,
-            completed: !hasMore,
+            completed: !hasMoreAfterJump,
             updatedAt: new Date().toISOString(),
           },
         },
@@ -7630,8 +7660,11 @@ export class RecNetService extends EventEmitter {
         pagesFetched,
         photosFetched,
         newPhotosAdded,
+        headPhotosChecked,
+        previouslyScannedPhotosSkipped,
+        resumedFromSavedSkip: savedNextSkip > 0 ? savedNextSkip : undefined,
         totalPhotos: normalizedAll.length,
-        hasMore,
+        hasMore: hasMoreAfterJump,
         relatedMetadata,
         downloadStats,
         downloadResults,

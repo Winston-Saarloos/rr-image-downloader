@@ -318,6 +318,9 @@ export interface RoomPhotoBatchResult {
   pagesFetched: number;
   photosFetched: number;
   newPhotosAdded: number;
+  headPhotosChecked: number;
+  previouslyScannedPhotosSkipped: number;
+  resumedFromSavedSkip?: number;
   totalPhotos: number;
   hasMore: boolean;
   relatedMetadata: {
