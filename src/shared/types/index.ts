@@ -17,6 +17,11 @@ export interface RecNetSettings {
    * True when output is configured so downloads may start; set by main `getSettings` only.
    */
   outputPathConfiguredForDownload?: boolean;
+  /**
+   * When the saved output folder exists in settings but cannot be used (e.g. disconnected drive).
+   * Set by main `getSettings` only; not persisted.
+   */
+  outputRootUnavailableMessage?: string | null;
   /** Image CDN base URL (image name is appended automatically). */
   cdnBase: string;
   interPageDelayMs?: number;
@@ -313,6 +318,9 @@ export interface RoomPhotoBatchResult {
   pagesFetched: number;
   photosFetched: number;
   newPhotosAdded: number;
+  headPhotosChecked: number;
+  previouslyScannedPhotosSkipped: number;
+  resumedFromSavedSkip?: number;
   totalPhotos: number;
   hasMore: boolean;
   relatedMetadata: {

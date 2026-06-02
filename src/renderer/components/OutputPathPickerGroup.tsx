@@ -72,6 +72,7 @@ export const OutputPathPickerGroup: React.FC<OutputPathPickerGroupProps> = ({
 
   const busy = pickerDisabled || isSelectingFolder;
   const configured = Boolean(settings.outputPathConfiguredForDownload);
+  const unavailableMessage = settings.outputRootUnavailableMessage?.trim();
 
   return (
     <div
@@ -131,8 +132,14 @@ export const OutputPathPickerGroup: React.FC<OutputPathPickerGroupProps> = ({
           className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-sm text-amber-950 dark:text-amber-100"
           role="status"
         >
-          <p className="font-medium">Output folder required</p>
-          {calloutContext === 'download' ? (
+          <p className="font-medium">
+            {unavailableMessage
+              ? 'Saved output folder unavailable'
+              : 'Output folder required'}
+          </p>
+          {unavailableMessage ? (
+            <p>{unavailableMessage}</p>
+          ) : calloutContext === 'download' ? (
             <p>
               Downloads are disabled until you choose a permanent folder for
               your photo library. Click{' '}

@@ -32,6 +32,12 @@ jest.mock('fs-extra', () => {
     writeFile: jest.fn(),
     writeJson: jest.fn(),
     ensureDir: jest.fn(),
+    pathExistsSync: jest.fn((...args: Parameters<typeof actualFs.pathExistsSync>) =>
+      actualFs.pathExistsSync(...args)
+    ),
+    ensureDirSync: jest.fn((...args: Parameters<typeof actualFs.ensureDirSync>) =>
+      actualFs.ensureDirSync(...args)
+    ),
     readdir: jest.fn(),
     copy: jest.fn(),
     remove: jest.fn(),
@@ -209,6 +215,44 @@ describe('RecNetService - File Saving Functionality', () => {
       >;
       expect(rewrittenSettings?.outputRoot).toBe('');
       expect(rewrittenSettings).not.toHaveProperty('legacyRelativeOutputAllowed');
+    });
+
+    it('loads settings when the saved output folder cannot be created', async () => {
+      jest.clearAllMocks();
+      const missingDrivePath = 'I:\\Rec Room User Images';
+      (mockedFs.pathExists as jest.Mock).mockResolvedValue(true);
+      (mockedFs.readJson as jest.Mock).mockResolvedValue({
+        outputRoot: missingDrivePath,
+      });
+      (mockedFs.pathExistsSync as jest.Mock).mockReturnValue(false);
+      (mockedFs.ensureDirSync as jest.Mock).mockImplementation(() => {
+        throw Object.assign(
+          new Error(
+            "ENOENT: no such file or directory, mkdir 'I:\\Rec Room User Images'"
+          ),
+          { code: 'ENOENT' }
+        );
+      });
+
+      const localService = new RecNetService();
+      const settings = await localService.getSettings();
+
+      expect(settings.outputRoot).toBe(missingDrivePath);
+      expect(settings.outputPathConfiguredForDownload).toBe(false);
+      expect(settings.outputRootUnavailableMessage).toMatch(/not available/i);
+
+      (mockedFs.pathExistsSync as jest.Mock).mockImplementation(
+        (target: string) =>
+          target === testOutputDir ||
+          target.startsWith(`${testOutputDir}${path.sep}`)
+      );
+      (mockedFs.ensureDirSync as jest.Mock).mockImplementation(() => undefined);
+
+      const updated = await localService.updateSettings({
+        outputRoot: testOutputDir,
+      });
+      expect(updated.outputRoot).toBe(testOutputDir);
+      expect(updated.outputPathConfiguredForDownload).toBe(true);
     });
   });
 
