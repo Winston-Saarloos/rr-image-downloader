@@ -4,6 +4,8 @@
 
 # RR Image Downloader / Offline Viewer
 
+**Update notice (Jun 2026):** There was an error where auto-updates were incorrectly disabled while the app was in *viewer-only mode*. Download **v4.0.7 or newer** from the releases page to fix this.
+
 This is an Electron + React desktop app for saving your Rec Room / RecNet images locally, browsing them offline, and exploring stats about your library.
 
 In the event Rec Room doesn't exist. This application will allow you to download full resolution images of your image library and feed images from Rec Room's CDN. It will also capture important metadata about your images so you will still be able to view tagged users and the room the image was taken in. All while being offline and not connected to Rec Room's services.
