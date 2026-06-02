@@ -2,9 +2,9 @@
   <img src="assets/icon.png" alt="App Icon" width="75">
 </div>
 
-# RR Image Downloader / Offline Viewer
-
 **Update notice (Jun 2026):** There was an error where auto-updates were incorrectly disabled while the app was in *viewer-only mode*. Download **v4.0.7 or newer** from the releases page to fix this.
+
+# RR Image Downloader / Offline Viewer
 
 This is an Electron + React desktop app for saving your Rec Room / RecNet images locally, browsing them offline, and exploring stats about your library.
 
