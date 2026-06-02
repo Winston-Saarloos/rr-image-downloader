@@ -479,11 +479,6 @@ function registerLocalFileProtocol() {
 
 // Setup auto-updater event handlers
 function setupAutoUpdater() {
-  if (isViewerOnlyMode()) {
-    console.log('Auto-updater disabled in viewer-only mode');
-    return;
-  }
-
   if (isDev) {
     console.log('Auto-updater disabled in development mode');
     return;
@@ -1930,9 +1925,6 @@ ipcMain.handle(
 
 // Auto-updater IPC handlers
 ipcMain.handle('check-for-updates', async (): Promise<void> => {
-  if (getViewerOnlyNetworkError()) {
-    throw new Error(VIEWER_ONLY_MODE_ERROR);
-  }
   if (!isDev) {
     try {
       await autoUpdater.checkForUpdates();
@@ -1944,9 +1936,6 @@ ipcMain.handle('check-for-updates', async (): Promise<void> => {
 });
 
 ipcMain.handle('download-update', async (): Promise<void> => {
-  if (getViewerOnlyNetworkError()) {
-    throw new Error(VIEWER_ONLY_MODE_ERROR);
-  }
   if (!isDev) {
     try {
       await autoUpdater.downloadUpdate();
@@ -1958,9 +1947,6 @@ ipcMain.handle('download-update', async (): Promise<void> => {
 });
 
 ipcMain.handle('install-update', async (): Promise<void> => {
-  if (getViewerOnlyNetworkError()) {
-    throw new Error(VIEWER_ONLY_MODE_ERROR);
-  }
   if (!isDev) {
     autoUpdater.quitAndInstall(false, true);
   }

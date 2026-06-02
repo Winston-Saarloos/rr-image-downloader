@@ -301,7 +301,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
                 <Download className="h-4 w-4" />
               </Button>
             )}
-            {!viewerOnlyMode && <UpdateIndicator />}
+            <UpdateIndicator />
             <Button
               variant="ghost"
               size="icon"
