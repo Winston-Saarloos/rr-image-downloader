@@ -366,7 +366,7 @@ interface PhotoStats {
   } | null;
   firstPhotoDate: Date | null;
   latestPhotoDate: Date | null;
-  timeSpan: { days: number; hours: number; minutes: number } | null;
+  timeSpan: { years: number; days: number; hours: number; minutes: number } | null;
   photosPerYear: Array<{
     year: string;
     userPhotos: number;
@@ -615,16 +615,18 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
         ? photosWithDates[photosWithDates.length - 1].date
         : null;
 
-    let timeSpan: { days: number; hours: number; minutes: number } | null =
-      null;
+    let timeSpan: { years: number; days: number; hours: number; minutes: number; } | null =
+     null;
     if (firstPhotoDate && latestPhotoDate) {
       const diffMs = latestPhotoDate.getTime() - firstPhotoDate.getTime();
-      const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      const years = Math.floor(totalDays / 365);
+      const days = totalDays % 365;
       const hours = Math.floor(
         (diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
       );
       const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-      timeSpan = { days, hours, minutes };
+      timeSpan = { years, days, hours, minutes };
     }
 
     // Photos per year - separate user photos and feed photos
@@ -700,10 +702,12 @@ export const StatsDialog: React.FC<StatsDialogProps> = ({
   }, [photos, feedPhotos, getPhotoRoom, getPhotoUsers]);
 
   const formatTimeGap = (
-    gap: { days: number; hours: number; minutes: number } | null
+    gap: { years?: number; days: number; hours: number; minutes: number } | null
   ): string => {
     if (!gap) return 'N/A';
     const parts: string[] = [];
+    if (gap.years && gap.years > 0)
+      parts.push(`${gap.years} year${gap.years !== 1 ? 's' : ''}`);
     if (gap.days > 0) parts.push(`${gap.days} day${gap.days !== 1 ? 's' : ''}`);
     if (gap.hours > 0)
       parts.push(`${gap.hours} hour${gap.hours !== 1 ? 's' : ''}`);
