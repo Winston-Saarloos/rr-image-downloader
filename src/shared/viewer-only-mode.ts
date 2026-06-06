@@ -1,4 +1,4 @@
-export const VIEWER_ONLY_CUTOFF_YEAR = 2026;
+export const VIEWER_ONLY_CUTOFF_YEAR = 2027;
 export const VIEWER_ONLY_CUTOFF_MONTH_INDEX = 5;
 export const VIEWER_ONLY_CUTOFF_DAY = 6;
 
