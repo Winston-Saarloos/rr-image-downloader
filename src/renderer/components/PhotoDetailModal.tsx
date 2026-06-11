@@ -103,13 +103,15 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
   const room = getPhotoRoom(photo);
   const taggedUsers = getPhotoTaggedUsers(photo);
   const photographer = getPhotoPhotographer(photo);
-  const photographerProfileImagePath = photographer
-    ? accountProfileImageMap.get(photographer.id)?.trim() || ''
-    : '';
-  const photographerProfileImageUrl =
-    photographerProfileImagePath
-      ? `local://${encodeURIComponent(photographerProfileImagePath)}`
+  const getProfileImageUrl = (accountId: string): string => {
+    const profileImagePath = accountProfileImageMap.get(accountId)?.trim() || '';
+    return profileImagePath
+      ? `local://${encodeURIComponent(profileImagePath)}`
       : '';
+  };
+  const photographerProfileImageUrl = photographer
+    ? getProfileImageUrl(photographer.id)
+    : '';
   const description = extended.Description || '';
   const imageUrl = getPhotoImageUrl(photo);
   const createdAt = photo.CreatedAt ? new Date(photo.CreatedAt) : null;
@@ -315,6 +317,9 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
                           (comment.PlayerId ? comment.PlayerId : 'Unknown');
                         const username = usernameMap.get(comment.PlayerId);
                         const dateLabel = formatCommentDate(comment.CreatedAt);
+                        const profileImageUrl = getProfileImageUrl(
+                          comment.PlayerId
+                        );
                         return (
                           <li
                             key={comment.SavedImageCommentId}
@@ -324,7 +329,15 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
                               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
                               aria-hidden
                             >
-                              <User className="h-5 w-5" strokeWidth={1.75} />
+                              {profileImageUrl ? (
+                                <img
+                                  src={profileImageUrl}
+                                  alt=""
+                                  className="h-full w-full rounded-full object-cover"
+                                />
+                              ) : (
+                                <User className="h-5 w-5" strokeWidth={1.75} />
+                              )}
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 leading-tight">
