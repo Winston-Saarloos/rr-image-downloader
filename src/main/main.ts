@@ -13,168 +13,22 @@ import * as fs from 'fs-extra';
 import { autoUpdater } from 'electron-updater';
 import { RecNetService } from './services/recnet-service';
 import {
-  CollectionResult,
-  DownloadPreflightSummary,
-  DownloadResult,
-  ProfileHistoryAccessResult,
-  ProfileHistoryCollectionResult,
   RecNetSettings,
   Progress,
-  AccountInfo,
   AvailableEvent,
   AvailableEventCreator,
   AvailableRoom,
-  EventDiscoveryResult,
-  EventPhotoBatchResult,
   Photo,
   PlayerResult,
   RoomDto,
-  RoomPhotoBatchResult,
-  RoomPhotoSort,
   LibraryMoveResult,
-  MetadataSyncResult,
 } from '../shared/types';
-import type { DownloadSourceSelection } from '../shared/download-sources';
 import { EventDto } from './models/EventDto';
 import { ImageCommentDto } from './models/ImageCommentDto';
-import {
-  isViewerOnlyMode,
-  VIEWER_ONLY_MODE_ERROR,
-} from '../shared/viewer-only-mode';
-import { pathsEffectivelyEqual } from './services/library-move';
 
 // Keep a global reference of the window object
 let mainWindow: BrowserWindow | null = null;
 let recNetService: RecNetService;
-
-function getViewerOnlyNetworkError(): string | null {
-  return isViewerOnlyMode() ? VIEWER_ONLY_MODE_ERROR : null;
-}
-
-function viewerOnlyApiResponse<T>(): ApiResponse<T> {
-  return { success: false, error: VIEWER_ONLY_MODE_ERROR };
-}
-
-function emptyMetadataSyncResult(): MetadataSyncResult {
-  return {
-    accountsProcessed: 0,
-    creatorsProcessed: 0,
-    eventsProcessed: 0,
-    roomsProcessed: 0,
-  };
-}
-
-/** Serialize metadata image sync jobs (launch, debug force, output path change). */
-let metadataSyncMutex: Promise<void> = Promise.resolve();
-let activeMetadataSyncAbort: AbortController | null = null;
-
-function cancelActiveMetadataSync(): void {
-  if (activeMetadataSyncAbort && !activeMetadataSyncAbort.signal.aborted) {
-    activeMetadataSyncAbort.abort();
-  }
-}
-
-function enqueueMetadataSync(force: boolean): Promise<MetadataSyncResult> {
-  const next = metadataSyncMutex.then(async (): Promise<MetadataSyncResult> => {
-    if (!recNetService || isViewerOnlyMode()) {
-      return emptyMetadataSyncResult();
-    }
-    const settings = await recNetService.getSettings();
-    if (
-      !force &&
-      (!settings.backgroundMetadataSyncEnabled ||
-        !settings.outputPathConfiguredForDownload ||
-        !(settings.resolvedOutputRoot ?? '').trim())
-    ) {
-      return emptyMetadataSyncResult();
-    }
-    const abortController = new AbortController();
-    activeMetadataSyncAbort = abortController;
-    const wc = mainWindow?.webContents;
-    wc?.send('metadata-sync-state', {
-      phase: 'running',
-      currentStep: 'Starting metadata image sync',
-      current: 0,
-      total: 0,
-      checkedAssets: 0,
-      totalAssets: 0,
-      downloadedAssets: 0,
-      skippedAssets: 0,
-      failedAssets: 0,
-      force,
-    });
-    try {
-      return await recNetService.syncMetadataLibraryAssets({
-        force,
-        signal: abortController.signal,
-        onProgress: progress => {
-          wc?.send('metadata-sync-state', {
-            phase: 'running',
-            ...progress,
-          });
-        },
-      });
-    } finally {
-      if (activeMetadataSyncAbort === abortController) {
-        activeMetadataSyncAbort = null;
-      }
-      wc?.send('metadata-sync-state', { phase: 'idle' });
-    }
-  });
-  metadataSyncMutex = next.then(() => undefined).catch(() => undefined);
-  return next;
-}
-
-async function enqueueBackgroundMetadataSync(): Promise<void> {
-  if (!recNetService || isViewerOnlyMode()) {
-    return;
-  }
-  void enqueueMetadataSync(false);
-}
-
-async function withInlineMetadataSyncIndicator<T>(
-  event: IpcMainInvokeEvent,
-  currentStep: string,
-  work: (
-    onProgress: NonNullable<
-      Parameters<typeof recNetService.syncMetadataLibraryAssets>[0]
-    >['onProgress']
-  ) => Promise<T>
-): Promise<T> {
-  const wc = event.sender;
-  let didReport = false;
-  try {
-    return await work(progress => {
-      didReport = true;
-      wc?.send('metadata-sync-state', {
-        phase: 'running',
-        currentStep,
-        ...progress,
-      });
-    });
-  } finally {
-    if (didReport) {
-      wc?.send('metadata-sync-state', { phase: 'idle' });
-    }
-  }
-}
-
-function scheduleInitialMetadataSync(): void {
-  if (!mainWindow || mainWindow.isDestroyed() || isViewerOnlyMode()) {
-    return;
-  }
-  const wc = mainWindow.webContents;
-  const start = () => {
-    setTimeout(() => {
-      void enqueueBackgroundMetadataSync();
-    }, 500);
-  };
-  if (wc.isLoading()) {
-    wc.once('did-finish-load', start);
-  } else {
-    start();
-  }
-}
 const isDev = process.argv.includes('--dev');
 
 const MAIN_WINDOW_MIN_WIDTH = 850;
@@ -190,70 +44,6 @@ function enforceMainWindowMinimumSize(win: BrowserWindow): void {
   if (nextWidth !== width || nextHeight !== height) {
     win.setSize(nextWidth, nextHeight, false);
   }
-}
-
-interface CollectPhotosParams {
-  accountId: string;
-  token?: string;
-  forceAccountsRefresh?: boolean;
-  forceRoomsRefresh?: boolean;
-  forceEventsRefresh?: boolean;
-  forceImageCommentsRefresh?: boolean;
-}
-
-interface CollectFeedPhotosParams {
-  accountId: string;
-  token?: string;
-  incremental?: boolean;
-  forceAccountsRefresh?: boolean;
-  forceRoomsRefresh?: boolean;
-  forceEventsRefresh?: boolean;
-  forceImageCommentsRefresh?: boolean;
-}
-
-interface DownloadPhotosParams {
-  accountId: string;
-  token?: string;
-}
-
-interface ValidateProfileHistoryAccessParams {
-  username: string;
-  token: string;
-}
-
-interface BuildDownloadPreflightParams {
-  accountId: string;
-  downloadSources: DownloadSourceSelection;
-}
-
-interface LookupRoomParams {
-  roomName: string;
-  token?: string;
-}
-
-interface DownloadRoomPhotoBatchParams {
-  roomName: string;
-  token?: string;
-  startSkip?: number;
-  batchPages?: number;
-  pageSize?: number;
-  sort?: RoomPhotoSort;
-  forceAccountsRefresh?: boolean;
-  forceRoomsRefresh?: boolean;
-  forceEventsRefresh?: boolean;
-  forceImageCommentsRefresh?: boolean;
-}
-
-interface DiscoverEventsForUsernameParams {
-  username: string;
-  token?: string;
-  persist?: boolean;
-}
-
-interface DownloadEventPhotosParams {
-  creatorAccountId: string;
-  eventIds: string[];
-  token?: string;
 }
 
 interface LoadEventAlbumPhotosParams {
@@ -310,11 +100,6 @@ const normalizePhotoRecord = (photo: Photo): Photo => {
   };
 };
 
-const normalizePlayerRecord = (player: PlayerResult): PlayerResult => ({
-  ...player,
-  accountId: normalizeId(player.accountId),
-});
-
 const normalizeRoomRecord = (room: RoomDto): RoomDto => ({
   ...room,
   RoomId: normalizeId(room.RoomId),
@@ -333,7 +118,8 @@ const normalizeImageCommentRecord = (
   comment: ImageCommentDto
 ): ImageCommentDto => {
   const cheer =
-    typeof comment.CheerCount === 'number' && Number.isFinite(comment.CheerCount)
+    typeof comment.CheerCount === 'number' &&
+    Number.isFinite(comment.CheerCount)
       ? comment.CheerCount
       : 0;
   return {
@@ -342,7 +128,9 @@ const normalizeImageCommentRecord = (
     SavedImageId: normalizeId(comment.SavedImageId),
     PlayerId: normalizeId(comment.PlayerId),
     Comment:
-      typeof comment.Comment === 'string' ? comment.Comment : String(comment.Comment ?? ''),
+      typeof comment.Comment === 'string'
+        ? comment.Comment
+        : String(comment.Comment ?? ''),
     CreatedAt:
       typeof comment.CreatedAt === 'string'
         ? comment.CreatedAt
@@ -569,8 +357,6 @@ app.whenReady().then(() => {
   // Setup auto-updater
   setupAutoUpdater();
 
-  scheduleInitialMetadataSync();
-
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -589,345 +375,7 @@ async function getOutputWriteBlockedError(): Promise<string | null> {
   return recNetService.getOutputConfigurationError();
 }
 
-ipcMain.handle(
-  'sync-metadata-assets',
-  async (
-    _event: IpcMainInvokeEvent,
-    opts?: { force?: boolean }
-  ): Promise<ApiResponse<MetadataSyncResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const data = await enqueueMetadataSync(Boolean(opts?.force));
-      return { success: true, data };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
 // IPC handlers for communication with renderer process
-ipcMain.handle(
-  'collect-photos',
-  async (
-    event: IpcMainInvokeEvent,
-    params: CollectPhotosParams
-  ): Promise<ApiResponse<CollectionResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const outputErr = await getOutputWriteBlockedError();
-      if (outputErr) {
-        return { success: false, error: outputErr };
-      }
-      const result = await recNetService.collectPhotos(
-        params.accountId,
-        params.token,
-        {
-          forceAccountsRefresh: params.forceAccountsRefresh,
-          forceRoomsRefresh: params.forceRoomsRefresh,
-          forceEventsRefresh: params.forceEventsRefresh,
-          forceImageCommentsRefresh: params.forceImageCommentsRefresh,
-        }
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'collect-feed-photos',
-  async (
-    event: IpcMainInvokeEvent,
-    params: CollectFeedPhotosParams
-  ): Promise<ApiResponse<CollectionResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const outputErr = await getOutputWriteBlockedError();
-      if (outputErr) {
-        return { success: false, error: outputErr };
-      }
-      const result = await recNetService.collectFeedPhotos(
-        params.accountId,
-        params.token,
-        params.incremental ?? true,
-        {
-          forceAccountsRefresh: params.forceAccountsRefresh,
-          forceRoomsRefresh: params.forceRoomsRefresh,
-          forceEventsRefresh: params.forceEventsRefresh,
-          forceImageCommentsRefresh: params.forceImageCommentsRefresh,
-        }
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'collect-profile-history-manifest',
-  async (
-    event: IpcMainInvokeEvent,
-    params: ValidateProfileHistoryAccessParams & { accountId: string }
-  ): Promise<ApiResponse<ProfileHistoryCollectionResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const outputErr = await getOutputWriteBlockedError();
-      if (outputErr) {
-        return { success: false, error: outputErr };
-      }
-      const result = await recNetService.collectProfileHistoryManifest(
-        params.accountId,
-        params.token
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'build-download-preflight',
-  async (
-    event: IpcMainInvokeEvent,
-    params: BuildDownloadPreflightParams
-  ): Promise<ApiResponse<DownloadPreflightSummary>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const outputErr = await getOutputWriteBlockedError();
-      if (outputErr) {
-        return { success: false, error: outputErr };
-      }
-      const result = await recNetService.buildDownloadPreflightSummary(
-        params.accountId,
-        params.downloadSources
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'download-photos',
-  async (
-    event: IpcMainInvokeEvent,
-    params: DownloadPhotosParams
-  ): Promise<ApiResponse<DownloadResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const outputErr = await getOutputWriteBlockedError();
-      if (outputErr) {
-        return { success: false, error: outputErr };
-      }
-      const result = await withInlineMetadataSyncIndicator(
-        event,
-        'Waiting for user metadata image sync',
-        onProgress =>
-          recNetService.downloadPhotos(
-            params.accountId,
-            params.token,
-            onProgress
-          )
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'download-feed-photos',
-  async (
-    event: IpcMainInvokeEvent,
-    params: DownloadPhotosParams
-  ): Promise<ApiResponse<DownloadResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const outputErr = await getOutputWriteBlockedError();
-      if (outputErr) {
-        return { success: false, error: outputErr };
-      }
-      const result = await withInlineMetadataSyncIndicator(
-        event,
-        'Waiting for feed metadata image sync',
-        onProgress =>
-          recNetService.downloadFeedPhotos(
-            params.accountId,
-            params.token,
-            onProgress
-          )
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'download-profile-history',
-  async (
-    event: IpcMainInvokeEvent,
-    params: ValidateProfileHistoryAccessParams & { accountId: string }
-  ): Promise<ApiResponse<DownloadResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const outputErr = await getOutputWriteBlockedError();
-      if (outputErr) {
-        return { success: false, error: outputErr };
-      }
-      const result = await recNetService.downloadProfileHistory(
-        params.accountId,
-        params.token
-      );
-      void enqueueBackgroundMetadataSync();
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'lookup-room-by-name',
-  async (
-    event: IpcMainInvokeEvent,
-    params: LookupRoomParams
-  ): Promise<ApiResponse<RoomDto>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const result = await recNetService.lookupRoomByName(
-        params.roomName,
-        params.token
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'download-room-photo-batch',
-  async (
-    event: IpcMainInvokeEvent,
-    params: DownloadRoomPhotoBatchParams
-  ): Promise<ApiResponse<RoomPhotoBatchResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const outputErr = await getOutputWriteBlockedError();
-      if (outputErr) {
-        return { success: false, error: outputErr };
-      }
-      const result = await withInlineMetadataSyncIndicator(
-        event,
-        'Waiting for room metadata image sync',
-        onProgress => recNetService.downloadRoomPhotoBatch(params, onProgress)
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'discover-events-for-username',
-  async (
-    event: IpcMainInvokeEvent,
-    params: DiscoverEventsForUsernameParams
-  ): Promise<ApiResponse<EventDiscoveryResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const outputErr = await getOutputWriteBlockedError();
-      if (outputErr) {
-        return { success: false, error: outputErr };
-      }
-      const result = await recNetService.discoverEventsForUsername(
-        params.username,
-        params.token,
-        { persist: params.persist }
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'download-event-photos',
-  async (
-    event: IpcMainInvokeEvent,
-    params: DownloadEventPhotosParams
-  ): Promise<ApiResponse<EventPhotoBatchResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const outputErr = await getOutputWriteBlockedError();
-      if (outputErr) {
-        return { success: false, error: outputErr };
-      }
-      const result = await withInlineMetadataSyncIndicator(
-        event,
-        'Waiting for event metadata image sync',
-        onProgress => recNetService.downloadEventPhotos(params, onProgress)
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-ipcMain.handle(
-  'validate-profile-history-access',
-  async (
-    event: IpcMainInvokeEvent,
-    params: ValidateProfileHistoryAccessParams
-  ): Promise<ApiResponse<ProfileHistoryAccessResult>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const result = await recNetService.validateProfileHistoryAccess(
-        params.username,
-        params.token
-      );
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
 
 ipcMain.handle('select-output-folder', async (): Promise<string | null> => {
   if (!mainWindow) return null;
@@ -953,37 +401,12 @@ ipcMain.handle(
     event: IpcMainInvokeEvent,
     settings: Partial<RecNetSettings>
   ): Promise<RecNetSettings> => {
-    const before = await recNetService.getSettings();
-    const prevRoot = (before.resolvedOutputRoot ?? '').trim();
-    const updated = await recNetService.updateSettings(settings);
-    const nextRoot = (updated.resolvedOutputRoot ?? '').trim();
-    const backgroundSyncTurnedOn =
-      settings.backgroundMetadataSyncEnabled === true &&
-      before.backgroundMetadataSyncEnabled !== true;
-    if (metadataOutputRootChanged(prevRoot, nextRoot)) {
-      cancelActiveMetadataSync();
-    }
-    if (
-      metadataOutputRootChanged(prevRoot, nextRoot) ||
-      backgroundSyncTurnedOn
-    ) {
-      void enqueueBackgroundMetadataSync();
-    }
-    return updated;
+    return recNetService.updateSettings({
+      ...settings,
+      backgroundMetadataSyncEnabled: false,
+    });
   }
 );
-
-function metadataOutputRootChanged(prev: string, next: string): boolean {
-  const n = next.trim();
-  const p = prev.trim();
-  if (!p && !n) {
-    return false;
-  }
-  if (!p || !n) {
-    return true;
-  }
-  return !pathsEffectivelyEqual(p, n);
-}
 
 ipcMain.handle(
   'library-move-start',
@@ -1025,98 +448,6 @@ ipcMain.handle('get-progress', async (): Promise<Progress> => {
 ipcMain.handle('cancel-operation', async (): Promise<boolean> => {
   return recNetService.cancelCurrentOperation();
 });
-
-// Lookup account information by account ID
-ipcMain.handle(
-  'lookup-account-by-id',
-  async (
-    event: IpcMainInvokeEvent,
-    accountId: string
-  ): Promise<ApiResponse<AccountInfo>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const result = await recNetService.lookupAccountById(accountId);
-      return { success: true, data: result };
-    } catch (error) {
-      return { success: false, error: (error as Error).message };
-    }
-  }
-);
-
-// Lookup account information by username
-ipcMain.handle(
-  'lookup-account-by-username',
-  async (
-    event: IpcMainInvokeEvent,
-    username: string,
-    token?: string
-  ): Promise<ApiResponse<AccountInfo>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const result = await recNetService.lookupAccountByUsername(username, token);
-      return { success: true, data: result };
-    } catch (error) {
-      const message = (error as Error).message ?? String(error);
-
-      if (token && /HTTP\s+(401|403)\b/.test(message)) {
-        try {
-          const fallback = await recNetService.lookupAccountByUsername(username);
-          return { success: true, data: fallback };
-        } catch (fallbackError) {
-          return {
-            success: false,
-            error:
-              (fallbackError as Error).message ?? String(fallbackError),
-          };
-        }
-      }
-
-      return { success: false, error: message };
-    }
-  }
-);
-
-// Search accounts by username
-ipcMain.handle(
-  'search-accounts',
-  async (
-    event: IpcMainInvokeEvent,
-    username: string,
-    token?: string
-  ): Promise<ApiResponse<AccountInfo[]>> => {
-    if (getViewerOnlyNetworkError()) {
-      return viewerOnlyApiResponse();
-    }
-    try {
-      const result = token
-        ? await recNetService.searchAccounts(username, token)
-        : await recNetService.searchAccounts(username);
-      return { success: true, data: result };
-    } catch (error) {
-      const message = (error as Error).message ?? String(error);
-
-      // If the provided token isn't authorized, still allow downloads by
-      // falling back to unauthenticated account search.
-      if (token && /HTTP\s+(401|403)\b/.test(message)) {
-        try {
-          const result = await recNetService.searchAccounts(username);
-          return { success: true, data: result };
-        } catch (fallbackError) {
-          return {
-            success: false,
-            error: (fallbackError as Error).message ?? String(fallbackError),
-          };
-        }
-      }
-
-      return { success: false, error: message };
-    }
-  }
-);
 
 // Clear account data
 ipcMain.handle(
@@ -1321,9 +652,9 @@ ipcMain.handle(
         return { success: true, data: [] };
       }
 
-      const profileHistoryPhotos: Photo[] = (await fs.readJson(
-        profileHistoryJsonPath
-      )).map(normalizePhotoRecord);
+      const profileHistoryPhotos: Photo[] = (
+        await fs.readJson(profileHistoryJsonPath)
+      ).map(normalizePhotoRecord);
       const profileHistoryDir = path.join(accountDir, 'profile-history');
 
       const profileHistoryFileIds = new Set<string>();
@@ -1503,12 +834,7 @@ ipcMain.handle(
       if (!root) {
         return { success: true, data: [] };
       }
-      const jsonPath = path.join(
-        root,
-        'rooms',
-        roomId,
-        `${roomId}_rooms.json`
-      );
+      const jsonPath = path.join(root, 'rooms', roomId, `${roomId}_rooms.json`);
       if (!(await fs.pathExists(jsonPath))) {
         return { success: true, data: [] };
       }
@@ -1859,39 +1185,6 @@ ipcMain.handle(
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }
-);
-
-// Allowlist of URL prefixes that the renderer may open in the system browser
-const ALLOWED_EXTERNAL_URL_PREFIXES = [
-  'https://rec.net/',
-  'https://github.com/Winston-Saarloos/rr-image-downloader/',
-];
-
-// Open external URL in system browser
-ipcMain.handle(
-  'open-external',
-  async (event: IpcMainInvokeEvent, url: string): Promise<void> => {
-    if (getViewerOnlyNetworkError()) {
-      throw new Error(VIEWER_ONLY_MODE_ERROR);
-    }
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new Error(`Invalid URL: ${url}`);
-    }
-    if (parsed.protocol !== 'https:') {
-      throw new Error(`Blocked non-HTTPS URL: ${url}`);
-    }
-    if (
-      !ALLOWED_EXTERNAL_URL_PREFIXES.some(prefix =>
-        parsed.href.startsWith(prefix)
-      )
-    ) {
-      throw new Error(`URL not in allowlist: ${url}`);
-    }
-    await shell.openExternal(parsed.href);
   }
 );
 

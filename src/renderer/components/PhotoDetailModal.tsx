@@ -42,7 +42,6 @@ type OptionalElectronAPI = {
   openPathInExplorer?: (
     targetPath: string
   ) => Promise<{ success: boolean; error?: string }>;
-  openExternal?: (url: string) => Promise<void>;
 };
 
 const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
@@ -410,22 +409,6 @@ const PhotoDetailModalComponent: React.FC<PhotoDetailModalProps> = ({
             <div className="pt-2 border-t text-sm text-muted-foreground">
               <p>Photo ID: {photo.Id}</p>
               {photo.ImageName && <p>Image: {photo.ImageName}</p>}
-              {allowRemoteImages && (
-                <p>
-                  URL:
-                  <button
-                    className="text-blue-500 hover:text-blue-600 underline ml-1 cursor-pointer"
-                    onClick={() => {
-                      const url = `https://rec.net/image/${photo.Id}`;
-                      if (electronAPI) {
-                        void electronAPI.openExternal?.(url);
-                      }
-                    }}
-                  >
-                    https://rec.net/image/{photo.Id}
-                  </button>
-                </p>
-              )}
             </div>
           </div>
         </div>

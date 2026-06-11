@@ -3,100 +3,22 @@
  * Keeps preload and renderer type-checking in sync with the main process IPC surface.
  */
 import type {
-  AccountInfo,
   ApiResponse,
   AvailableAccount,
   AvailableEvent,
   AvailableEventCreator,
   AvailableRoom,
-  CollectionResult,
-  DownloadPreflightSummary,
-  DownloadResult,
-  EventDiscoveryResult,
-  EventPhotoBatchResult,
   EventDto,
   ImageCommentDto,
   Photo,
-  ProfileHistoryAccessResult,
-  ProfileHistoryCollectionResult,
   PlayerResult,
-  Progress,
   RecNetSettings,
   RoomDto,
-  RoomPhotoBatchResult,
-  RoomPhotoSort,
   LibraryMoveProgress,
   LibraryMoveResult,
-  MetadataSyncResult,
-  MetadataSyncState,
 } from './types';
-import type { DownloadSourceSelection } from './download-sources';
 
 export interface ElectronAPI {
-  collectPhotos: (params: {
-    accountId: string;
-    token?: string;
-    forceAccountsRefresh?: boolean;
-    forceRoomsRefresh?: boolean;
-    forceEventsRefresh?: boolean;
-    forceImageCommentsRefresh?: boolean;
-  }) => Promise<ApiResponse<CollectionResult>>;
-
-  collectFeedPhotos: (params: {
-    accountId: string;
-    token?: string;
-    incremental?: boolean;
-    forceAccountsRefresh?: boolean;
-    forceRoomsRefresh?: boolean;
-    forceEventsRefresh?: boolean;
-    forceImageCommentsRefresh?: boolean;
-  }) => Promise<ApiResponse<CollectionResult>>;
-  collectProfileHistoryManifest: (params: {
-    accountId: string;
-    token: string;
-  }) => Promise<ApiResponse<ProfileHistoryCollectionResult>>;
-  buildDownloadPreflight: (params: {
-    accountId: string;
-    downloadSources: DownloadSourceSelection;
-  }) => Promise<ApiResponse<DownloadPreflightSummary>>;
-
-  downloadPhotos: (params: { accountId: string; token?: string }) => Promise<ApiResponse<DownloadResult>>;
-  downloadFeedPhotos: (params: { accountId: string; token?: string }) => Promise<ApiResponse<DownloadResult>>;
-  downloadProfileHistory: (params: {
-    accountId: string;
-    token: string;
-  }) => Promise<ApiResponse<DownloadResult>>;
-  validateProfileHistoryAccess: (params: {
-    username: string;
-    token: string;
-  }) => Promise<ApiResponse<ProfileHistoryAccessResult>>;
-  lookupRoomByName: (params: {
-    roomName: string;
-    token?: string;
-  }) => Promise<ApiResponse<RoomDto>>;
-  downloadRoomPhotoBatch: (params: {
-    roomName: string;
-    token?: string;
-    startSkip?: number;
-    batchPages?: number;
-    pageSize?: number;
-    sort?: RoomPhotoSort;
-    forceAccountsRefresh?: boolean;
-    forceRoomsRefresh?: boolean;
-    forceEventsRefresh?: boolean;
-    forceImageCommentsRefresh?: boolean;
-  }) => Promise<ApiResponse<RoomPhotoBatchResult>>;
-  discoverEventsForUsername: (params: {
-    username: string;
-    token?: string;
-    persist?: boolean;
-  }) => Promise<ApiResponse<EventDiscoveryResult>>;
-  downloadEventPhotos: (params: {
-    creatorAccountId: string;
-    eventIds: string[];
-    token?: string;
-  }) => Promise<ApiResponse<EventPhotoBatchResult>>;
-
   selectOutputFolder: () => Promise<string | null>;
   getSettings: () => Promise<RecNetSettings>;
   updateSettings: (settings: Partial<RecNetSettings>) => Promise<RecNetSettings>;
@@ -110,27 +32,6 @@ export interface ElectronAPI {
     callback: (event: unknown, progress: LibraryMoveProgress) => void
   ) => void;
 
-  getProgress: () => Promise<Progress>;
-  cancelOperation: () => Promise<boolean>;
-  onProgress: (callback: (event: unknown, progress: Progress) => void) => void;
-  removeProgressListener: (callback: (event: unknown, progress: Progress) => void) => void;
-
-  syncMetadataAssets: (opts?: {
-    force?: boolean;
-  }) => Promise<ApiResponse<MetadataSyncResult>>;
-  onMetadataSyncState: (
-    callback: (event: unknown, state: MetadataSyncState) => void
-  ) => void;
-  removeMetadataSyncStateListener: (
-    callback: (event: unknown, state: MetadataSyncState) => void
-  ) => void;
-
-  lookupAccountById: (accountId: string) => Promise<ApiResponse<AccountInfo>>;
-  lookupAccountByUsername: (
-    username: string,
-    token?: string
-  ) => Promise<ApiResponse<AccountInfo>>;
-  searchAccounts: (username: string, token?: string) => Promise<ApiResponse<AccountInfo[]>>;
   clearAccountData: (accountId: string) => Promise<ApiResponse<{ filesRemoved: number }>>;
   loadPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
   loadFeedPhotos: (accountId: string) => Promise<ApiResponse<Photo[]>>;
@@ -184,7 +85,6 @@ export interface ElectronAPI {
   toggleFavorite: (photoId: string) => Promise<ApiResponse<boolean>>;
   isFavorite: (photoId: string) => Promise<ApiResponse<boolean>>;
 
-  openExternal: (url: string) => Promise<void>;
   openPathInExplorer: (
     targetPath: string
   ) => Promise<{ success: boolean; error?: string }>;
