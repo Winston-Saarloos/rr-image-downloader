@@ -3,27 +3,6 @@ import type { ElectronAPI } from '../shared/electron-api';
 import type { LibraryMoveProgress } from '../shared/types';
 
 const electronAPI: ElectronAPI = {
-  collectPhotos: (params) => ipcRenderer.invoke('collect-photos', params),
-  collectFeedPhotos: (params) => ipcRenderer.invoke('collect-feed-photos', params),
-  collectProfileHistoryManifest: (params) =>
-    ipcRenderer.invoke('collect-profile-history-manifest', params),
-  buildDownloadPreflight: (params) =>
-    ipcRenderer.invoke('build-download-preflight', params),
-
-  downloadPhotos: (params) => ipcRenderer.invoke('download-photos', params),
-  downloadFeedPhotos: (params) => ipcRenderer.invoke('download-feed-photos', params),
-  downloadProfileHistory: (params) =>
-    ipcRenderer.invoke('download-profile-history', params),
-  validateProfileHistoryAccess: (params) =>
-    ipcRenderer.invoke('validate-profile-history-access', params),
-  lookupRoomByName: (params) => ipcRenderer.invoke('lookup-room-by-name', params),
-  downloadRoomPhotoBatch: (params) =>
-    ipcRenderer.invoke('download-room-photo-batch', params),
-  discoverEventsForUsername: (params) =>
-    ipcRenderer.invoke('discover-events-for-username', params),
-  downloadEventPhotos: (params) =>
-    ipcRenderer.invoke('download-event-photos', params),
-
   selectOutputFolder: () => ipcRenderer.invoke('select-output-folder'),
 
   getSettings: () => ipcRenderer.invoke('get-settings'),
@@ -44,30 +23,6 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.removeListener('library-move-progress', callback);
   },
 
-  getProgress: () => ipcRenderer.invoke('get-progress'),
-  cancelOperation: () => ipcRenderer.invoke('cancel-operation'),
-
-  onProgress: (callback) => {
-    ipcRenderer.on('progress-update', callback);
-  },
-  removeProgressListener: (callback) => {
-    ipcRenderer.removeListener('progress-update', callback);
-  },
-
-  syncMetadataAssets: (opts) =>
-    ipcRenderer.invoke('sync-metadata-assets', opts ?? {}),
-  onMetadataSyncState: (callback) => {
-    ipcRenderer.on('metadata-sync-state', callback);
-  },
-  removeMetadataSyncStateListener: (callback) => {
-    ipcRenderer.removeListener('metadata-sync-state', callback);
-  },
-
-  lookupAccountById: (accountId) => ipcRenderer.invoke('lookup-account-by-id', accountId),
-  lookupAccountByUsername: (username: string, token?: string) =>
-    ipcRenderer.invoke('lookup-account-by-username', username, token),
-  searchAccounts: (username: string, token?: string) =>
-    ipcRenderer.invoke('search-accounts', username, token),
   clearAccountData: (accountId) => ipcRenderer.invoke('clear-account-data', accountId),
 
   loadPhotos: (accountId) => ipcRenderer.invoke('load-photos', accountId),
@@ -111,7 +66,6 @@ const electronAPI: ElectronAPI = {
   toggleFavorite: (photoId) => ipcRenderer.invoke('toggle-favorite', photoId),
   isFavorite: (photoId) => ipcRenderer.invoke('is-favorite', photoId),
 
-  openExternal: (url) => ipcRenderer.invoke('open-external', url),
   openPathInExplorer: (targetPath: string) =>
     ipcRenderer.invoke('open-path-in-explorer', targetPath),
   revealPathInExplorer: (targetPath: string) =>

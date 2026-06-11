@@ -1,13 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  Minus,
-  Square,
-  X,
-  Download,
-  BarChart3,
-  Settings,
-  Loader2,
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { BarChart3, Minus, Settings, Square, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { ThemeToggle } from './ThemeToggle';
 import { UpdateIndicator } from './UpdateIndicator';
@@ -19,7 +11,6 @@ import {
 } from '../components/ui/dialog';
 import { SettingsPanel } from './SettingsPanel';
 import { LogPanel } from './LogPanel';
-import { ResultsPanel } from './ResultsPanel';
 import { RecNetSettings } from '../../shared/types';
 import type { LibraryMode } from '../../shared/types';
 import packageJson from '../../../package.json';
@@ -30,16 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from './ui/tooltip';
-import type { MetadataSyncState } from '../../shared/types';
 
 interface CustomTitleBarProps {
-  onDownloadClick?: () => void;
   onStatsClick: () => void;
   settings: RecNetSettings;
   onUpdateSettings: (settings: Partial<RecNetSettings>) => Promise<void>;
@@ -48,136 +31,65 @@ interface CustomTitleBarProps {
     type: 'info' | 'success' | 'error' | 'warning';
     timestamp: string;
   }>;
-  results: Array<{
-    operation: string;
-    data: unknown;
-    type: 'success' | 'error';
-    timestamp: string;
-  }>;
   onClearLogs: () => void;
   currentAccountId?: string;
   debugMenuOpen: boolean;
   onDebugMenuOpenChange: (open: boolean) => void;
   resultsScrollRequestId: number;
-  onRetryDownload?: () => void | Promise<void>;
-  canRetryDownload?: boolean;
-  isRetryingDownload?: boolean;
-  onOpenDownloadPanel?: () => void;
-  onOpenOutputFolder?: (folderPath: string) => void | Promise<void>;
-  /** Absolute path to open in Explorer (resolved when output root is relative). */
   outputExplorerPath: string;
   libraryMode: LibraryMode;
   onLibraryModeChange: (mode: LibraryMode) => void;
-  /** When false, the library move row is shown but the button stays disabled. */
   libraryMoveEnabled?: boolean;
   onOpenLibraryMove?: () => void;
   viewerOnlyMode?: boolean;
-  metadataSyncPhase?: 'idle' | 'running';
-  metadataSyncState?: MetadataSyncState;
-  onForceMetadataSync?: () => void | Promise<void>;
 }
 
 export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
-  onDownloadClick,
   onStatsClick,
   settings,
   onUpdateSettings,
   logs,
-  results,
   onClearLogs,
   currentAccountId,
   debugMenuOpen,
   onDebugMenuOpenChange,
   resultsScrollRequestId,
-  onRetryDownload,
-  canRetryDownload,
-  isRetryingDownload,
-  onOpenDownloadPanel,
-  onOpenOutputFolder,
   outputExplorerPath,
   libraryMode,
   onLibraryModeChange,
   libraryMoveEnabled = false,
   onOpenLibraryMove,
-  viewerOnlyMode = false,
-  metadataSyncPhase = 'idle',
-  metadataSyncState,
-  onForceMetadataSync,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const resultsSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const checkMaximized = async () => {
-      if (window.electronAPI) {
-        const maximized = await window.electronAPI.windowIsMaximized();
-        setIsMaximized(maximized);
-      }
+      const maximized = await window.electronAPI.windowIsMaximized();
+      setIsMaximized(maximized);
     };
-    checkMaximized();
+    void checkMaximized();
 
-    // Check periodically for maximize/unmaximize state changes
-    const interval = setInterval(checkMaximized, 500);
-    return () => clearInterval(interval);
+    const interval = window.setInterval(() => void checkMaximized(), 500);
+    return () => window.clearInterval(interval);
   }, []);
 
   useEffect(() => {
-    if (!debugMenuOpen || resultsScrollRequestId === 0) {
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      resultsSectionRef.current?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      });
-    }, 75);
-
-    return () => window.clearTimeout(timeout);
-  }, [debugMenuOpen, resultsScrollRequestId]);
+    void resultsScrollRequestId;
+  }, [resultsScrollRequestId]);
 
   const handleMinimize = () => {
-    if (window.electronAPI) {
-      window.electronAPI.windowMinimize();
-    }
+    void window.electronAPI.windowMinimize();
   };
 
   const handleMaximize = async () => {
-    if (window.electronAPI) {
-      await window.electronAPI.windowMaximize();
-      const maximized = await window.electronAPI.windowIsMaximized();
-      setIsMaximized(maximized);
-    }
+    await window.electronAPI.windowMaximize();
+    const maximized = await window.electronAPI.windowIsMaximized();
+    setIsMaximized(maximized);
   };
 
   const handleClose = () => {
-    if (window.electronAPI) {
-      window.electronAPI.windowClose();
-    }
+    void window.electronAPI.windowClose();
   };
-
-  const syncCurrent = metadataSyncState?.current ?? 0;
-  const syncTotal = metadataSyncState?.total ?? 0;
-  const syncPercent =
-    syncTotal > 0
-      ? Math.min(100, Math.max(0, Math.round((syncCurrent / syncTotal) * 100)))
-      : null;
-  const syncAssetParts = [
-    `${metadataSyncState?.downloadedAssets ?? 0} downloaded`,
-    `${metadataSyncState?.skippedAssets ?? 0} already local`,
-  ];
-  const syncFailedAssets = metadataSyncState?.failedAssets ?? 0;
-  if (syncFailedAssets > 0) {
-    syncAssetParts.push(`${syncFailedAssets} failed`);
-  }
-  const syncCheckedAssets = metadataSyncState?.checkedAssets ?? 0;
-  const syncTotalAssets = metadataSyncState?.totalAssets ?? 0;
-  const syncAssetProgress =
-    syncTotalAssets > 0
-      ? `${syncCheckedAssets} / ${syncTotalAssets} images checked`
-      : syncCheckedAssets > 0
-        ? `${syncCheckedAssets} images checked`
-        : 'Counting images';
 
   return (
     <>
@@ -204,7 +116,6 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
           </Select>
         </div>
 
-        {/* Center - Icon and App Name */}
         <div
           className="flex items-center gap-2 absolute left-1/2 transform -translate-x-1/2"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
@@ -214,66 +125,14 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
             alt="App Icon"
             className="w-5 h-5"
             onError={e => {
-              // Hide icon if it fails to load
-              console.error('Failed to load icon', e);
               (e.target as HTMLImageElement).style.display = 'none';
             }}
           />
-          {metadataSyncPhase === 'running' && (
-            <TooltipProvider delayDuration={150}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-                    aria-label="Metadata sync progress"
-                  >
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" align="center" className="w-72">
-                  <div className="space-y-1.5">
-                    <p className="font-medium">Syncing metadata images</p>
-                    <p className="text-xs text-muted-foreground">
-                      {metadataSyncState?.currentStep ?? 'Preparing sync'}
-                    </p>
-                    {metadataSyncState?.currentItemLabel && (
-                      <p className="text-xs">
-                        {metadataSyncState.currentItemLabel}
-                      </p>
-                    )}
-                    {metadataSyncState?.currentAssetLabel && (
-                      <p className="text-xs text-muted-foreground">
-                        {metadataSyncState.currentAssetLabel}
-                      </p>
-                    )}
-                    <div className="flex items-center justify-between text-xs">
-                      <span>
-                        {syncTotal > 0
-                          ? `${syncCurrent} / ${syncTotal} folders checked`
-                          : 'Counting folders'}
-                      </span>
-                      {syncPercent !== null && <span>{syncPercent}%</span>}
-                    </div>
-                    {syncTotal > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        {Math.max(0, syncTotal - syncCurrent)} folders remaining
-                      </p>
-                    )}
-                    <div className="space-y-0.5 text-xs text-muted-foreground">
-                      <p>{syncAssetProgress}</p>
-                      <p>Images: {syncAssetParts.join(', ')}</p>
-                    </div>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
           <span className="text-sm font-semibold text-foreground">
-            Photo Downloader & Viewer
+            Photo Viewer
           </span>
         </div>
 
-        {/* Right side - Window Controls */}
         <div
           className="flex items-center ml-auto"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
@@ -290,17 +149,6 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
             >
               <BarChart3 className="h-4 w-4" />
             </Button>
-            {onDownloadClick && !viewerOnlyMode && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={onDownloadClick}
-                aria-label="Download"
-              >
-                <Download className="h-4 w-4" />
-              </Button>
-            )}
             <UpdateIndicator />
             <Button
               variant="ghost"
@@ -320,7 +168,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
             <Minus className="w-4 h-4" />
           </button>
           <button
-            onClick={handleMaximize}
+            onClick={() => void handleMaximize()}
             className="w-10 h-10 flex items-center justify-center hover:bg-muted transition-colors"
             aria-label={isMaximized ? 'Restore' : 'Maximize'}
           >
@@ -336,12 +184,11 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
         </div>
       </div>
 
-      {/* Debug Menu Dialog */}
       <Dialog open={debugMenuOpen} onOpenChange={onDebugMenuOpenChange}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              <span>Debug Menu</span>
+              <span>Settings</span>
               <span className="text-sm font-normal text-muted-foreground pl-2">
                 v{packageJson.version}
               </span>
@@ -352,31 +199,9 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
               settings={settings}
               onUpdateSettings={onUpdateSettings}
               onLog={() => {
-                // Logging handled by parent component
+                // Logging handled by parent component.
               }}
             />
-            {onForceMetadataSync && (
-              <div className="rounded-md border p-3 space-y-2">
-                <p className="text-sm font-medium">Metadata images</p>
-                <p className="text-xs text-muted-foreground">
-                  Download profile, event cover, and room listing images
-                  into each folder&apos;s metadata directory. Enable background
-                  metadata image sync in Settings to run this automatically.
-                  Use this to refresh or retry.
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={metadataSyncPhase === 'running'}
-                  onClick={() => void onForceMetadataSync()}
-                >
-                  {metadataSyncPhase === 'running'
-                    ? 'Syncing metadata images…'
-                    : 'Force metadata image sync'}
-                </Button>
-              </div>
-            )}
             {onOpenLibraryMove && (
               <div
                 className={`rounded-md border p-3 space-y-2 ${!libraryMoveEnabled ? 'opacity-80' : ''}`}
@@ -407,22 +232,16 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
                     }
                   }}
                 >
-                  Move photo library…
+                  Move photo library...
                 </Button>
               </div>
             )}
+            {outputExplorerPath && (
+              <p className="text-xs text-muted-foreground break-all">
+                Current library: {outputExplorerPath}
+              </p>
+            )}
             <LogPanel logs={logs} onClearLogs={onClearLogs} />
-            <div ref={resultsSectionRef}>
-              <ResultsPanel
-                results={results}
-                onRetryDownload={onRetryDownload}
-                canRetryDownload={canRetryDownload}
-                isRetryingDownload={isRetryingDownload}
-                onOpenDownloadPanel={onOpenDownloadPanel}
-                onOpenOutputFolder={onOpenOutputFolder}
-                outputExplorerPath={outputExplorerPath}
-              />
-            </div>
           </div>
         </DialogContent>
       </Dialog>
