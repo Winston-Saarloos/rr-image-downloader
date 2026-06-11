@@ -70,8 +70,8 @@ const CLEAN_DOWNLOAD_FOLLOW_UP =
   'If you take more photos in Rec Room, come back and run this download again. The app will only grab anything new.';
 const VIEWER_ONLY_RECHECK_MS = 60 * 60 * 1000;
 
-/** Set to true to allow starting a library move from the debug menu. */
-const LIBRARY_MOVE_ENABLED = false;
+/** Set to false to hide the library move entry in the debug menu. */
+const LIBRARY_MOVE_ENABLED = true;
 
 function App() {
   const [viewerOnlyMode, setViewerOnlyMode] = useState(() =>

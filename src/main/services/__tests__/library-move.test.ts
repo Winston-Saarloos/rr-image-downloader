@@ -2,9 +2,11 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  describeLibraryMoveDestinationError,
   LibraryMoveCancelledError,
-  removePartialLibraryCopy,
+  removeAbsolutePathsFromMovedLibraryMetadata,
   runLibraryMove,
+  verifyLibraryMoveSnapshot,
 } from '../library-move';
 
 describe('library-move', () => {
@@ -60,7 +62,7 @@ describe('library-move', () => {
       srcRoot: src,
       destRoot: dest,
       signal: new AbortController().signal,
-      onProgress: () => {},
+      onProgress: jest.fn(),
     });
 
     const text = await fs.readFile(
@@ -70,6 +72,63 @@ describe('library-move', () => {
     expect(text).toBe('hello-data');
     expect(await fs.pathExists(path.join(src, 'acc', 'photos', '1.jpg'))).toBe(
       true
+    );
+  });
+
+  it('rejects destination content that differs even when size matches', async () => {
+    const src = path.join(base, 'src');
+    const dest = path.join(base, 'dest');
+    await fs.ensureDir(src);
+    await fs.ensureDir(dest);
+    await fs.writeFile(path.join(src, 'same-size.txt'), 'abc123');
+
+    await expect(
+      runLibraryMove({
+        srcRoot: src,
+        destRoot: dest,
+        signal: new AbortController().signal,
+        onProgress: p => {
+          if (p.phase === 'copy' && p.filesDone === 1) {
+            fs.writeFileSync(path.join(dest, 'same-size.txt'), 'zzz999');
+          }
+        },
+      })
+    ).rejects.toThrow(/content mismatch/i);
+  });
+
+  it('final snapshot verification rejects a source file added after copy', async () => {
+    const src = path.join(base, 'src');
+    const dest = path.join(base, 'dest');
+    await fs.ensureDir(src);
+    await fs.ensureDir(dest);
+    await fs.writeFile(path.join(src, 'photo.jpg'), 'original');
+
+    const result = await runLibraryMove({
+      srcRoot: src,
+      destRoot: dest,
+      signal: new AbortController().signal,
+      onProgress: jest.fn(),
+    });
+
+    await fs.writeFile(path.join(src, 'new-photo.jpg'), 'late');
+
+    await expect(
+      verifyLibraryMoveSnapshot({
+        srcRoot: src,
+        destRoot: dest,
+        files: result.verifiedFiles,
+        signal: new AbortController().signal,
+      })
+    ).rejects.toThrow(/source library changed/i);
+  });
+
+  it('describeLibraryMoveDestinationError reports a non-empty destination', async () => {
+    const dest = path.join(base, 'dest');
+    await fs.ensureDir(dest);
+    await fs.writeFile(path.join(dest, 'keep.txt'), 'x');
+
+    await expect(describeLibraryMoveDestinationError(dest)).resolves.toMatch(
+      /empty/i
     );
   });
 
@@ -85,7 +144,7 @@ describe('library-move', () => {
         srcRoot: src,
         destRoot: dest,
         signal: new AbortController().signal,
-        onProgress: () => {},
+        onProgress: jest.fn(),
       })
     ).rejects.toThrow(/empty/i);
   });
@@ -120,12 +179,51 @@ describe('library-move', () => {
     expect(startedCopy).toBe(true);
   });
 
-  it('removePartialLibraryCopy removes listed top-level entries', async () => {
+  it('removes absolutePath keys from moved metadata while preserving relative paths', async () => {
     const dest = path.join(base, 'dest');
-    await fs.ensureDir(path.join(dest, 'a'));
-    await fs.ensureDir(path.join(dest, 'b'));
-    await removePartialLibraryCopy(dest, ['a']);
-    expect(await fs.pathExists(path.join(dest, 'a'))).toBe(false);
-    expect(await fs.pathExists(path.join(dest, 'b'))).toBe(true);
+    const manifestPath = path.join(dest, 'metadata', 'accounts-metadata.json');
+    const nonMetadataJsonPath = path.join(dest, 'not-metadata.json');
+    await fs.ensureDir(path.dirname(manifestPath));
+    await fs.writeJson(
+      manifestPath,
+      {
+        schemaVersion: 1,
+        kind: 'account-metadata',
+        accounts: {
+          '1': {
+            profile: {
+              imageName: 'profile.png',
+              relativePath: 'accounts/1/profile.png',
+              absolutePath: 'C:\\old\\metadata\\accounts\\1\\profile.png',
+            },
+            banner: {
+              imageName: 'banner.png',
+              relativePath: 'accounts/1/banner.png',
+              absolutePath: 'C:\\old\\metadata\\accounts\\1\\banner.png',
+            },
+          },
+        },
+      },
+      { spaces: 2 }
+    );
+    await fs.writeJson(nonMetadataJsonPath, {
+      absolutePath: 'C:\\old\\leave-alone.png',
+    });
+
+    const result = await removeAbsolutePathsFromMovedLibraryMetadata(
+      dest,
+      new AbortController().signal
+    );
+
+    const manifest = await fs.readJson(manifestPath);
+    expect(result.absolutePathsRemoved).toBe(2);
+    expect(manifest.accounts['1'].profile.relativePath).toBe(
+      'accounts/1/profile.png'
+    );
+    expect(manifest.accounts['1'].profile.absolutePath).toBeUndefined();
+    expect(manifest.accounts['1'].banner.absolutePath).toBeUndefined();
+    expect((await fs.readJson(nonMetadataJsonPath)).absolutePath).toBe(
+      'C:\\old\\leave-alone.png'
+    );
   });
 });

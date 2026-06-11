@@ -1,4 +1,5 @@
 import * as fs from 'fs-extra';
+import { createHash } from 'crypto';
 import * as path from 'path';
 import type { LibraryMoveProgress } from '../../shared/types';
 
@@ -20,6 +21,19 @@ type FilePlan = {
   srcAbs: string;
   destAbs: string;
   size: number;
+  sha256?: string;
+};
+
+export type VerifiedLibraryMoveFile = {
+  relativePath: string;
+  size: number;
+  sha256: string;
+};
+
+export type LibraryMoveMetadataCleanupResult = {
+  filesScanned: number;
+  filesUpdated: number;
+  absolutePathsRemoved: number;
 };
 
 export function pathsEffectivelyEqual(a: string, b: string): boolean {
@@ -73,6 +87,28 @@ async function walkSourceFiles(
   return plans;
 }
 
+/** Returns an error message when the destination cannot be used, otherwise null. */
+export async function describeLibraryMoveDestinationError(
+  destRoot: string
+): Promise<string | null> {
+  const resolved = path.resolve(destRoot.trim());
+  if (!resolved) {
+    return 'Destination path is required.';
+  }
+  if (!path.isAbsolute(resolved)) {
+    return 'Destination must be an absolute path.';
+  }
+  try {
+    await ensureDestinationEmptyOrCreatable(
+      resolved,
+      new AbortController().signal
+    );
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function ensureDestinationEmptyOrCreatable(
   destRoot: string,
   signal: AbortSignal
@@ -106,14 +142,13 @@ export interface RunLibraryMoveOutcome {
   newRoot: string;
   filesCopied: number;
   bytesCopied: number;
-  /** Top-level names under destRoot created during this run (for partial cleanup on cancel). */
-  topLevelDestNames: string[];
+  verifiedFiles: VerifiedLibraryMoveFile[];
   operationLog: string[];
 }
 
 /**
- * Copy library from `srcRoot` to empty `destRoot`, verify sizes, then caller updates settings and removes `srcRoot`.
- * Does not delete source or change settings — orchestrator does that after success.
+ * Copy library from `srcRoot` to empty `destRoot` and verify every file.
+ * Does not delete anything or change settings — the orchestrator updates settings after success.
  */
 export async function runLibraryMove(
   params: RunLibraryMoveParams
@@ -148,7 +183,6 @@ export async function runLibraryMove(
       currentLabel: partial.currentLabel ?? '',
       done: partial.done ?? false,
       error: partial.error,
-      sourceDeleteWarning: partial.sourceDeleteWarning,
       operationLog: [...operationLog],
     });
   };
@@ -209,14 +243,6 @@ export async function runLibraryMove(
     filesTotal,
   });
 
-  const topLevelDestNames = new Set<string>();
-  for (const p of plans) {
-    const top = p.relativePath.split(/[/\\]/)[0];
-    if (top) {
-      topLevelDestNames.add(top);
-    }
-  }
-
   let bytesDone = 0;
   let filesDone = 0;
 
@@ -268,6 +294,7 @@ export async function runLibraryMove(
 
   let verifiedBytes = 0;
   let verifiedFiles = 0;
+  const verifiedManifest: VerifiedLibraryMoveFile[] = [];
   for (const plan of plans) {
     await assertNotAborted(signal);
     if (!(await fs.pathExists(plan.destAbs))) {
@@ -282,6 +309,21 @@ export async function runLibraryMove(
         `Verification failed: size mismatch for ${plan.relativePath} (expected ${plan.size}, got ${st.size}).`
       );
     }
+    const [srcHash, destHash] = await Promise.all([
+      hashFile(plan.srcAbs, signal),
+      hashFile(plan.destAbs, signal),
+    ]);
+    if (srcHash !== destHash) {
+      throw new Error(
+        `Verification failed: content mismatch for ${plan.relativePath}.`
+      );
+    }
+    plan.sha256 = srcHash;
+    verifiedManifest.push({
+      relativePath: plan.relativePath,
+      size: plan.size,
+      sha256: srcHash,
+    });
     verifiedBytes += st.size;
     verifiedFiles += 1;
     emit({
@@ -297,7 +339,7 @@ export async function runLibraryMove(
   pushLog(
     filesTotal === 0
       ? 'Verify: skipped (no files).'
-      : `Verify: passed for all ${filesTotal} file(s) (sizes match source).`
+      : `Verify: passed for all ${filesTotal} file(s) (SHA-256 hashes match source).`
   );
 
   pushLog('Copy and verify stage complete; application will update settings next.');
@@ -317,7 +359,7 @@ export async function runLibraryMove(
     newRoot: destRoot,
     filesCopied: filesTotal,
     bytesCopied: bytesTotal,
-    topLevelDestNames: [...topLevelDestNames],
+    verifiedFiles: verifiedManifest,
     operationLog,
   };
 }
@@ -335,21 +377,203 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+export interface VerifyLibraryMoveSnapshotParams {
+  srcRoot: string;
+  destRoot: string;
+  files: VerifiedLibraryMoveFile[];
+  signal: AbortSignal;
+  onProgress?: LibraryMoveProgressFn;
+  operationLog?: string[];
+}
+
 /**
- * Best-effort removal of partial data after cancel (before settings commit).
+ * Confirms the source tree is unchanged and the destination still matches the
+ * verified copy manifest. Run immediately before deleting the old source root.
  */
-export async function removePartialLibraryCopy(
-  destRoot: string,
-  topLevelNames: string[]
+export async function verifyLibraryMoveSnapshot(
+  params: VerifyLibraryMoveSnapshotParams
 ): Promise<void> {
-  for (const name of topLevelNames) {
-    const target = path.join(destRoot, name);
-    try {
-      if (await fs.pathExists(target)) {
-        await fs.remove(target);
+  const srcRoot = path.resolve(params.srcRoot.trim());
+  const destRoot = path.resolve(params.destRoot.trim());
+  const files = [...params.files].sort((a, b) =>
+    a.relativePath.localeCompare(b.relativePath)
+  );
+  const sourceNow = (await walkSourceFiles(srcRoot, destRoot, params.signal)).sort(
+    (a, b) => a.relativePath.localeCompare(b.relativePath)
+  );
+  const bytesTotal = files.reduce((sum, file) => sum + file.size, 0);
+
+  if (sourceNow.length !== files.length) {
+    throw new Error(
+      `Final safety check failed: source library changed during move (expected ${files.length} file(s), found ${sourceNow.length}).`
+    );
+  }
+
+  const emit = (
+    partial: Partial<LibraryMoveProgress> & Pick<LibraryMoveProgress, 'phase'>
+  ) => {
+    params.onProgress?.({
+      phase: partial.phase,
+      bytesDone: partial.bytesDone ?? 0,
+      bytesTotal: partial.bytesTotal ?? bytesTotal,
+      filesDone: partial.filesDone ?? 0,
+      filesTotal: partial.filesTotal ?? files.length,
+      currentLabel: partial.currentLabel ?? '',
+      done: partial.done ?? false,
+      error: partial.error,
+      operationLog: [...(params.operationLog ?? [])],
+    });
+  };
+
+  let bytesDone = 0;
+  for (let i = 0; i < files.length; i += 1) {
+    await assertNotAborted(params.signal);
+    const expected = files[i];
+    const current = sourceNow[i];
+    if (current.relativePath !== expected.relativePath) {
+      throw new Error(
+        `Final safety check failed: source library changed during move near ${expected.relativePath}.`
+      );
+    }
+    if (current.size !== expected.size) {
+      throw new Error(
+        `Final safety check failed: source file size changed for ${expected.relativePath}.`
+      );
+    }
+
+    const destAbs = destAbsFor(destRoot, expected.relativePath);
+    if (!(await fs.pathExists(destAbs))) {
+      throw new Error(
+        `Final safety check failed: missing destination file ${expected.relativePath}.`
+      );
+    }
+    const destStat = await fs.stat(destAbs);
+    if (!destStat.isFile() || destStat.size !== expected.size) {
+      throw new Error(
+        `Final safety check failed: destination file changed for ${expected.relativePath}.`
+      );
+    }
+
+    const [srcHash, destHash] = await Promise.all([
+      hashFile(current.srcAbs, params.signal),
+      hashFile(destAbs, params.signal),
+    ]);
+    if (srcHash !== expected.sha256) {
+      throw new Error(
+        `Final safety check failed: source file content changed for ${expected.relativePath}.`
+      );
+    }
+    if (destHash !== expected.sha256) {
+      throw new Error(
+        `Final safety check failed: destination file content changed for ${expected.relativePath}.`
+      );
+    }
+
+    bytesDone += expected.size;
+    emit({
+      phase: 'verify',
+      currentLabel: expected.relativePath,
+      bytesDone,
+      filesDone: i + 1,
+    });
+  }
+}
+
+export async function removeAbsolutePathsFromMovedLibraryMetadata(
+  libraryRoot: string,
+  signal: AbortSignal
+): Promise<LibraryMoveMetadataCleanupResult> {
+  const root = path.resolve(libraryRoot.trim());
+  const result: LibraryMoveMetadataCleanupResult = {
+    filesScanned: 0,
+    filesUpdated: 0,
+    absolutePathsRemoved: 0,
+  };
+
+  async function walk(dir: string, relPrefix: string): Promise<void> {
+    await assertNotAborted(signal);
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      await assertNotAborted(signal);
+      const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(abs, rel);
+        continue;
       }
-    } catch {
-      // ignore per-item cleanup errors
+      if (
+        !entry.isFile() ||
+        path.extname(entry.name).toLowerCase() !== '.json' ||
+        !isMetadataRelativePath(rel)
+      ) {
+        continue;
+      }
+
+      result.filesScanned += 1;
+      const json = await fs.readJson(abs);
+      const removed = removeAbsolutePathKeys(json);
+      if (removed > 0) {
+        await fs.writeJson(abs, json, { spaces: 2 });
+        result.filesUpdated += 1;
+        result.absolutePathsRemoved += removed;
+      }
     }
   }
+
+  if (await fs.pathExists(root)) {
+    await walk(root, '');
+  }
+
+  return result;
+}
+
+function isMetadataRelativePath(relativePath: string): boolean {
+  return relativePath
+    .split(/[/\\]/)
+    .some(part => part.toLowerCase() === 'metadata');
+}
+
+function removeAbsolutePathKeys(value: unknown): number {
+  if (!value || typeof value !== 'object') {
+    return 0;
+  }
+  if (Array.isArray(value)) {
+    return value.reduce((sum, item) => sum + removeAbsolutePathKeys(item), 0);
+  }
+
+  let removed = 0;
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key === 'absolutePath') {
+      delete record[key];
+      removed += 1;
+    } else {
+      removed += removeAbsolutePathKeys(record[key]);
+    }
+  }
+  return removed;
+}
+
+async function hashFile(filePath: string, signal: AbortSignal): Promise<string> {
+  await assertNotAborted(signal);
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+
+    stream.on('data', chunk => {
+      if (signal.aborted) {
+        stream.destroy(new LibraryMoveCancelledError());
+        return;
+      }
+      hash.update(chunk);
+    });
+    stream.on('error', reject);
+    stream.on('end', () => {
+      try {
+        resolve(hash.digest('hex'));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 }
