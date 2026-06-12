@@ -208,7 +208,8 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({
               >
                 <p className="text-sm font-medium">Move Photo Library</p>
                 <p className="text-xs text-muted-foreground">
-                  Move the entire photo library to another folder.
+                  Copy and verify your library in a new folder, then update settings.
+                  You remove the old folder yourself when ready.
                 </p>
                 {!libraryMoveEnabled && (
                   <p className="text-xs text-amber-700 dark:text-amber-300">

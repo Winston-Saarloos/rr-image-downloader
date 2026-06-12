@@ -19,8 +19,8 @@ import {
 } from './utils/errorPresentation';
 import { ErrorRecoveryBanner } from './components/ErrorRecoveryBanner';
 
-/** Set to true to allow starting a library move from the debug menu. */
-const LIBRARY_MOVE_ENABLED = false;
+/** Set to false to hide the library move entry in the debug menu. */
+const LIBRARY_MOVE_ENABLED = true;
 
 function App() {
   const [settings, setSettings] = useState<RecNetSettings>({

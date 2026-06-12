@@ -412,15 +412,19 @@ ipcMain.handle(
   'library-move-start',
   async (
     _event: IpcMainInvokeEvent,
-    dest: string
+    payload: string | { dest?: string }
   ): Promise<ApiResponse<LibraryMoveResult>> => {
     try {
-      const result = await recNetService.moveLibraryTo(dest, progress => {
-        if (!mainWindow || mainWindow.isDestroyed()) {
-          return;
+      const dest = typeof payload === 'string' ? payload : payload?.dest ?? '';
+      const result = await recNetService.moveLibraryTo(
+        dest,
+        progress => {
+          if (!mainWindow || mainWindow.isDestroyed()) {
+            return;
+          }
+          mainWindow.webContents.send('library-move-progress', progress);
         }
-        mainWindow.webContents.send('library-move-progress', progress);
-      });
+      );
       if (result.success) {
         return { success: true, data: result };
       }

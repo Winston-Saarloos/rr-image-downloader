@@ -61,10 +61,9 @@ export type LibraryMovePhase =
   | 'preflight'
   | 'copy'
   | 'verify'
-  /** Copy and per-file verification finished; settings update / cleanup not started yet. */
+  /** Copy and per-file verification finished; settings update not started yet. */
   | 'verified'
   | 'saving_settings'
-  | 'removing_old'
   | 'complete';
 
 /** Progress events from main during `library-move-start` (via preload). */
@@ -78,8 +77,6 @@ export interface LibraryMoveProgress {
   done: boolean;
   /** Set when `done` is true and the move failed. */
   error?: string;
-  /** Non-fatal: library is on new path but old folder could not be removed. */
-  sourceDeleteWarning?: string;
   /** Human-readable milestones for the current move (newest entries last). */
   operationLog?: string[];
 }
@@ -120,7 +117,6 @@ export interface LibraryMoveResult {
   filesCopied: number;
   bytesCopied: number;
   error?: string;
-  sourceDeleteWarning?: string;
   /** Summary of major steps and outcomes (for UI or support). */
   operationLog?: string[];
 }

@@ -70,7 +70,7 @@ export const LibraryMoveDialog: React.FC<LibraryMoveDialogProps> = ({
 
   const handleStart = async () => {
     if (!api?.startLibraryMove || !destPath.trim()) {
-      setError('Choose an empty destination folder.');
+      setError('Choose a new destination folder.');
       return;
     }
     setError(null);
@@ -87,11 +87,11 @@ export const LibraryMoveDialog: React.FC<LibraryMoveDialogProps> = ({
     try {
       const res = await api.startLibraryMove(destPath.trim());
       if (res.success && res.data) {
-        const warn = res.data.sourceDeleteWarning;
+        const previousRoot = res.data.previousRoot?.trim();
         setDoneMessage(
-          warn
-            ? `Move finished. ${warn}`
-            : `Library is now at ${res.data.newRoot}.`
+          previousRoot
+            ? `Move complete. Your library is now at ${res.data.newRoot}. All files were verified. You can delete the old folder at ${previousRoot} when you are ready.`
+            : `Move complete. Your library is now at ${res.data.newRoot}. All files were verified.`
         );
         if (res.data.operationLog?.length) {
           setResultLogLines(res.data.operationLog);
@@ -148,15 +148,16 @@ export const LibraryMoveDialog: React.FC<LibraryMoveDialogProps> = ({
         <DialogHeader>
           <DialogTitle>Move photo library</DialogTitle>
           <DialogDescription>
-            Copies your entire library to a new folder, verifies every file, updates
-            settings, then removes the old folder. The destination must be{' '}
+            Copies your entire library to a new folder, verifies every file, and
+            updates settings. The app never deletes files — you can remove the old
+            folder yourself after the move succeeds. The destination must be{' '}
             <strong>empty</strong>. Large libraries can take a long time across disks.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 text-sm">
           <div>
-            <p className="text-muted-foreground">Current library (resolved)</p>
+            <p className="text-muted-foreground">Current Photo Folder</p>
             <p className="break-all font-mono text-xs mt-1 rounded border bg-muted/40 px-2 py-1.5">
               {resolved || '(not configured)'}
             </p>
@@ -164,7 +165,7 @@ export const LibraryMoveDialog: React.FC<LibraryMoveDialogProps> = ({
 
           {!isSuccessComplete && (
             <div className="space-y-2">
-              <Label htmlFor="lib-move-dest">Empty destination folder</Label>
+              <Label htmlFor="lib-move-dest">New destination folder (empty)</Label>
               <div className="flex gap-2">
                 <Input
                   id="lib-move-dest"
@@ -179,7 +180,7 @@ export const LibraryMoveDialog: React.FC<LibraryMoveDialogProps> = ({
                   size="icon"
                   disabled={running}
                   onClick={() => void handleSelectFolder()}
-                  aria-label="Choose empty destination folder"
+                  aria-label="Choose new destination folder"
                   title="Choose folder"
                 >
                   <FolderOpen className="h-4 w-4" aria-hidden />
@@ -195,6 +196,10 @@ export const LibraryMoveDialog: React.FC<LibraryMoveDialogProps> = ({
             <p className="text-sm text-green-700 dark:text-green-400 break-words">
               {doneMessage}
             </p>
+          )}
+
+          {running && !progress && (
+            <p className="text-xs text-muted-foreground">Validating destination…</p>
           )}
 
           {running && progress && (
@@ -282,8 +287,6 @@ function libraryMovePhaseLabel(phase: LibraryMovePhase): string {
       return 'Verified';
     case 'saving_settings':
       return 'Updating settings';
-    case 'removing_old':
-      return 'Removing old library';
     case 'complete':
       return 'Complete';
     default:
